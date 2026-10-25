@@ -1,0 +1,8 @@
+{
+  "key_id": "prod-2026",
+  "project_id": "p",
+  "public_key_pem": "PEM",
+  "private_key_file": "/k",
+  "default_signing_key": true,
+  "firmware_snippet": "snippet"
+}

@@ -1,0 +1,11 @@
+static const simpleota_signing_key_t kSigningKeys[] = {
+    { "prod-2026",
+      "-----BEGIN PUBLIC KEY-----\n"
+      "MCowBQYDK2VwAyEAaQcAzcqEJyJmEBTOkEtM9+6wX0ET8SvA8i2ABsEcs3w=\n"
+      "-----END PUBLIC KEY-----\n" },
+    // { "backup-key-id", "...backup public key PEM..." },
+};
+
+cfg.security_mode = SIMPLEOTA_SECURITY_SIGNED;
+cfg.signing_keys = kSigningKeys;
+cfg.num_signing_keys = 1;  // 2 once the backup key is added
