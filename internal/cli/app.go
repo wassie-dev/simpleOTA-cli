@@ -176,7 +176,7 @@ func (a *App) rootCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "simpleota",
 		Short:         "Sign, release and roll out ESP32 firmware with SimpleOTA",
-		Version:       version.Version,
+		Version:       version.Current(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
