@@ -1,0 +1,5 @@
+/.devserver/
+/dist/
+/simpleota
+/simpleota.exe
+/coverage.out
