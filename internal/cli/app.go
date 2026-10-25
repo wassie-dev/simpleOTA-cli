@@ -193,6 +193,7 @@ func (a *App) rootCommand() *cobra.Command {
 		a.loginCommand(),
 		a.logoutCommand(),
 		a.keysCommand(),
+		a.releaseCommand(),
 	)
 	return root
 }

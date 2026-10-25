@@ -1,0 +1,12 @@
+{
+  "build_number": 42,
+  "artifact_id": "art",
+  "deployment_id": "5f0c2b1e-1d2c-4b7a-9a3e-0123456789ab",
+  "state": "active",
+  "channel": "stable",
+  "security_mode": "signed",
+  "key_id": "prod-2026",
+  "sha256": "ab12",
+  "sha256_verified": true,
+  "size": 1024
+}
