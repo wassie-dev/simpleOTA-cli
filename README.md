@@ -10,7 +10,9 @@ signatures are sent to SimpleOTA.
 
 Download a binary for Linux, macOS or Windows (amd64 or arm64) from the
 [releases page](https://github.com/wassie-dev/simpleOTA-cli/releases) and
-check it against `checksums.txt`, or build it with Go 1.27+:
+check it against `checksums.txt`. On macOS, a binary downloaded in a browser
+is quarantined until you run `xattr -d com.apple.quarantine simpleota`.
+Or build it with Go 1.27+:
 
 ```bash
 go install github.com/wassie-dev/simpleOTA-cli/cmd/simpleota@latest
@@ -116,3 +118,7 @@ make e2e         # end-to-end suite against that server
 into `.devserver/` and runs it on `http://127.0.0.1:8765` with SQLite and
 local storage. It needs Python 3.12+. Plain `http` is accepted only for
 localhost.
+
+## License
+
+MIT. Report security issues privately as described in [SECURITY.md](SECURITY.md).
