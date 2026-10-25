@@ -17,6 +17,7 @@ import (
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/config"
+	"github.com/wassie-dev/simpleOTA-cli/internal/credentials"
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
 	"github.com/wassie-dev/simpleOTA-cli/internal/version"
 )
@@ -48,6 +49,8 @@ type App struct {
 	Err    io.Writer
 	Getenv func(string) string
 
+	// Store overrides the credential store; nil selects the default.
+	Store credentials.Store
 	// NewAPI builds the API client; nil selects the HTTP client.
 	NewAPI func(baseURL, token string) api.API
 	// Prompt reads a secret from the terminal; nil disables prompting.
@@ -186,5 +189,9 @@ func (a *App) rootCommand() *cobra.Command {
 	pf.StringVar(&a.flags.apiURL, "api-url", "", "SimpleOTA API URL (default "+config.DefaultAPIURL+", or SIMPLEOTA_API_URL)")
 	pf.StringVar(&a.flags.project, "project", "", "project ID or slug (default: the project chosen at login)")
 
+	root.AddCommand(
+		a.loginCommand(),
+		a.logoutCommand(),
+	)
 	return root
 }

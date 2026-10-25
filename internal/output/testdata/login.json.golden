@@ -1,0 +1,10 @@
+{
+  "api_url": "https://simpleota.com",
+  "token_type": "project",
+  "credential_store": "the OS keychain",
+  "project": {
+    "id": "p",
+    "slug": "fleet",
+    "name": "Fleet"
+  }
+}
