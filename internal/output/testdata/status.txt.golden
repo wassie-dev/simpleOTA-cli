@@ -1,0 +1,6 @@
+Deployment 5f0c2b1e-1d2c-4b7a-9a3e-0123456789ab
+  build    42
+  state    paused, 25% (immediate)
+  devices  3 offered, 1 confirmed, 1 in progress, 0 failed, 1 rolled back
+  rolled_back  device d3: task_wdt
+A device failed or rolled back.

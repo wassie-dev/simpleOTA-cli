@@ -194,6 +194,8 @@ func (a *App) rootCommand() *cobra.Command {
 		a.logoutCommand(),
 		a.keysCommand(),
 		a.releaseCommand(),
+		a.rolloutCommand(),
+		a.statusCommand(),
 	)
 	return root
 }

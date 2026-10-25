@@ -1,0 +1,2 @@
+Deployment 5f0c2b1e-1d2c-4b7a-9a3e-0123456789ab (build 42) is paused at 25%
+To ship a fix or go back, release the fixed or previous source again as a new build: simpleota release <bin> --version-label <label> --chip <chip>
