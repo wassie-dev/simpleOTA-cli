@@ -72,3 +72,16 @@ type LogoutView struct {
 	APIURL    string `json:"api_url"`
 	LoggedOut bool   `json:"logged_out"`
 }
+
+// Logout prints the result of logout.
+func (p Printer) Logout(v LogoutView) error {
+	if p.JSON {
+		return p.WriteJSON(v)
+	}
+	if !v.LoggedOut {
+		_, err := fmt.Fprintf(p.Out, "Not logged in to %s; nothing to remove.\n", v.APIURL)
+		return err
+	}
+	_, err := fmt.Fprintf(p.Out, "Logged out of %s.\n", v.APIURL)
+	return err
+}

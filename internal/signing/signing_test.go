@@ -203,3 +203,26 @@ func snippetGolden(t *testing.T, name, got string) {
 		t.Fatalf("snippet mismatch:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+func TestNewKeyFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keys", "prod.key")
+	pub, err := NewKeyFile(path, "correct horse battery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := ReadKeyFile(path)
+	if err != nil || !IsEncrypted(data) {
+		t.Fatalf("key file: %v", err)
+	}
+	priv, err := ParsePrivateKey(data, func() (string, error) { return "correct horse battery", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := PublicKeyPEM(priv.Public().(ed25519.PublicKey))
+	if pub != want {
+		t.Fatal("returned public key does not match the file")
+	}
+	if _, err := NewKeyFile(path, "correct horse battery"); err == nil {
+		t.Fatal("an existing file must not be overwritten")
+	}
+}

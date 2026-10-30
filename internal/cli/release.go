@@ -8,6 +8,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/wassie-dev/simpleOTA-cli/internal/api"
+	"github.com/wassie-dev/simpleOTA-cli/internal/deploy"
 	"github.com/wassie-dev/simpleOTA-cli/internal/manifest"
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
 	"github.com/wassie-dev/simpleOTA-cli/internal/release"
@@ -70,17 +72,19 @@ func (f buildFlags) validate() error {
 // buildJob is a validated upload: the release service for the current
 // project and the options to send.
 type buildJob struct {
-	svc  release.Service
-	opts release.Options
+	session   *session
+	projectID string
+	svc       release.Service
+	opts      release.Options
 }
 
-// prepareBuild validates the flags, loads the signing key and resolves the
-// current project.
+// prepareBuild validates the flags, resolves the current project and loads
+// the signing key.
 func (a *App) prepareBuild(ctx context.Context, binPath string, f buildFlags) (buildJob, error) {
 	if err := f.validate(); err != nil {
 		return buildJob{}, err
 	}
-	s, err := a.openSession()
+	s, projectID, err := a.projectSession(ctx)
 	if err != nil {
 		return buildJob{}, err
 	}
@@ -94,12 +98,10 @@ func (a *App) prepareBuild(ctx context.Context, binPath string, f buildFlags) (b
 			return buildJob{}, usageErr("--security-mode signed needs a key: pass --key-file or set %s", signingKeyEnv)
 		}
 	}
-	projectID, err := s.projectID(ctx)
-	if err != nil {
-		return buildJob{}, err
-	}
 	return buildJob{
-		svc: release.Service{API: s.api, ProjectID: projectID},
+		session:   s,
+		projectID: projectID,
+		svc:       release.Service{API: s.api, ProjectID: projectID},
 		opts: release.Options{
 			BinaryPath:     binPath,
 			VersionLabel:   f.versionLabel,
@@ -129,16 +131,12 @@ func noticeUnsigned(p output.Printer, res release.Result) {
 
 // alsoActive lists the other active deployments reaching the same devices,
 // printing a notice instead of failing when the check itself fails.
-func alsoActive(ctx context.Context, p output.Printer, svc release.Service, deploymentID, chip string) []output.DeploymentView {
-	views := []output.DeploymentView{}
-	others, err := svc.AlsoActive(ctx, deploymentID, chip)
+func alsoActive(ctx context.Context, p output.Printer, s *session, projectID, deploymentID, chip string) []output.DeploymentView {
+	others, err := deploy.AlsoActive(ctx, s.api, projectID, deploymentID, chip)
 	if err != nil {
 		p.Notice("Checking for other active deployments failed: %v", err)
 	}
-	for _, d := range others {
-		views = append(views, output.NewDeploymentView(d))
-	}
-	return views
+	return viewsOf(others, output.NewDeploymentView)
 }
 
 func (a *App) releaseCommand() *cobra.Command {
@@ -171,21 +169,20 @@ the older deployment goes on reaching the devices this release does not.
 			if err != nil {
 				return err
 			}
-			job.opts.Percent, job.opts.Channel = percent, channel
-			res, err := job.svc.Release(ctx, job.opts)
+			res, err := job.svc.Release(ctx, job.opts, release.Target{Channel: channel, Percent: percent})
 			if err != nil {
 				return buildErr(err)
 			}
 			p := a.printer()
 			noticeUnsigned(p, res)
 			view := output.NewReleaseView(res)
-			view.AlsoActive = alsoActive(ctx, p, job.svc, res.DeploymentID, res.Chip)
+			view.AlsoActive = alsoActive(ctx, p, job.session, job.projectID, res.DeploymentID, res.Chip)
 			return p.Release(view)
 		},
 	}
 	f.register(cmd.Flags())
 	cmd.Flags().IntVar(&percent, "percent", 100, "percentage of the channel's devices to offer the build to")
-	cmd.Flags().StringVar(&channel, "channel", "stable", "release channel; it must already exist on the project")
+	cmd.Flags().StringVar(&channel, "channel", api.DefaultChannel, "release channel; it must already exist on the project")
 	return cmd
 }
 

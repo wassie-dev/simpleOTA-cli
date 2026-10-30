@@ -32,8 +32,7 @@ the key release would sign with.
 Exit 0 when logged in with a working token, 3 when not logged in or the
 token is rejected, 2 when --project, SIMPLEOTA_PROJECT or the project
 chosen with project use cannot be found, and 1 when the API cannot be
-reached. For a deployment,
-use simpleota deployment show.`,
+reached. For a deployment, use simpleota deployment show.`,
 		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.runCLIStatus(cmd.Context())
@@ -42,30 +41,18 @@ use simpleota deployment show.`,
 }
 
 func (a *App) runCLIStatus(ctx context.Context) error {
-	dir, err := a.configDir()
-	if err != nil {
-		return err
-	}
-	cfg, err := config.Load(dir)
-	if err != nil {
-		return err
-	}
-	apiURL, err := a.resolveAPIURL(cfg)
+	st, err := a.loadSettings()
 	if err != nil {
 		return err
 	}
 	v := output.StatusView{
 		Version:    a.currentVersion(),
-		APIURL:     apiURL,
-		ConfigDir:  dir,
-		SigningKey: a.signingKeyState(cfg),
+		APIURL:     st.apiURL,
+		ConfigDir:  st.configDir,
+		SigningKey: a.signingKeyState(st.cfg),
 	}
 	a.checkForUpdate(ctx, &v)
-	project, projectErr := a.checkAuth(ctx, cfg, dir, &v)
-	if project != nil {
-		pv := output.NewProjectView(*project)
-		v.Project = &pv
-	}
+	projectErr := a.checkLogin(ctx, st, &v)
 	if projectErr != nil {
 		v.ProjectError = message(projectErr)
 	}
@@ -104,33 +91,28 @@ func (a *App) checkForUpdate(ctx context.Context, v *output.StatusView) {
 	v.UpdateAvailable = update.Normalize(v.Version) != "" && update.Newer(latest, v.Version)
 }
 
-// checkAuth fills v.Auth and returns the project commands would use.
-func (a *App) checkAuth(ctx context.Context, cfg config.Config, dir string, v *output.StatusView) (*api.Project, error) {
-	token := strings.TrimSpace(a.Getenv("SIMPLEOTA_TOKEN"))
-	source := "SIMPLEOTA_TOKEN"
-	if token == "" {
-		t, where, err := credentials.Lookup(a.store(dir), v.APIURL)
-		switch {
-		case errors.Is(err, credentials.ErrNotFound):
-			v.Auth = output.AuthView{State: output.AuthNotLoggedIn}
-			return nil, nil
-		case err != nil:
-			v.Auth = output.AuthView{State: output.AuthNotLoggedIn, Error: err.Error()}
-			return nil, nil
-		}
-		token, source = t, where
+// checkLogin fills v.Auth and the current project. It returns an error
+// only when the project that was asked for cannot be found.
+func (a *App) checkLogin(ctx context.Context, st settings, v *output.StatusView) error {
+	token, source, err := a.findToken(st)
+	switch {
+	case errors.Is(err, errNoToken):
+		v.Auth = output.AuthView{State: output.AuthNotLoggedIn}
+		return nil
+	case err != nil:
+		v.Auth = output.AuthView{State: output.AuthNotLoggedIn, Error: err.Error()}
+		return nil
 	}
-	kind, err := credentials.Classify(token)
+	s, err := a.newSession(st, token, source)
 	if err != nil {
 		v.Auth = output.AuthView{State: output.AuthRejected, Source: source, Error: err.Error()}
-		return nil, nil
+		return nil
 	}
-	v.Auth = output.AuthView{TokenType: string(kind), Source: source}
+	v.Auth = output.AuthView{TokenType: string(s.kind), Source: source}
 
 	ctx, cancel := context.WithTimeout(ctx, statusCheckTimeout)
 	defer cancel()
-	client := a.newAPI(v.APIURL, token)
-	me, err := checkToken(ctx, client)
+	me, err := checkToken(ctx, s.api)
 	var ae *api.Error
 	switch {
 	case err == nil:
@@ -141,36 +123,31 @@ func (a *App) checkAuth(ctx context.Context, cfg config.Config, dir string, v *o
 	case errors.As(err, &ae) && ae.StatusCode == http.StatusUnauthorized:
 		v.Auth.State = output.AuthRejected
 		v.Auth.Error = "the server rejected the token (401)"
-		return nil, nil
+		return nil
 	case errors.As(err, &ae):
 		// Any other API answer means the token was accepted.
 		v.Auth.State = output.AuthValid
 	default:
 		v.Auth.State = output.AuthUnreachable
 		v.Auth.Error = err.Error()
-		if kind != credentials.KindProject && cfg.ProjectID != "" && cfg.APIURL == v.APIURL {
+		if s.kind != credentials.KindProject && st.cfg.ProjectID != "" && st.cfg.APIURL == st.apiURL {
+			v.Project = &output.ProjectView{ID: st.cfg.ProjectID, Slug: st.cfg.ProjectSlug}
 			v.ProjectSource = projectFromConfig
-			return &api.Project{ID: cfg.ProjectID, Slug: cfg.ProjectSlug}, nil
 		}
-		return nil, nil
+		return nil
 	}
 
-	p, from, err := a.currentProject(ctx, client, kind, cfg, v.APIURL)
+	p, source, err := s.fullProject(ctx)
 	var none *noProjectError
 	switch {
 	case errors.As(err, &none):
-		return nil, nil
+		return nil
 	case err != nil:
-		return nil, err
-	case from == projectFromConfig:
-		full, err := client.GetProject(ctx, p.ID)
-		if err != nil {
-			return nil, savedProjectErr(err, p)
-		}
-		p = full
+		return err
 	}
-	v.ProjectSource = from
-	return &p, nil
+	pv := output.NewProjectView(p)
+	v.Project, v.ProjectSource = &pv, source
+	return nil
 }
 
 // signingKeyState reports the key release would use, in the same order.

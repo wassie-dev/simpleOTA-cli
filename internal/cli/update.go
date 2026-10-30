@@ -95,38 +95,28 @@ func (a *App) runUpdate(ctx context.Context, check bool, want string) error {
 		UpdateAvailable: update.Normalize(current) == "" || update.Newer(target, current),
 	}
 	p := a.printer()
+	devBuild := update.Normalize(current) == ""
 
 	if check {
-		if p.JSON {
-			return p.WriteJSON(view)
-		}
 		switch {
-		case update.Normalize(current) == "":
-			fmt.Fprintf(a.Out, "This is a development build; the latest release is %s.\n", view.Latest)
+		case devBuild:
+			view.Outcome = output.UpdateCheckedDevBuild
 		case view.UpdateAvailable:
-			fmt.Fprintf(a.Out, "simpleota %s is available (you have %s). Run: simpleota update\n", view.Latest, current)
+			view.Outcome = output.UpdateCheckedAvailable
 		default:
-			fmt.Fprintf(a.Out, "simpleota %s is up to date.\n", current)
+			view.Outcome = output.UpdateUpToDate
 		}
-		return nil
+		return p.Update(view)
 	}
-
-	if update.Normalize(current) == "" && want == "" {
+	switch {
+	case devBuild && want == "":
 		return usageErr("this is a development build (%s); pass --version to install a release over it", current)
-	}
-	if want == "" && !view.UpdateAvailable {
-		if p.JSON {
-			return p.WriteJSON(view)
-		}
-		fmt.Fprintf(a.Out, "simpleota %s is up to date.\n", current)
-		return nil
-	}
-	if want != "" && update.Normalize(current) == target {
-		if p.JSON {
-			return p.WriteJSON(view)
-		}
-		fmt.Fprintf(a.Out, "simpleota %s is already installed.\n", current)
-		return nil
+	case want == "" && !view.UpdateAvailable:
+		view.Outcome = output.UpdateUpToDate
+		return p.Update(view)
+	case want != "" && update.Normalize(current) == target:
+		view.Outcome = output.UpdateAlreadyInstalled
+		return p.Update(view)
 	}
 
 	exe, err := a.executable()
@@ -148,18 +138,14 @@ func (a *App) runUpdate(ctx context.Context, check bool, want string) error {
 		return fmt.Errorf("replacing %s: %w", exe, err)
 	}
 
-	view.Updated = true
-	view.Path = exe
-	if p.JSON {
-		return p.WriteJSON(view)
-	}
+	view.Updated, view.Path = true, exe
 	switch {
-	case update.Normalize(current) == "":
-		fmt.Fprintf(a.Out, "Replaced development build %s with simpleota %s at %s.\n", current, view.Latest, exe)
+	case devBuild:
+		view.Outcome = output.UpdateReplacedDevBuild
 	case update.Newer(current, target):
-		fmt.Fprintf(a.Out, "Downgraded simpleota from %s to %s at %s.\n", current, view.Latest, exe)
+		view.Outcome = output.UpdateDowngraded
 	default:
-		fmt.Fprintf(a.Out, "Updated simpleota from %s to %s at %s.\n", current, view.Latest, exe)
+		view.Outcome = output.UpdateInstalled
 	}
-	return nil
+	return p.Update(view)
 }

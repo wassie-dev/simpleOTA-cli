@@ -40,40 +40,6 @@ func NewReleaseView(r release.Result) ReleaseView {
 	}
 }
 
-// UploadView is the result of build upload.
-type UploadView struct {
-	BuildNumber  int    `json:"build_number"`
-	ArtifactID   string `json:"artifact_id"`
-	SecurityMode string `json:"security_mode"`
-	KeyID        string `json:"key_id,omitempty"`
-	Chip         string `json:"chip"`
-	SHA256       string `json:"sha256"`
-	Size         int64  `json:"size"`
-}
-
-// NewUploadView converts an upload result.
-func NewUploadView(r release.Result) UploadView {
-	return UploadView{BuildNumber: r.BuildNumber, ArtifactID: r.ArtifactID, SecurityMode: r.SecurityMode, KeyID: r.KeyID, Chip: r.Chip, SHA256: r.SHA256, Size: r.Size}
-}
-
-// Upload prints the result of build upload.
-func (p Printer) Upload(r UploadView) error {
-	if p.JSON {
-		return p.WriteJSON(r)
-	}
-	fmt.Fprintf(p.Out, "%s build %d for %s (%s)\n", p.green("Uploaded"), r.BuildNumber, r.Chip, securityText(r.SecurityMode, r.KeyID))
-	fmt.Fprintf(p.Out, "  sha256      %s (%d bytes, checked by the server)\n", r.SHA256, r.Size)
-	fmt.Fprintf(p.Out, "Deploy it with: simpleota deployment create --build %d\n", r.BuildNumber)
-	return nil
-}
-
-func securityText(mode, keyID string) string {
-	if keyID != "" {
-		return mode + " with key " + keyID
-	}
-	return mode
-}
-
 // Release prints a release result.
 func (p Printer) Release(r ReleaseView) error {
 	if p.JSON {
@@ -86,12 +52,3 @@ func (p Printer) Release(r ReleaseView) error {
 	fmt.Fprintf(p.Out, "Watch it with: simpleota deployment wait %s\n", r.DeploymentID)
 	return nil
 }
-
-func (p Printer) paint(code, s string) string {
-	if !p.Color {
-		return s
-	}
-	return "\x1b[" + code + "m" + s + "\x1b[0m"
-}
-
-func (p Printer) green(s string) string { return p.paint("32", s) }

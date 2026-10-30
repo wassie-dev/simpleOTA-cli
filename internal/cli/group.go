@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
 )
@@ -61,10 +60,7 @@ func (a *App) groupListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			views := make([]output.GroupView, len(groups))
-			for i, g := range groups {
-				views[i] = output.GroupView(g)
-			}
+			views := viewsOf(groups, output.NewGroupView)
 			return a.printer().GroupList(views)
 		},
 	}
@@ -91,7 +87,7 @@ func (a *App) groupCreateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return a.printer().GroupShow(output.GroupView(g))
+			return a.printer().GroupShow(output.NewGroupView(g))
 		},
 	}
 	cmd.Flags().StringVar(&description, "description", "", "what the group is for")
@@ -111,7 +107,7 @@ func (a *App) groupMemberListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			gid, err := groupID(ctx, s.api, projectID, args[0])
+			gid, err := findGroupID(ctx, s.api, projectID, args[0])
 			if err != nil {
 				return err
 			}
@@ -124,10 +120,7 @@ func (a *App) groupMemberListCommand() *cobra.Command {
 				return err
 			}
 			names := channelNames(channels)
-			views := make([]output.DeviceView, len(devices))
-			for i, d := range devices {
-				views[i] = output.NewDeviceView(d, names)
-			}
+			views := viewsOf(devices, func(d api.Device) output.DeviceView { return output.NewDeviceView(d, names) })
 			return a.printer().DeviceList(views)
 		},
 	}
@@ -168,7 +161,7 @@ func (a *App) changeMembers(ctx context.Context, group string, refs []string, ad
 	if err != nil {
 		return err
 	}
-	gid, err := groupID(ctx, s.api, projectID, group)
+	gid, err := findGroupID(ctx, s.api, projectID, group)
 	if err != nil {
 		return err
 	}
@@ -197,4 +190,28 @@ func (a *App) changeMembers(ctx context.Context, group string, refs []string, ad
 		return err
 	}
 	return a.printer().MembersChanged(output.MembersView{Group: group, Devices: refs, Added: add})
+}
+
+// findGroupID looks a device group up by name or ID.
+func findGroupID(ctx context.Context, client api.API, projectID, name string) (string, error) {
+	groups, err := client.ListGroups(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	return matchGroupID(groups, name)
+}
+
+// matchGroupID finds a device group by name or ID in a listing.
+func matchGroupID(groups []api.Group, name string) (string, error) {
+	names := make([]string, len(groups))
+	for i, g := range groups {
+		if g.Name == name || g.ID == name {
+			return g.ID, nil
+		}
+		names[i] = g.Name
+	}
+	if len(names) == 0 {
+		return "", usageErr("no group %q: this project has no device groups", name)
+	}
+	return "", usageErr("no group %q in this project (groups: %s)", name, strings.Join(names, ", "))
 }

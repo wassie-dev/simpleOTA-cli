@@ -34,10 +34,7 @@ signing_key.created or signing_key.revoked.`,
 			if err != nil {
 				return err
 			}
-			views := make([]output.AuditView, len(events))
-			for i, e := range events {
-				views[i] = output.AuditView{ID: e.ID, At: e.CreatedAt, EventType: e.EventType, ActorID: e.ActorID, TargetType: e.TargetType, TargetID: e.TargetID, Payload: e.Payload}
-			}
+			views := viewsOf(events, output.NewAuditView)
 			return a.printer().AuditList(views)
 		},
 	}

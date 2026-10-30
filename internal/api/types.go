@@ -129,6 +129,13 @@ type Deployment struct {
 	CreatedAt           time.Time  `json:"created_at"`
 }
 
+// DefaultChannel is the channel every project starts with, and the one
+// quick releases target by default.
+const DefaultChannel = "stable"
+
+// RolloutImmediate offers a build to its whole rollout percentage at once.
+const RolloutImmediate = "immediate"
+
 // Deployment states.
 const (
 	StateDraft     = "draft"

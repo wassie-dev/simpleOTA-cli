@@ -203,6 +203,25 @@ func ReadKeyFile(path string) ([]byte, error) {
 	return data, nil
 }
 
+// NewKeyFile generates an Ed25519 key, writes it to path encrypted with the
+// passphrase (0600, failing if path exists), and returns its public key PEM.
+// The private key never leaves the file.
+func NewKeyFile(path, passphrase string) (publicPEM string, err error) {
+	priv, err := Generate()
+	if err != nil {
+		return "", err
+	}
+	sealed, err := Encrypt(priv, passphrase)
+	if err != nil {
+		return "", err
+	}
+	publicPEM, err = PublicKeyPEM(priv.Public().(ed25519.PublicKey))
+	if err != nil {
+		return "", err
+	}
+	return publicPEM, WriteNewKeyFile(path, sealed)
+}
+
 // WriteNewKeyFile creates path with 0600 permissions and fails if it exists.
 func WriteNewKeyFile(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

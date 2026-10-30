@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -57,6 +58,14 @@ func (p Printer) table(header []string, rows [][]string) error {
 	return tw.Flush()
 }
 
+// field prints one indented "label  value" line, skipping empty values.
+func (p Printer) field(label, value string) {
+	if value == "" {
+		return
+	}
+	fmt.Fprintf(p.Out, "  %-12s %s\n", label, value)
+}
+
 // when formats a time for a table, in UTC so output does not depend on the
 // machine's zone.
 func when(t time.Time) string {
@@ -73,3 +82,25 @@ func whenPtr(t *time.Time) string {
 	}
 	return when(*t)
 }
+
+func intPtr(n *int) string {
+	if n == nil {
+		return ""
+	}
+	return strconv.Itoa(*n)
+}
+
+func (p Printer) paint(code, s string) string {
+	if !p.Color {
+		return s
+	}
+	return "\x1b[" + code + "m" + s + "\x1b[0m"
+}
+
+func (p Printer) green(s string) string { return p.paint("32", s) }
+
+func (p Printer) red(s string) string { return p.paint("31", s) }
+
+func (p Printer) yellow(s string) string { return p.paint("33", s) }
+
+func (p Printer) bold(s string) string { return p.paint("1", s) }

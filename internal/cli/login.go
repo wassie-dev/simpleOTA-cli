@@ -51,18 +51,11 @@ SIMPLEOTA_TOKEN, when set, takes precedence over the stored token.`,
 }
 
 func (a *App) runLogin(ctx context.Context) error {
-	dir, err := a.configDir()
+	st, err := a.loadSettings()
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(dir)
-	if err != nil {
-		return err
-	}
-	apiURL, err := a.resolveAPIURL(cfg)
-	if err != nil {
-		return err
-	}
+	apiURL, cfg := st.apiURL, st.cfg
 	token, err := a.readToken(apiURL)
 	if err != nil {
 		return err
@@ -82,7 +75,7 @@ func (a *App) runLogin(ctx context.Context) error {
 		return err
 	}
 
-	store := a.store(dir)
+	store := a.store(st.configDir)
 	where := store.Name()
 	if fb, ok := store.(credentials.Fallback); ok {
 		where, err = fb.SetWhere(apiURL, token)
@@ -93,7 +86,7 @@ func (a *App) runLogin(ctx context.Context) error {
 		return fmt.Errorf("storing the token: %w", err)
 	}
 	cfg.APIURL, cfg.ProjectID, cfg.ProjectSlug = apiURL, "", ""
-	if err := config.Save(dir, cfg); err != nil {
+	if err := config.Save(st.configDir, cfg); err != nil {
 		return err
 	}
 
@@ -115,8 +108,8 @@ func (a *App) runLogin(ctx context.Context) error {
 	}
 
 	p := a.printer()
-	if a.Getenv("SIMPLEOTA_TOKEN") != "" {
-		p.Notice("Note: SIMPLEOTA_TOKEN is set and takes precedence over the stored token.")
+	if a.Getenv(tokenEnv) != "" {
+		p.Notice("Note: %s is set and takes precedence over the stored token.", tokenEnv)
 	}
 	return p.Login(view)
 }
@@ -179,18 +172,11 @@ func (a *App) logoutCommand() *cobra.Command {
 with project use. SIMPLEOTA_TOKEN, when set, is not affected.`,
 		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			dir, err := a.configDir()
+			st, err := a.loadSettings()
 			if err != nil {
 				return err
 			}
-			cfg, err := config.Load(dir)
-			if err != nil {
-				return err
-			}
-			apiURL, err := a.resolveAPIURL(cfg)
-			if err != nil {
-				return err
-			}
+			dir, cfg, apiURL := st.configDir, st.cfg, st.apiURL
 			store := a.store(dir)
 			_, err = store.Get(apiURL)
 			hadToken := err == nil
@@ -206,16 +192,11 @@ with project use. SIMPLEOTA_TOKEN, when set, is not affected.`,
 			}
 			loggedOut := hadToken || hadProject
 			p := a.printer()
-			if p.JSON {
-				return p.WriteJSON(output.LogoutView{APIURL: apiURL, LoggedOut: loggedOut})
+			if err := p.Logout(output.LogoutView{APIURL: apiURL, LoggedOut: loggedOut}); err != nil {
+				return err
 			}
-			if loggedOut {
-				fmt.Fprintf(a.Out, "Logged out of %s.\n", apiURL)
-			} else {
-				fmt.Fprintf(a.Out, "Not logged in to %s; nothing to remove.\n", apiURL)
-			}
-			if a.Getenv("SIMPLEOTA_TOKEN") != "" {
-				p.Notice("Note: SIMPLEOTA_TOKEN is still set in this environment.")
+			if a.Getenv(tokenEnv) != "" {
+				p.Notice("Note: %s is still set in this environment.", tokenEnv)
 			}
 			return nil
 		},

@@ -10,11 +10,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/deploy"
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
-	"github.com/wassie-dev/simpleOTA-cli/internal/release"
 )
 
 func (a *App) deploymentCommand() *cobra.Command {
@@ -51,82 +49,6 @@ deployment list. show and wait default to the newest deployment.`,
 	return cmd
 }
 
-var actionHelp = map[string]string{
-	deploy.ActionRamp:     "Offer the build to a larger share of devices (it cannot go down)",
-	deploy.ActionPause:    "Stop offering the build until the deployment is resumed",
-	deploy.ActionResume:   "Offer the build again after a pause",
-	deploy.ActionComplete: "Mark the deployment finished",
-	deploy.ActionCancel:   "Stop the deployment for good",
-}
-
-var actionLong = map[string]string{
-	deploy.ActionRamp: `Raise the share of the targeted devices that are offered the build. Each
-device falls in a fixed bucket, so a device in at 10% stays in at 50%. The
-percentage cannot go down, since devices that already took the build
-would be decided again; to shrink a rollout, cancel the deployment and
-create a new one.`,
-	deploy.ActionPause: `Stop offering the build. Devices that already installed it keep it.
-Rollbacks also pause a deployment, once they reach its rollback threshold.
-Resume it to offer the build again.`,
-	deploy.ActionResume: `Offer the build again after a pause, at the same percentage.`,
-	deploy.ActionComplete: `Mark an active or paused deployment finished. It stops offering the build,
-and stays in the history as completed. This cannot be undone.`,
-	deploy.ActionCancel: `Stop a deployment for good. It stops offering the build, and devices that
-already installed it keep it. This cannot be undone; to go back, release
-the previous source again as a new, higher build.`,
-}
-
-func (a *App) deploymentActionCommand(action string) *cobra.Command {
-	var percent int
-	cmd := &cobra.Command{
-		Use:     action + " <deployment-id>",
-		Short:   actionHelp[action],
-		Long:    actionLong[action],
-		Example: "  simpleota deployment " + action + " 5f0c2b1e-...",
-		Args:    exactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			var pct *int
-			if cmd.Flags().Changed("percent") {
-				pct = &percent
-			}
-			return a.runRollout(cmd.Context(), action, args[0], pct)
-		},
-	}
-	if action == deploy.ActionRamp {
-		cmd.Use = "ramp <deployment-id> --percent <n>"
-		cmd.Example = "  simpleota deployment ramp 5f0c2b1e-... --percent 50"
-		cmd.Flags().IntVar(&percent, "percent", 0, "new rollout percentage (required)")
-	}
-	return cmd
-}
-
-func (a *App) runRollout(ctx context.Context, action, deploymentID string, percent *int) error {
-	t, err := deploy.BuildTransition(action, percent)
-	if err != nil {
-		return usageErr("%v", err)
-	}
-	if !api.IsUUID(deploymentID) {
-		return usageErr("%q is not a deployment ID; release and deployment list print it", deploymentID)
-	}
-	s, err := a.openSession()
-	if err != nil {
-		return err
-	}
-	projectID, err := s.projectID(ctx)
-	if err != nil {
-		return err
-	}
-	d, err := s.api.TransitionDeployment(ctx, projectID, deploymentID, t)
-	if err != nil {
-		return deploymentErr(err, deploymentID)
-	}
-	return a.printer().Rollout(output.RolloutView{
-		Action:     action,
-		Deployment: output.NewDeploymentView(d),
-		NextStep:   output.NextStep(d),
-	})
-}
-
 func (a *App) deploymentListCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
@@ -146,10 +68,7 @@ one offers, its state and its rollout percentage.`,
 				return err
 			}
 			sort.SliceStable(deps, func(i, j int) bool { return deps[i].CreatedAt.After(deps[j].CreatedAt) })
-			views := make([]output.DeploymentView, len(deps))
-			for i, d := range deps {
-				views[i] = output.NewDeploymentView(d)
-			}
+			views := viewsOf(deps, output.NewDeploymentView)
 			return a.printer().DeploymentList(views)
 		},
 	}
@@ -168,7 +87,7 @@ build.`,
   simpleota deployment show 5f0c2b1e-... --json`,
 		Args: maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.runDeploymentStatus(cmd.Context(), firstArg(args), false, 0, 0)
+			return a.runDeploymentShow(cmd.Context(), firstArg(args))
 		},
 	}
 }
@@ -195,7 +114,7 @@ the final state to stdout.`,
   simpleota deployment wait "$ID" --timeout 30m`,
 		Args: maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.runDeploymentStatus(cmd.Context(), firstArg(args), true, timeout, interval)
+			return a.runDeploymentWait(cmd.Context(), firstArg(args), timeout, interval)
 		},
 	}
 	fl := cmd.Flags()
@@ -204,193 +123,89 @@ the final state to stdout.`,
 	return cmd
 }
 
-type createFlags struct {
-	build      string
-	channels   []string
-	groups     []string
-	allDevices bool
-	percent    int
-	notes      string
-}
-
-func (a *App) deploymentCreateCommand() *cobra.Command {
-	var f createFlags
-	cmd := &cobra.Command{
-		Use:   "create --build <build-number>",
-		Short: "Deploy an uploaded build",
-		Long: `Create a deployment of an uploaded build and start it. It is offered to
-the devices on the given channels (stable by default) and in the given
-groups, in the rollout percentage, that can run the build. Channels are a
-union, as are groups; with both, a device must match each.
-
---all-devices targets every device in the project instead, whatever its
-channel or group. An archived build cannot be deployed.
-
-When another deployment for the same chip is still active for the same
-devices, create names it. A device installs the highest build offered to
-it, so the older deployment goes on reaching the devices this one does not.`,
-		Example: `  simpleota deployment create --build 42
-  simpleota deployment create --build 42 --channel beta --percent 10
-  simpleota deployment create --build 42 --group kitchen --group hall
-  simpleota deployment create --build 42 --all-devices`,
-		Args: exactArgs(0),
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return a.runCreateDeployment(cmd.Context(), f)
-		},
-	}
-	fl := cmd.Flags()
-	fl.StringVar(&f.build, "build", "", "build number to deploy (required)")
-	fl.StringArrayVar(&f.channels, "channel", nil, "release channel to target; repeat for more (default: stable)")
-	fl.StringArrayVar(&f.groups, "group", nil, "device group to target; repeat for more")
-	fl.BoolVar(&f.allDevices, "all-devices", false, "target every device in the project")
-	fl.IntVar(&f.percent, "percent", 100, "percentage of the targeted devices to offer the build to")
-	fl.StringVar(&f.notes, "notes", "", "a note to keep with the deployment")
-	return cmd
-}
-
-func (a *App) runCreateDeployment(ctx context.Context, f createFlags) error {
-	switch {
-	case f.build == "":
-		return usageErr("--build is required; simpleota build list prints build numbers")
-	case f.percent < 0 || f.percent > 100:
-		return usageErr("--percent must be between 0 and 100")
-	case f.allDevices && (len(f.channels) > 0 || len(f.groups) > 0):
-		return usageErr("--all-devices targets every device, so it cannot be combined with --channel or --group")
-	case !f.allDevices && len(f.channels) == 0 && len(f.groups) == 0:
-		f.channels = []string{"stable"}
+// deploymentTarget validates an optional deployment ID, resolves the
+// current project, and defaults the ID to the newest deployment.
+func (a *App) deploymentTarget(ctx context.Context, ref string) (*session, string, string, error) {
+	if ref != "" && !api.IsUUID(ref) {
+		return nil, "", "", usageErr("%q is not a deployment ID; deployment list prints them", ref)
 	}
 	s, projectID, err := a.projectSession(ctx)
 	if err != nil {
-		return err
+		return nil, "", "", err
 	}
-	art, err := findBuild(ctx, s.api, projectID, f.build)
-	if err != nil {
-		return err
-	}
-	if art.Archived {
-		return usageErr("build %d is archived; unarchive it first with simpleota build unarchive %d", art.BuildNumber, art.BuildNumber)
-	}
-	req := api.DeploymentRequest{
-		ArtifactID:        art.ID,
-		RolloutStrategy:   "immediate",
-		RolloutPercentage: f.percent,
-		TargetChannelIDs:  []string{},
-		TargetGroupIDs:    []string{},
-		Notes:             f.notes,
-	}
-	targets := []string{}
-	if len(f.channels) > 0 {
-		channels, err := s.api.ListChannels(ctx, projectID)
-		if err != nil {
-			return err
-		}
-		for _, name := range f.channels {
-			id, err := channelID(channels, name)
-			if err != nil {
-				return err
-			}
-			req.TargetChannelIDs = append(req.TargetChannelIDs, id)
-			targets = append(targets, "channel "+name)
-		}
-	}
-	for _, name := range f.groups {
-		id, err := groupID(ctx, s.api, projectID, name)
-		if err != nil {
-			return err
-		}
-		req.TargetGroupIDs = append(req.TargetGroupIDs, id)
-		targets = append(targets, "group "+name)
-	}
-
-	draft, err := s.api.CreateDeployment(ctx, projectID, req)
-	if err != nil {
-		return err
-	}
-	d, err := s.api.TransitionDeployment(ctx, projectID, draft.ID, api.Transition{Action: "start", ConfirmAll: f.allDevices})
-	if err != nil {
-		return fmt.Errorf("deployment %s was created but did not start (%w); cancel it with simpleota deployment cancel %s", draft.ID, err, draft.ID)
-	}
-	p := a.printer()
-	svc := release.Service{API: s.api, ProjectID: projectID}
-	return p.Created(output.CreatedView{
-		Deployment: output.NewDeploymentView(d),
-		Targets:    targets,
-		AlsoActive: alsoActive(ctx, p, svc, d.ID, art.ChipFamily),
-	})
-}
-
-func firstArg(args []string) string {
-	if len(args) == 0 {
-		return ""
-	}
-	return args[0]
-}
-
-func (a *App) runDeploymentStatus(ctx context.Context, deploymentID string, wait bool, timeout, interval time.Duration) error {
-	if deploymentID != "" && !api.IsUUID(deploymentID) {
-		return usageErr("%q is not a deployment ID", deploymentID)
-	}
-	if wait && timeout <= 0 {
-		return usageErr("--timeout must be positive")
-	}
-	if wait && interval < time.Second {
-		return usageErr("--interval must be at least 1s")
-	}
-	s, projectID, err := a.projectSession(ctx)
-	if err != nil {
-		return err
-	}
-	if deploymentID == "" {
+	if ref == "" {
 		latest, err := deploy.Latest(ctx, s.api, projectID)
 		if err != nil {
-			return err
+			return nil, "", "", err
 		}
-		deploymentID = latest.ID
+		ref = latest.ID
+	}
+	return s, projectID, ref, nil
+}
+
+func (a *App) runDeploymentShow(ctx context.Context, ref string) error {
+	s, projectID, id, err := a.deploymentTarget(ctx, ref)
+	if err != nil {
+		return err
+	}
+	sum, err := deploy.Status(ctx, s.api, projectID, id)
+	if err != nil {
+		return deploymentErr(err, id)
+	}
+	return a.printer().DeploymentStatus(output.NewDeploymentStatusView(sum, deploy.Evaluate(sum)))
+}
+
+func (a *App) runDeploymentWait(ctx context.Context, ref string, timeout, interval time.Duration) error {
+	if timeout <= 0 {
+		return usageErr("--timeout must be positive")
+	}
+	if interval < time.Second {
+		return usageErr("--interval must be at least 1s")
+	}
+	s, projectID, id, err := a.deploymentTarget(ctx, ref)
+	if err != nil {
+		return err
 	}
 	p := a.printer()
-
-	if !wait {
-		sum, err := deploy.Status(ctx, s.api, projectID, deploymentID)
-		if err != nil {
-			return deploymentErr(err, deploymentID)
-		}
-		outcome := deploy.Evaluate(sum)
-		return p.DeploymentStatus(output.NewDeploymentStatusView(sum, outcome))
-	}
-
 	w := deploy.Waiter{
-		API:       s.api,
-		ProjectID: projectID,
-		Interval:  interval,
-		Timeout:   timeout,
-		Now:       a.Now,
-		Sleep:     a.Sleep,
+		API:         s.api,
+		ProjectID:   projectID,
+		Interval:    interval,
+		Timeout:     timeout,
+		Now:         a.Now,
+		Sleep:       a.Sleep,
+		OnPollError: func(err error) { p.Notice("Polling failed, retrying: %v", err) },
 	}
 	if !p.JSON {
 		w.OnProgress = p.Progress
 	}
-	w.OnPollError = func(err error) { p.Notice("Polling failed, retrying: %v", err) }
-	sum, outcome, err := w.Wait(ctx, deploymentID)
+	sum, outcome, err := w.Wait(ctx, id)
 	if err != nil {
-		return deploymentErr(err, deploymentID)
+		return deploymentErr(err, id)
 	}
 	if err := p.DeploymentStatus(output.NewDeploymentStatusView(sum, outcome)); err != nil {
 		return err
 	}
+	return waitErr(sum, outcome, timeout)
+}
+
+// waitErr turns a wait outcome into the exit code CI gates on.
+func waitErr(sum deploy.Summary, outcome deploy.Outcome, timeout time.Duration) error {
+	d := sum.Deployment
 	switch outcome {
 	case deploy.OutcomeDeviceFailed:
-		return &exitError{code: ExitDeployment, err: fmt.Errorf("deployment %s: %s", deploymentID, failureText(sum))}
+		return &exitError{code: ExitDeployment, err: fmt.Errorf("deployment %s: %s", d.ID, failureText(sum))}
 	case deploy.OutcomeStopped:
-		msg := fmt.Sprintf("deployment %s is %s", deploymentID, sum.Deployment.State)
-		if next := output.NextStep(sum.Deployment); next != "" {
+		msg := fmt.Sprintf("deployment %s is %s", d.ID, d.State)
+		if next := output.NextStep(d); next != "" {
 			msg += ". " + next
 		}
-		return &exitError{code: ExitDeployment, err: fmt.Errorf("%s", msg)}
+		return &exitError{code: ExitDeployment, err: errors.New(msg)}
 	case deploy.OutcomeNoDevices:
-		return &exitError{code: ExitDeployment, err: fmt.Errorf("deployment %s was completed before any device was offered build %d, so no device updated", deploymentID, sum.Deployment.ArtifactBuildNumber)}
+		return &exitError{code: ExitDeployment, err: fmt.Errorf("deployment %s was completed before any device was offered build %d, so no device updated", d.ID, d.ArtifactBuildNumber)}
 	case deploy.OutcomeTimedOut:
 		if sum.Counts.Offered == 0 {
-			return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s: no device has been offered build %d yet; a device is offered it when it checks in, if it is on the channel, in the rollout and compatible", timeout, sum.Deployment.ArtifactBuildNumber)}
+			return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s: no device has been offered build %d yet; a device is offered it when it checks in, if it is on the channel, in the rollout and compatible", timeout, d.ArtifactBuildNumber)}
 		}
 		return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s: %d of %d offered devices confirmed", timeout, sum.Counts.Confirmed, sum.Counts.Offered)}
 	}
@@ -412,13 +227,4 @@ func failureText(s deploy.Summary) string {
 		parts = append(parts, fmt.Sprintf("device %s %s", f.DeviceID, strings.ReplaceAll(f.Status, "_", " ")))
 	}
 	return strings.Join(parts, "; ")
-}
-
-func maxArgs(n int) cobra.PositionalArgs {
-	return func(cmd *cobra.Command, args []string) error {
-		if len(args) > n {
-			return usageErr("%s takes at most %d argument(s), got %d; see simpleota %s --help", cmd.Name(), n, len(args), cmd.Name())
-		}
-		return nil
-	}
 }

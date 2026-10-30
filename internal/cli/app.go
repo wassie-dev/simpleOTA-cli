@@ -186,6 +186,7 @@ func exitCode(err error) int {
 	if errors.As(err, &ae) && ae.IsAuth() {
 		return ExitAuth
 	}
+	// cobra reports an unknown top-level command as a plain error.
 	if strings.HasPrefix(err.Error(), "unknown command") {
 		return ExitUsage
 	}
@@ -198,9 +199,9 @@ func (a *App) rootCommand() *cobra.Command {
 		Short: "Sign, release and roll out ESP32 firmware with SimpleOTA",
 		Long: `simpleota signs, uploads and rolls out ESP32 firmware through SimpleOTA.
 
-Commands follow the API's resources. login stores a token; a project holds
-your fleet; and builds, deployments, devices, channels, groups, signing
-keys and the audit log live in a project. Resource commands act on the current project:
+Commands follow the API's resources. login stores a token, and a project
+holds your fleet: its builds, deployments, devices, channels, groups,
+signing keys and audit log. Resource commands act on the current project:
 --project, then SIMPLEOTA_PROJECT, then the one chosen with
 simpleota project use, then the only project the token can see.
 
@@ -243,7 +244,7 @@ codes: 0 OK, 1 error, 2 usage, 3 not logged in or token rejected,
 	root.AddCommand(project)
 	for _, c := range []*cobra.Command{
 		a.releaseCommand(), a.buildCommand(), a.deploymentCommand(), a.deviceCommand(),
-		a.channelCommand(), a.groupCommand(), a.keysCommand(), a.auditCommand(),
+		a.channelCommand(), a.groupCommand(), a.keyCommand(), a.auditCommand(),
 	} {
 		c.GroupID = groupResources
 		root.AddCommand(c)

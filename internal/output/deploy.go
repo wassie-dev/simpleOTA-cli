@@ -2,6 +2,7 @@ package output
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,21 +23,6 @@ type DeploymentView struct {
 	CompletedAt       *time.Time `json:"completed_at"`
 }
 
-// RolloutView is the result of rollout.
-type RolloutView struct {
-	Action     string         `json:"action"`
-	Deployment DeploymentView `json:"deployment"`
-	NextStep   string         `json:"next_step,omitempty"`
-}
-
-// DeploymentStatusView is the result of deployment show and deployment wait.
-type DeploymentStatusView struct {
-	Deployment DeploymentView   `json:"deployment"`
-	Devices    deploy.Counts    `json:"devices"`
-	Failures   []deploy.Failure `json:"failures"`
-	Outcome    deploy.Outcome   `json:"outcome"`
-}
-
 // NewDeploymentView converts an API deployment.
 func NewDeploymentView(d api.Deployment) DeploymentView {
 	return DeploymentView{
@@ -52,23 +38,20 @@ func NewDeploymentView(d api.Deployment) DeploymentView {
 	}
 }
 
-// NewDeploymentStatusView converts a summary and its outcome.
-func NewDeploymentStatusView(s deploy.Summary, o deploy.Outcome) DeploymentStatusView {
-	failures := s.Failures
-	if failures == nil {
-		failures = []deploy.Failure{}
+// DeploymentList prints deployment list.
+func (p Printer) DeploymentList(deps []DeploymentView) error {
+	if p.JSON {
+		return p.WriteJSON(deps)
 	}
-	return DeploymentStatusView{Deployment: NewDeploymentView(s.Deployment), Devices: s.Counts, Failures: failures, Outcome: o}
-}
-
-// NextStep is the advice printed after a rollout stops. SimpleOTA never
-// offers a lower build, so going back means shipping the old code again.
-func NextStep(d api.Deployment) string {
-	switch d.State {
-	case api.StatePaused, api.StateCancelled:
-		return "To ship a fix or go back, release the fixed or previous source again as a new build: simpleota release <bin> --version-label <label>"
+	if len(deps) == 0 {
+		fmt.Fprintln(p.Out, "No deployments yet. Create one with: simpleota release <bin> --version-label <label>")
+		return nil
 	}
-	return ""
+	rows := make([][]string, len(deps))
+	for i, d := range deps {
+		rows[i] = []string{d.ID, strconv.Itoa(d.BuildNumber), d.State, fmt.Sprintf("%d%%", d.RolloutPercentage), when(d.CreatedAt)}
+	}
+	return p.table([]string{"DEPLOYMENT", "BUILD", "STATE", "ROLLOUT", "CREATED"}, rows)
 }
 
 // CreatedView is the result of deployment create.
@@ -110,6 +93,13 @@ func (p Printer) alsoActive(others []DeploymentView, build int) {
 	fmt.Fprintf(p.Out, "Each device installs the highest build offered to it, so these still reach\nthe devices build %d does not. Stop one with: simpleota deployment complete <id>\n", build)
 }
 
+// RolloutView is the result of rollout.
+type RolloutView struct {
+	Action     string         `json:"action"`
+	Deployment DeploymentView `json:"deployment"`
+	NextStep   string         `json:"next_step,omitempty"`
+}
+
 // Rollout prints the result of a rollout action.
 func (p Printer) Rollout(v RolloutView) error {
 	if p.JSON {
@@ -121,6 +111,33 @@ func (p Printer) Rollout(v RolloutView) error {
 		fmt.Fprintln(p.Out, v.NextStep)
 	}
 	return nil
+}
+
+// NextStep is the advice printed after a rollout stops. SimpleOTA never
+// offers a lower build, so going back means shipping the old code again.
+func NextStep(d api.Deployment) string {
+	switch d.State {
+	case api.StatePaused, api.StateCancelled:
+		return "To ship a fix or go back, release the fixed or previous source again as a new build: simpleota release <bin> --version-label <label>"
+	}
+	return ""
+}
+
+// DeploymentStatusView is the result of deployment show and deployment wait.
+type DeploymentStatusView struct {
+	Deployment DeploymentView   `json:"deployment"`
+	Devices    deploy.Counts    `json:"devices"`
+	Failures   []deploy.Failure `json:"failures"`
+	Outcome    deploy.Outcome   `json:"outcome"`
+}
+
+// NewDeploymentStatusView converts a summary and its outcome.
+func NewDeploymentStatusView(s deploy.Summary, o deploy.Outcome) DeploymentStatusView {
+	failures := s.Failures
+	if failures == nil {
+		failures = []deploy.Failure{}
+	}
+	return DeploymentStatusView{Deployment: NewDeploymentView(s.Deployment), Devices: s.Counts, Failures: failures, Outcome: o}
 }
 
 // DeploymentStatus prints a deployment summary.
@@ -188,7 +205,3 @@ func (p Printer) state(s string) string {
 	}
 	return s
 }
-
-func (p Printer) red(s string) string    { return p.paint("31", s) }
-func (p Printer) yellow(s string) string { return p.paint("33", s) }
-func (p Printer) bold(s string) string   { return p.paint("1", s) }

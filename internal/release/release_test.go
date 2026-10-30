@@ -54,13 +54,16 @@ func registerKey(t *testing.T, fake *fakeapi.Server, keyID string, revoked bool)
 	return priv
 }
 
+// everyone targets every device on the stable channel.
+var everyone = release.Target{Channel: "stable", Percent: 100}
+
 var firmware = []byte{0xe9, 0x04, 0x02, 0x20, 1, 2, 3, 4}
 
 func TestBasicRelease(t *testing.T) {
 	fake, svc := service(t)
 	res, err := svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1.0.0", Chip: "ESP32S3", Percent: 10, Channel: "stable",
-	})
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1.0.0", Chip: "ESP32S3",
+	}, release.Target{Channel: "stable", Percent: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,8 +83,8 @@ func TestBasicRelease(t *testing.T) {
 func TestExplicitFrameworkSkipsProjectLookup(t *testing.T) {
 	fake, svc := service(t)
 	_, err := svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Framework: "arduino", Percent: 100, Channel: "stable",
-	})
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Framework: "arduino",
+	}, everyone)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,8 +98,8 @@ func TestSignedReleaseUsesRegisteredKeyID(t *testing.T) {
 	registerKey(t, fake, "other", false)
 	priv := registerKey(t, fake, "prod-2026", false)
 	res, err := svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1.0.0", Chip: "esp32", Percent: 100, Channel: "stable", Key: priv,
-	})
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1.0.0", Chip: "esp32", Key: priv,
+	}, everyone)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,8 +116,8 @@ func TestUnregisteredKeyIsRefusedBeforeUpload(t *testing.T) {
 	registerKey(t, fake, "prod-2026", false)
 	stranger, _ := signing.Generate()
 	_, err := svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Percent: 100, Channel: "stable", Key: stranger,
-	})
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Key: stranger,
+	}, everyone)
 	if err == nil || !strings.Contains(err.Error(), "not registered") {
 		t.Fatalf("err = %v", err)
 	}
@@ -127,8 +130,8 @@ func TestRevokedKeyIsRefused(t *testing.T) {
 	fake, svc := service(t)
 	priv := registerKey(t, fake, "old", true)
 	_, err := svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Percent: 100, Channel: "stable", Key: priv,
-	})
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Key: priv,
+	}, everyone)
 	if err == nil || !strings.Contains(err.Error(), "revoked") {
 		t.Fatalf("err = %v", err)
 	}
@@ -138,8 +141,8 @@ func TestChecksumMismatchCreatesNothing(t *testing.T) {
 	fake, svc := service(t)
 	fake.CorruptUploads = true
 	_, err := svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Percent: 100, Channel: "stable",
-	})
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32",
+	}, everyone)
 	if !errors.Is(err, release.ErrChecksumMismatch) || !strings.Contains(err.Error(), "nothing was created") {
 		t.Fatalf("err = %v", err)
 	}
@@ -154,12 +157,12 @@ func TestChecksumMismatchCreatesNothing(t *testing.T) {
 func TestDuplicateBinaryIsRefusedBeforeUpload(t *testing.T) {
 	fake, svc := service(t)
 	bin := writeBin(t, "app.bin", firmware)
-	opts := release.Options{BinaryPath: bin, VersionLabel: "1.0.0", Chip: "esp32", Percent: 100, Channel: "stable"}
-	if _, err := svc.Release(context.Background(), opts); err != nil {
+	opts := release.Options{BinaryPath: bin, VersionLabel: "1.0.0", Chip: "esp32"}
+	if _, err := svc.Release(context.Background(), opts, everyone); err != nil {
 		t.Fatal(err)
 	}
 	opts.VersionLabel = "1.0.1"
-	_, err := svc.Release(context.Background(), opts)
+	_, err := svc.Release(context.Background(), opts, everyone)
 	if !errors.Is(err, release.ErrDuplicate) || !strings.Contains(err.Error(), "build 1 (version 1.0.0)") || !strings.Contains(err.Error(), "--allow-duplicate") {
 		t.Fatalf("err = %v", err)
 	}
@@ -168,7 +171,7 @@ func TestDuplicateBinaryIsRefusedBeforeUpload(t *testing.T) {
 	}
 
 	opts.AllowDuplicate = true
-	res, err := svc.Release(context.Background(), opts)
+	res, err := svc.Release(context.Background(), opts, everyone)
 	if err != nil || res.BuildNumber != 2 {
 		t.Fatalf("--allow-duplicate: %+v %v", res, err)
 	}
@@ -181,8 +184,8 @@ func TestUnreadableArtifactListStopsBeforeUpload(t *testing.T) {
 	fake, svc := service(t)
 	fake.FailNext["/api/v1/projects/"+fakeapi.ProjectID+"/artifacts/"] = []int{500}
 	_, err := svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Percent: 100, Channel: "stable",
-	})
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32",
+	}, everyone)
 	if err == nil || !strings.Contains(err.Error(), "earlier upload of this binary") {
 		t.Fatalf("err = %v", err)
 	}
@@ -194,8 +197,8 @@ func TestUnreadableArtifactListStopsBeforeUpload(t *testing.T) {
 func TestServerErrorsPassThrough(t *testing.T) {
 	_, svc := service(t)
 	_, err := svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Percent: 100, Channel: "beta",
-	})
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32",
+	}, release.Target{Channel: "beta", Percent: 100})
 	if err == nil || !strings.Contains(err.Error(), "channel 'beta' not found") {
 		t.Fatalf("err = %v", err)
 	}
@@ -238,14 +241,18 @@ func TestReadBinary(t *testing.T) {
 func TestInvalidInputFailsBeforeNetwork(t *testing.T) {
 	fake, svc := service(t)
 	bin := writeBin(t, "app.bin", firmware)
-	for _, o := range []release.Options{
-		{BinaryPath: bin, VersionLabel: "1", Chip: "esp 32", Percent: 100, Channel: "stable"},
-		{BinaryPath: bin, VersionLabel: "1", Chip: "esp32", Percent: 101, Channel: "stable"},
-		{BinaryPath: bin, VersionLabel: "1", Chip: "esp32", Percent: 100, Channel: " "},
-		{BinaryPath: bin, VersionLabel: "", Chip: "esp32", Framework: "arduino", Percent: 100, Channel: "stable"},
+	valid := release.Options{BinaryPath: bin, VersionLabel: "1", Chip: "esp32"}
+	for _, tc := range []struct {
+		opts   release.Options
+		target release.Target
+	}{
+		{release.Options{BinaryPath: bin, VersionLabel: "1", Chip: "esp 32"}, everyone},
+		{valid, release.Target{Channel: "stable", Percent: 101}},
+		{valid, release.Target{Channel: " ", Percent: 100}},
+		{release.Options{BinaryPath: bin, VersionLabel: "", Chip: "esp32", Framework: "arduino"}, everyone},
 	} {
-		if _, err := svc.Release(context.Background(), o); err == nil {
-			t.Errorf("options %+v should fail", o)
+		if _, err := svc.Release(context.Background(), tc.opts, tc.target); err == nil {
+			t.Errorf("%+v should fail", tc)
 		}
 	}
 	for k, n := range fake.Requests {
@@ -291,8 +298,8 @@ func TestUnclearUploadFailureIsNotRetried(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			svc, uploads := unclearServer(t, fail)
 			_, err := svc.Release(context.Background(), release.Options{
-				BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Percent: 100, Channel: "stable",
-			})
+				BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32",
+			}, everyone)
 			if err == nil {
 				t.Fatal("want an error")
 			}
@@ -332,14 +339,14 @@ func TestImageChip(t *testing.T) {
 func TestChipComesFromImageHeader(t *testing.T) {
 	fake, svc := service(t)
 	res, err := svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", image(0x0009, 1)), VersionLabel: "1", Percent: 100, Channel: "stable",
-	})
+		BinaryPath: writeBin(t, "app.bin", image(0x0009, 1)), VersionLabel: "1",
+	}, everyone)
 	if err != nil || res.Chip != "esp32s3" || fake.LastManifest.ChipFamily != "esp32s3" {
 		t.Fatalf("res = %+v, err = %v", res, err)
 	}
 	_, err = svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Percent: 100, Channel: "stable",
-	})
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1",
+	}, everyone)
 	var chipErr *release.ChipError
 	if !errors.As(err, &chipErr) || !strings.Contains(err.Error(), "--chip is required") {
 		t.Fatalf("an image without a known chip needs --chip: %v", err)
@@ -348,8 +355,8 @@ func TestChipComesFromImageHeader(t *testing.T) {
 
 func TestChipMismatchIsRefusedUnlessADeviceReportsIt(t *testing.T) {
 	fake, svc := service(t)
-	opts := release.Options{BinaryPath: writeBin(t, "app.bin", image(0x0009, 2)), VersionLabel: "1", Chip: "esp99", Percent: 100, Channel: "stable"}
-	_, err := svc.Release(context.Background(), opts)
+	opts := release.Options{BinaryPath: writeBin(t, "app.bin", image(0x0009, 2)), VersionLabel: "1", Chip: "esp99"}
+	_, err := svc.Release(context.Background(), opts, everyone)
 	var chipErr *release.ChipError
 	if !errors.As(err, &chipErr) || !strings.Contains(err.Error(), "built for esp32s3, but --chip is esp99") {
 		t.Fatalf("err = %v", err)
@@ -358,45 +365,12 @@ func TestChipMismatchIsRefusedUnlessADeviceReportsIt(t *testing.T) {
 		t.Fatal("a refused chip must not upload")
 	}
 	fake.Devices = []api.Device{{ID: "d1", DeviceID: "lamp-1", ChipFamily: "ESP99"}}
-	res, err := svc.Release(context.Background(), opts)
+	res, err := svc.Release(context.Background(), opts, everyone)
 	if err != nil || res.Chip != "esp99" {
 		t.Fatalf("a chip a device reports is allowed: %+v %v", res, err)
 	}
 	opts.Chip, opts.AllowDuplicate = "esp32s3", true
-	if _, err := svc.Release(context.Background(), opts); err != nil {
+	if _, err := svc.Release(context.Background(), opts, everyone); err != nil {
 		t.Fatalf("a matching --chip: %v", err)
-	}
-}
-
-func TestAlsoActive(t *testing.T) {
-	fake, svc := service(t)
-	release1 := func(id uint16, fill byte) release.Result {
-		t.Helper()
-		res, err := svc.Release(context.Background(), release.Options{
-			BinaryPath: writeBin(t, "app.bin", image(id, fill)), VersionLabel: "1", Percent: 100, Channel: "stable",
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return res
-	}
-	first := release1(0x0009, 1)
-	release1(0x0000, 2) // another chip
-	fake.AddDeployment("all-channels", api.StateActive, 0, 100)
-	fake.AddDeployment("paused", api.StatePaused, 0, 100)
-	other := fake.AddDeployment("other-channel", api.StateActive, 0, 100)
-	fake.Deployments[len(fake.Deployments)-1].TargetChannelIDs = []string{"beta"}
-	latest := release1(0x0009, 3)
-
-	got, err := svc.AlsoActive(context.Background(), latest.DeploymentID, latest.Chip)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var ids []string
-	for _, d := range got {
-		ids = append(ids, d.ID)
-	}
-	if strings.Join(ids, ",") != first.DeploymentID+",all-channels" {
-		t.Fatalf("also active = %v (other channel %s must be left out)", ids, other.ID)
 	}
 }

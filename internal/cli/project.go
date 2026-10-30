@@ -41,23 +41,24 @@ func (e *noProjectError) Error() string {
 // SIMPLEOTA_PROJECT, then the project chosen with project use for this API
 // URL, then the only project the token can see. A project token always
 // sees just its own project, so project use does not apply to it. A
-// project from project use carries only its ID and slug.
-func (a *App) currentProject(ctx context.Context, client api.API, kind credentials.Kind, cfg config.Config, apiURL string) (api.Project, string, error) {
-	if ref := a.flags.project; ref != "" {
-		p, err := findProject(ctx, client, ref)
+// project from project use carries only its ID and slug; fullProject
+// fetches the rest.
+func (s *session) currentProject(ctx context.Context) (api.Project, string, error) {
+	if ref := s.app.flags.project; ref != "" {
+		p, err := findProject(ctx, s.api, ref)
 		return p, projectFromFlag, err
 	}
-	if ref := strings.TrimSpace(a.Getenv(projectEnv)); ref != "" {
-		p, err := findProject(ctx, client, ref)
+	if ref := strings.TrimSpace(s.app.Getenv(projectEnv)); ref != "" {
+		p, err := findProject(ctx, s.api, ref)
 		if err != nil {
 			err = fmt.Errorf("%s: %w", projectEnv, err)
 		}
 		return p, projectFromEnv, err
 	}
-	if kind != credentials.KindProject && cfg.ProjectID != "" && cfg.APIURL == apiURL {
-		return api.Project{ID: cfg.ProjectID, Slug: cfg.ProjectSlug}, projectFromConfig, nil
+	if s.kind != credentials.KindProject && s.cfg.ProjectID != "" && s.cfg.APIURL == s.apiURL {
+		return api.Project{ID: s.cfg.ProjectID, Slug: s.cfg.ProjectSlug}, projectFromConfig, nil
 	}
-	projects, err := client.ListProjects(ctx)
+	projects, err := s.api.ListProjects(ctx)
 	if isStaffListing(err) {
 		return api.Project{}, "", usageErr("this server does not list a staff account's projects; choose one with simpleota project use <project-id>, or pass --project <project-id>")
 	}
@@ -65,7 +66,7 @@ func (a *App) currentProject(ctx context.Context, client api.API, kind credentia
 		return api.Project{}, "", err
 	}
 	if len(projects) == 1 {
-		if kind == credentials.KindProject {
+		if s.kind == credentials.KindProject {
 			return projects[0], projectFromToken, nil
 		}
 		return projects[0], projectFromOnly, nil
@@ -75,6 +76,21 @@ func (a *App) currentProject(ctx context.Context, client api.API, kind credentia
 		code = ExitError
 	}
 	return api.Project{}, "", &exitError{code: code, err: &noProjectError{projects: projects}}
+}
+
+// fullProject resolves the current project and fetches it in full, with
+// the source currentProject reports.
+func (s *session) fullProject(ctx context.Context) (api.Project, string, error) {
+	p, source, err := s.currentProject(ctx)
+	if err != nil || source != projectFromConfig {
+		return p, source, err
+	}
+	full, err := s.api.GetProject(ctx, p.ID)
+	var ae *api.Error
+	if errors.As(err, &ae) && ae.StatusCode == http.StatusNotFound {
+		return api.Project{}, source, usageErr("the project chosen with project use (%s) does not exist or this token cannot see it; choose another with simpleota project use <slug>", p.Slug)
+	}
+	return full, source, err
 }
 
 // findProject accepts a project UUID or slug.
@@ -168,7 +184,7 @@ A staff account sees its own projects; open any other project by ID with
 			if err != nil {
 				return err
 			}
-			current, _, _ := a.currentProject(ctx, s.api, s.kind, s.cfg, s.apiURL)
+			current, _, _ := s.currentProject(ctx)
 			views := make([]output.ProjectView, len(projects))
 			for i, p := range projects {
 				views[i] = output.NewProjectView(p)
@@ -198,7 +214,7 @@ Without an argument it shows the current project.`,
 			if len(args) == 1 {
 				p, err = findProject(ctx, s.api, args[0])
 			} else {
-				p, err = s.project(ctx)
+				p, _, err = s.fullProject(ctx)
 			}
 			if err != nil {
 				return err

@@ -11,6 +11,17 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 )
 
+// API is the part of the developer API that deployments need.
+type API interface {
+	ListDeployments(ctx context.Context, projectID string) ([]api.Deployment, error)
+	GetDeployment(ctx context.Context, projectID, deploymentID string) (api.Deployment, error)
+	ListDeploymentStates(ctx context.Context, projectID, deploymentID string) ([]api.DeviceState, error)
+}
+
+// ActionStart starts a draft deployment. deployment create sends it; it is
+// not a command of its own.
+const ActionStart = "start"
+
 // Actions accepted by the transition endpoint that the CLI exposes.
 const (
 	ActionRamp     = "ramp"
@@ -46,7 +57,7 @@ func BuildTransition(action string, percent *int) (api.Transition, error) {
 }
 
 // Latest returns the project's most recently created deployment.
-func Latest(ctx context.Context, a api.API, projectID string) (api.Deployment, error) {
+func Latest(ctx context.Context, a API, projectID string) (api.Deployment, error) {
 	deps, err := a.ListDeployments(ctx, projectID)
 	if err != nil {
 		return api.Deployment{}, err
@@ -148,7 +159,7 @@ func Evaluate(s Summary) Outcome {
 }
 
 // Status fetches a deployment and its device states.
-func Status(ctx context.Context, a api.API, projectID, deploymentID string) (Summary, error) {
+func Status(ctx context.Context, a API, projectID, deploymentID string) (Summary, error) {
 	d, err := a.GetDeployment(ctx, projectID, deploymentID)
 	if err != nil {
 		return Summary{}, err
@@ -163,7 +174,7 @@ func Status(ctx context.Context, a api.API, projectID, deploymentID string) (Sum
 // Waiter polls a deployment until Evaluate reaches a verdict or the timeout
 // passes.
 type Waiter struct {
-	API        api.API
+	API        API
 	ProjectID  string
 	Interval   time.Duration
 	Timeout    time.Duration

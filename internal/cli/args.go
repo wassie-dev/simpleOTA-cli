@@ -6,6 +6,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// viewsOf converts each item for output.
+func viewsOf[T, V any](items []T, view func(T) V) []V {
+	views := make([]V, len(items))
+	for i, item := range items {
+		views[i] = view(item)
+	}
+	return views
+}
+
 func usageErr(format string, args ...any) error {
 	return &exitError{code: ExitUsage, err: fmt.Errorf(format, args...)}
 }
@@ -24,6 +33,15 @@ func exactArgs(n int) cobra.PositionalArgs {
 	}
 }
 
+func maxArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) > n {
+			return usageErr("%s takes at most %d argument(s), got %d; see simpleota %s --help", cmd.Name(), n, len(args), cmd.Name())
+		}
+		return nil
+	}
+}
+
 // minArgs is cobra.MinimumNArgs with the usage exit code.
 func minArgs(n int) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
@@ -32,6 +50,13 @@ func minArgs(n int) cobra.PositionalArgs {
 		}
 		return nil
 	}
+}
+
+func firstArg(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	return args[0]
 }
 
 // groupRun makes a command group print its help when called bare and
