@@ -6,6 +6,8 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-30
+
 ### Added
 
 - `login` and `logout`: store a personal or project token from the dashboard
@@ -30,3 +32,6 @@ All notable changes to simpleota are documented here. The format follows
 - Static binaries for Linux, macOS and Windows on amd64 and arm64.
 - `install.sh` and `install.ps1`: one-line install and update scripts,
   published with each release, that verify the download's checksum.
+
+[Unreleased]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/wassie-dev/simpleOTA-cli/releases/tag/v0.1.0
