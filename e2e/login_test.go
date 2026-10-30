@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,11 +56,20 @@ func TestLoginWithBothTokenTypes(t *testing.T) {
 func TestLoginWithStaffToken(t *testing.T) {
 	c := newCLI(t)
 	token := env["SIMPLEOTA_DEV_STAFF_TOKEN"] + "\n"
-	if r := c.run(token, "login"); r.code != 2 || !strings.Contains(r.stderr, "staff account") || !strings.Contains(r.stderr, "--project <project-id>") {
+	unknownSlug := "by ID, not slug"
+	if serverHasMe(t) {
+		// The staff account's own project is listed; another account's
+		// project is found only by ID.
+		r := c.run(token, "login", "--json")
+		if r.code != 0 || !strings.Contains(r.stdout, `"slug": "`+env["SIMPLEOTA_DEV_STAFF_PROJECT_SLUG"]+`"`) {
+			t.Fatalf("own project: %+v", r)
+		}
+		unknownSlug = "is visible to this token"
+	} else if r := c.run(token, "login"); r.code != 2 || !strings.Contains(r.stderr, "staff account") || !strings.Contains(r.stderr, "--project <project-id>") {
 		t.Fatalf("no project: %+v", r)
 	}
-	if r := c.run(token, "login", "--project", env["SIMPLEOTA_DEV_PROJECT_SLUG"]); r.code != 2 || !strings.Contains(r.stderr, "by ID, not slug") {
-		t.Fatalf("slug: %+v", r)
+	if r := c.run(token, "login", "--project", env["SIMPLEOTA_DEV_PROJECT_SLUG"]); r.code != 2 || !strings.Contains(r.stderr, unknownSlug) {
+		t.Fatalf("another account's slug: %+v", r)
 	}
 	r := c.run(token, "login", "--project", env["SIMPLEOTA_DEV_PROJECT_ID"], "--json")
 	if r.code != 0 {
@@ -79,7 +89,7 @@ func TestLoginWithStaffToken(t *testing.T) {
 	if st.Auth.State != "valid" || st.Project.ID != env["SIMPLEOTA_DEV_PROJECT_ID"] || st.Project.Name == "" {
 		t.Fatalf("status: %+v", st)
 	}
-	if r := c.run("", "--project", "does-not-exist-"+uid(), "status"); r.code != 2 || !strings.Contains(r.stdout, "by ID, not slug") {
+	if r := c.run("", "--project", "does-not-exist-"+uid(), "status"); r.code != 2 || !strings.Contains(r.stdout, unknownSlug) {
 		t.Fatalf("status with an unknown project: %+v", r)
 	}
 }
@@ -107,4 +117,17 @@ func TestStatusReportsLogin(t *testing.T) {
 	if v.Auth.State != "valid" || v.Auth.TokenType != "project" || v.Project.ID != env["SIMPLEOTA_DEV_PROJECT_ID"] || v.APIURL != env["SIMPLEOTA_DEV_API_URL"] {
 		t.Fatalf("status: %+v", v)
 	}
+}
+
+// serverHasMe reports whether the dev server has GET /api/v1/me/.
+func serverHasMe(t *testing.T) bool {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, env["SIMPLEOTA_DEV_API_URL"]+"/api/v1/me/", nil)
+	req.Header.Set("Authorization", "Bearer "+env["SIMPLEOTA_DEV_STAFF_TOKEN"])
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }

@@ -182,8 +182,13 @@ func TestStatusStaffProjectHasName(t *testing.T) {
 		t.Fatalf("%+v %+v", r, v)
 	}
 	r = h.run("--project", "fleet", "status")
+	if r.code != ExitUsage || !strings.Contains(r.stdout, `no project with slug "fleet"`) {
+		t.Fatalf("staff --project slug of another account's project: %+v", r)
+	}
+	h.fake.NoMe = true
+	r = h.run("--project", "fleet", "status")
 	if r.code != ExitUsage || !strings.Contains(r.stdout, "by ID, not slug") {
-		t.Fatalf("staff --project slug: %+v", r)
+		t.Fatalf("staff --project slug without /me/: %+v", r)
 	}
 }
 

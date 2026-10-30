@@ -131,9 +131,23 @@ func projectPath(projectID string, rest ...string) string {
 	return p
 }
 
+// ListProjects lists the projects the token can see. The API lists projects
+// for a staff account only when given an owner, so for a staff token it asks
+// /me/ for the account and lists that account's own projects. A server
+// without /me/ leaves the 400 in place.
 func (c *Client) ListProjects(ctx context.Context) ([]Project, error) {
 	var out []Project
-	return out, c.get(ctx, "/api/v1/projects/", &out)
+	err := c.get(ctx, "/api/v1/projects/", &out)
+	var ae *Error
+	if !errors.As(err, &ae) || ae.StatusCode != http.StatusBadRequest {
+		return out, err
+	}
+	var me Me
+	if c.get(ctx, "/api/v1/me/", &me) != nil || me.Account == nil || !me.Account.IsStaff {
+		return nil, err
+	}
+	out = nil
+	return out, c.get(ctx, "/api/v1/projects/?owner_id="+strconv.Itoa(me.Account.ID), &out)
 }
 
 func (c *Client) GetProject(ctx context.Context, projectID string) (Project, error) {

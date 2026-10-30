@@ -76,9 +76,10 @@ simpleota deployment ramp <deployment-id> --percent 100
 ```
 
 `login` picks the project when the token can see exactly one. Otherwise pass
-`--project <slug>`. A staff account selects its project by ID: paste the
-Project ID from the project's page when `login` asks, or pass
-`--project <project-id>`.
+`--project <slug>`. A staff account sees its own projects, and opens any
+other project by ID with `--project <project-id>`. When the server cannot
+list a staff account's projects, `login` asks for the Project ID from the
+project's page.
 
 Run `simpleota keys generate` a second time for a backup key, keep that one
 offline, and pin both keys in your first signed firmware. Devices pin at most

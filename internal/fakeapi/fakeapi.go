@@ -30,8 +30,10 @@ const (
 	// StaffToken is a staff account's personal token: listing projects
 	// needs an owner filter, as on the real server.
 	StaffToken = "soto_pat_staffstaffstaffstaffstaff"
-	ProjectID  = "11111111-1111-4111-8111-111111111111"
-	OtherID    = "22222222-2222-4222-8222-222222222222"
+	// StaffAccountID is the staff token's account.
+	StaffAccountID = 7
+	ProjectID      = "11111111-1111-4111-8111-111111111111"
+	OtherID        = "22222222-2222-4222-8222-222222222222"
 	// StableChannelID is the ID of the project's only channel, stable.
 	StableChannelID = "33333333-3333-4333-8333-333333333333"
 )
@@ -75,6 +77,12 @@ type Server struct {
 	// CorruptUploads flips a byte of each uploaded binary, as if it changed
 	// in transit.
 	CorruptUploads bool
+	// StaffProjects are the staff account's own projects, listed for the
+	// staff token with owner_id set to StaffAccountID. Staff can still read
+	// every project by ID.
+	StaffProjects []api.Project
+	// NoMe makes /me/ answer 404, as on a server without it.
+	NoMe bool
 	// FailNext makes the next requests to a path fail with these statuses,
 	// one per request.
 	FailNext map[string][]int
@@ -88,9 +96,10 @@ func New(t *testing.T) *Server {
 		Projects: []api.Project{
 			{ID: ProjectID, Name: "Fleet", Slug: "fleet", DefaultFramework: "esp_idf"},
 		},
-		States:   map[string][]api.DeviceState{},
-		Requests: map[string]int{},
-		FailNext: map[string][]int{},
+		StaffProjects: []api.Project{},
+		States:        map[string][]api.DeviceState{},
+		Requests:      map[string]int{},
+		FailNext:      map[string][]int{},
 	}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	t.Cleanup(s.Close)
@@ -167,14 +176,25 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/")
 	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if path == "me/" && !s.NoMe {
+		s.me(w, token)
+		return
+	}
 	if !strings.HasSuffix(r.URL.Path, "/") || len(parts) == 0 || parts[0] != "projects" {
 		detail(w, http.StatusNotFound, "Not Found")
 		return
 	}
 	if len(parts) == 1 {
 		q := r.URL.Query()
-		if token == StaffToken && q.Get("email") == "" && q.Get("owner_id") == "" {
-			detail(w, http.StatusBadRequest, "staff project listing requires email or owner_id")
+		if token == StaffToken {
+			switch q.Get("owner_id") {
+			case "":
+				detail(w, http.StatusBadRequest, "staff project listing requires email or owner_id")
+			case strconv.Itoa(StaffAccountID):
+				writeJSON(w, http.StatusOK, s.StaffProjects)
+			default:
+				writeJSON(w, http.StatusOK, s.Projects)
+			}
 			return
 		}
 		writeJSON(w, http.StatusOK, s.Projects)
@@ -220,6 +240,17 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		s.transition(w, r, parts[3])
 	default:
 		detail(w, http.StatusNotFound, "Not Found")
+	}
+}
+
+func (s *Server) me(w http.ResponseWriter, token string) {
+	switch token {
+	case ProjectToken:
+		writeJSON(w, http.StatusOK, map[string]any{"token_type": "project", "project": s.Projects[0], "scopes": []string{"api"}})
+	case StaffToken:
+		writeJSON(w, http.StatusOK, map[string]any{"token_type": "personal", "account": api.Account{ID: StaffAccountID, Email: "staff@example.invalid", Username: "staff", IsStaff: true}})
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"token_type": "personal", "account": api.Account{ID: 1, Email: "me@example.invalid", Username: "me"}})
 	}
 }
 

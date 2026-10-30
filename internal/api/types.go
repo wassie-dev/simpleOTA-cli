@@ -18,6 +18,23 @@ type Project struct {
 	DefaultFramework string `json:"default_framework"`
 }
 
+// Me mirrors PersonalMeOut and ProjectMeOut: Account is set for a personal
+// token, Project for a project token.
+type Me struct {
+	TokenType string   `json:"token_type"`
+	Account   *Account `json:"account"`
+	Project   *Project `json:"project"`
+	Scopes    []string `json:"scopes"`
+}
+
+// Account mirrors UserIdentityOut.
+type Account struct {
+	ID       int    `json:"id"`
+	Email    string `json:"email"`
+	Username string `json:"username"`
+	IsStaff  bool   `json:"is_staff"`
+}
+
 // SigningKey mirrors SigningKeyOut.
 type SigningKey struct {
 	ID           string     `json:"id"`

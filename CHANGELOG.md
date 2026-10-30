@@ -18,8 +18,11 @@ All notable changes to simpleota are documented here. The format follows
 ### Fixed
 
 - `login` with a staff account's personal token failed with "this token
-  cannot list projects". It now asks for the Project ID on a terminal, and
-  otherwise explains that `--project <project-id>` is needed.
+  cannot list projects". The CLI now asks the API's `/me/` endpoint for the
+  account and lists its own projects; another account's project is opened
+  with `--project <project-id>`. On a server without `/me/`, `login` asks
+  for the Project ID on a terminal, and otherwise explains that
+  `--project <project-id>` is needed.
 - `deployment status --wait` exited 0 for a deployment completed before any
   device was offered the build. It now exits 4 with outcome `no_devices`.
 - `status --project <ref>` exited 0 without saying the project was not

@@ -60,8 +60,34 @@ func TestLoginPromptExplainsTokens(t *testing.T) {
 	}
 }
 
+func TestLoginStaffTokenListsOwnProjects(t *testing.T) {
+	h := newHarness(t)
+	h.stdin = fakeapi.StaffToken
+	r := h.run("login")
+	if r.code != ExitUsage || !strings.Contains(r.stderr, "no projects yet") || !strings.Contains(r.stderr, "--project <project-id>") {
+		t.Fatalf("staff account without projects: %+v", r)
+	}
+	h.stdin = fakeapi.StaffToken
+	if r := h.run("login", "--project", fakeapi.ProjectID); r.code != 0 {
+		t.Fatalf("another account's project by ID: %+v", r)
+	}
+
+	h.fake.StaffProjects = []api.Project{h.fake.Projects[0]}
+	h.stdin = fakeapi.StaffToken
+	if r := h.run("login"); r.code != 0 || !strings.Contains(r.stdout, "personal token for project fleet") {
+		t.Fatalf("staff account with one project: %+v", r)
+	}
+	h.stdin = fakeapi.StaffToken
+	if r := h.run("login", "--project", "fleet"); r.code != 0 {
+		t.Fatalf("own project by slug: %+v", r)
+	}
+}
+
+// A server without /me/ cannot name a staff token's account, so login asks
+// for the project ID.
 func TestLoginStaffTokenAsksForProjectID(t *testing.T) {
 	h := newHarness(t)
+	h.fake.NoMe = true
 	h.prompts = []string{fakeapi.StaffToken, " " + fakeapi.ProjectID + "\n"}
 	r := h.run("login")
 	if r.code != 0 || !strings.Contains(r.stderr, "staff account") || !strings.Contains(r.stdout, "personal token for project fleet") {
@@ -79,6 +105,7 @@ func TestLoginStaffTokenAsksForProjectID(t *testing.T) {
 
 func TestLoginStaffTokenWithoutTerminal(t *testing.T) {
 	h := newHarness(t)
+	h.fake.NoMe = true
 	h.stdin = fakeapi.StaffToken
 	if r := h.run("login"); r.code != ExitUsage || !strings.Contains(r.stderr, "--project <project-id>") {
 		t.Fatalf("no project: %+v", r)

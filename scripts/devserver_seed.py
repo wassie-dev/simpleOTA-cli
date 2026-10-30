@@ -25,8 +25,9 @@ profile.plan = Plan.objects.get(code="pro")
 profile.email_verified = True
 profile.save(update_fields=["plan", "email_verified", "updated_at"])
 
-# A staff account with no projects of its own. The API lists projects for
-# staff only when given an owner, so the CLI must log it in by project ID.
+# A staff account with one project of its own. The API lists projects for
+# staff only when given an owner, so the CLI asks /me/ for the account, or
+# on a server without /me/ logs it in by project ID.
 staff, created = User.objects.get_or_create(
     username="cli-dev-staff",
     defaults={"email": "cli-dev-staff@example.invalid", "is_staff": True},
@@ -43,6 +44,11 @@ project, _ = Project.objects.get_or_create(
 ReleaseChannel.objects.get_or_create(
     project=project, name="stable", defaults={"is_default": True}
 )
+staff_project, _ = Project.objects.get_or_create(
+    owner=staff,
+    slug="cli-dev-staff",
+    defaults={"name": "CLI dev staff", "default_framework": "esp_idf"},
+)
 
 now = timezone.now()
 PersonalAPIToken.objects.filter(user__in=[user, staff], revoked_at__isnull=True).update(revoked_at=now)
@@ -57,5 +63,6 @@ print(f"SIMPLEOTA_DEV_PROJECT_ID={project.id}")
 print(f"SIMPLEOTA_DEV_PROJECT_SLUG={project.slug}")
 print(f"SIMPLEOTA_DEV_PERSONAL_TOKEN={pat}")
 print(f"SIMPLEOTA_DEV_STAFF_TOKEN={staff_pat}")
+print(f"SIMPLEOTA_DEV_STAFF_PROJECT_SLUG={staff_project.slug}")
 print(f"SIMPLEOTA_DEV_PROJECT_TOKEN={api_token}")
 print(f"SIMPLEOTA_DEV_DEVICE_TOKEN={device_token}")

@@ -27,8 +27,10 @@ pipe it on stdin. The token is checked against the API, kept in the OS
 keychain (or a 0600 file when there is none), and its project is remembered.
 
 The project is picked automatically when the token can see only one;
-otherwise pass --project. A staff account selects its project by ID: paste
-the Project ID from the project's page when asked, or pass --project <id>.
+otherwise pass --project. A staff account sees its own projects, and opens
+any other project by ID with --project <id>. When the server cannot list a
+staff account's projects, login asks for the Project ID from the project's
+page.
 
 SIMPLEOTA_TOKEN, when set, takes precedence over the stored token.`,
 		Example: `  simpleota login
@@ -155,7 +157,7 @@ func (a *App) loginProject(ctx context.Context, client api.API, kind credentials
 	case len(projects) == 1:
 		return projects[0], nil
 	case len(projects) == 0 && kind == credentials.KindPersonal:
-		return api.Project{}, errors.New("this account has no projects yet; create one in the dashboard, then log in again")
+		return api.Project{}, usageErr("this account has no projects yet; create one in the dashboard and log in again, or pass --project <project-id> for a project you can open")
 	case len(projects) == 0:
 		return api.Project{}, errors.New("this token cannot see any project")
 	default:
@@ -163,8 +165,9 @@ func (a *App) loginProject(ctx context.Context, client api.API, kind credentials
 	}
 }
 
-// staffProject asks a staff account for its project ID, because the API
-// lists projects for staff only when given an owner.
+// staffProject asks a staff account for its project ID, for a server that
+// lists projects for staff only when given an owner and has no /me/ to name
+// the account.
 func (a *App) staffProject(ctx context.Context, client api.API, apiURL string) (api.Project, error) {
 	if !a.StdinIsTerminal || a.PromptLine == nil {
 		return api.Project{}, usageErr("this token belongs to a staff account, which the API does not list projects for; pass --project <project-id>, copying the Project ID from the project's page at %s", apiURL)
