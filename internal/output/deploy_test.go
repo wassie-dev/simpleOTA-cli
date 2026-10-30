@@ -25,22 +25,22 @@ func TestRolloutGolden(t *testing.T) {
 	golden(t, "rollout.txt", render(t, false, func(p Printer) error { return p.Rollout(v) }))
 }
 
-func TestStatusGolden(t *testing.T) {
+func TestDeploymentStatusGolden(t *testing.T) {
 	s := deploy.Summarize(dep, []api.DeviceState{
 		{DeviceID: "d1", FinalStatus: "confirmed", AssignedToRollout: true},
 		{DeviceID: "d2", FinalStatus: "downloaded", AssignedToRollout: true},
 		{DeviceID: "d3", FinalStatus: "rolled_back", AssignedToRollout: true, StatusReason: "task_wdt"},
 	})
-	v := NewStatusView(s, deploy.Evaluate(s))
-	golden(t, "status.json", render(t, true, func(p Printer) error { return p.Status(v) }))
-	golden(t, "status.txt", render(t, false, func(p Printer) error { return p.Status(v) }))
+	v := NewDeploymentStatusView(s, deploy.Evaluate(s))
+	golden(t, "deployment_status.json", render(t, true, func(p Printer) error { return p.DeploymentStatus(v) }))
+	golden(t, "deployment_status.txt", render(t, false, func(p Printer) error { return p.DeploymentStatus(v) }))
 }
 
-func TestStatusEmptyFailuresIsArray(t *testing.T) {
+func TestDeploymentStatusEmptyFailuresIsArray(t *testing.T) {
 	active := dep
 	active.State = api.StateActive
-	v := NewStatusView(deploy.Summarize(active, nil), deploy.OutcomeInProgress)
-	golden(t, "status_empty.json", render(t, true, func(p Printer) error { return p.Status(v) }))
+	v := NewDeploymentStatusView(deploy.Summarize(active, nil), deploy.OutcomeInProgress)
+	golden(t, "deployment_status_empty.json", render(t, true, func(p Printer) error { return p.DeploymentStatus(v) }))
 }
 
 func TestNoColorWhenDisabled(t *testing.T) {

@@ -26,8 +26,11 @@ Keep a second key offline and pin it in your firmware as the backup.`
 
 func (a *App) keysCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "keys",
-		Short: "Create and export firmware signing keys",
+		Use:     "keys",
+		Aliases: []string{"key"},
+		Short:   "Create and export firmware signing keys",
+		Args:    cobra.ArbitraryArgs,
+		RunE:    groupRun,
 	}
 	cmd.AddCommand(a.keysGenerateCommand(), a.keysExportCommand())
 	return cmd

@@ -11,11 +11,13 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/credentials"
 	"github.com/wassie-dev/simpleOTA-cli/internal/fakeapi"
+	"github.com/wassie-dev/simpleOTA-cli/internal/fakerelease"
 )
 
 type harness struct {
 	t         *testing.T
 	fake      *fakeapi.Server
+	release   *fakerelease.Server
 	configDir string
 	env       map[string]string
 	stdin     string
@@ -27,6 +29,7 @@ func newHarness(t *testing.T) *harness {
 	return &harness{
 		t:         t,
 		fake:      fake,
+		release:   fakerelease.New(t, "0.2.0", "linux", "amd64", []byte("new")),
 		configDir: t.TempDir(),
 		env:       map[string]string{"SIMPLEOTA_API_URL": fake.URL},
 	}
@@ -42,12 +45,15 @@ func (h *harness) run(args ...string) result {
 	h.t.Helper()
 	var out, errBuf bytes.Buffer
 	prompts := append([]string(nil), h.prompts...)
+	src := h.release.Source()
 	a := &App{
-		In:     strings.NewReader(h.stdin),
-		Out:    &out,
-		Err:    &errBuf,
-		Getenv: func(k string) string { return h.env[k] },
-		Store:  credentials.File{Path: filepath.Join(h.configDir, "credentials.json")},
+		CurrentVersion: func() string { return "0.1.0" },
+		UpdateSource:   &src,
+		In:             strings.NewReader(h.stdin),
+		Out:            &out,
+		Err:            &errBuf,
+		Getenv:         func(k string) string { return h.env[k] },
+		Store:          credentials.File{Path: filepath.Join(h.configDir, "credentials.json")},
 		NewAPI: func(u, tok string) api.API {
 			return api.New(u, tok, "test", api.WithSleep(func(context.Context, time.Duration) error { return nil }))
 		},

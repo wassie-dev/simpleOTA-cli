@@ -182,7 +182,7 @@ func (s Service) Release(ctx context.Context, o Options) (Result, error) {
 	if err != nil {
 		var ae *api.Error
 		if !errors.As(err, &ae) && !errors.Is(err, context.Canceled) {
-			return res, fmt.Errorf("%w; the upload may still have created a build, so check with simpleota status before releasing again (a retry uses another build number)", err)
+			return res, fmt.Errorf("%w; the upload may still have created a build, so check with simpleota deployment status before releasing again (a retry uses another build number)", err)
 		}
 		return res, err
 	}
@@ -240,7 +240,7 @@ func (s Service) verifyChecksum(ctx context.Context, out api.ReleaseResult, want
 		}
 		_, cancelErr := s.API.TransitionDeployment(ctx, s.ProjectID, out.DeploymentID, api.Transition{Action: "cancel"})
 		if cancelErr != nil {
-			return false, fmt.Errorf("%w: the server stored sha256 %s but %s was sent, and cancelling deployment %s failed (%v); cancel it now with simpleota rollout cancel %s",
+			return false, fmt.Errorf("%w: the server stored sha256 %s but %s was sent, and cancelling deployment %s failed (%v); cancel it now with simpleota deployment cancel %s",
 				ErrChecksumMismatch, a.ChecksumSHA256, want, out.DeploymentID, cancelErr, out.DeploymentID)
 		}
 		return false, fmt.Errorf("%w: the server stored sha256 %s but %s was sent; deployment %s was cancelled",

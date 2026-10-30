@@ -1,4 +1,4 @@
 Released build 42 (signed with key prod-2026)
   deployment  5f0c2b1e-1d2c-4b7a-9a3e-0123456789ab (active, channel stable)
   sha256      ab12 (1024 bytes, verified)
-Watch it with: simpleota status 5f0c2b1e-1d2c-4b7a-9a3e-0123456789ab --wait
+Watch it with: simpleota deployment status 5f0c2b1e-1d2c-4b7a-9a3e-0123456789ab --wait

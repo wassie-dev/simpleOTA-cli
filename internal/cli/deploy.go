@@ -15,28 +15,55 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
 )
 
-func (a *App) rolloutCommand() *cobra.Command {
+func (a *App) deploymentCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "deployment",
+		Aliases: []string{"deployments"},
+		Short:   "Show and change deployments",
+		Long: `A deployment offers one build to a project's devices. release creates one;
+these commands show its progress and change its state.
+
+There is no rollback: SimpleOTA never offers a build at or below what a
+device runs, so to go back you release the previous source again as a
+new, higher build.`,
+		Args: cobra.ArbitraryArgs,
+		RunE: groupRun,
+	}
+	cmd.AddCommand(a.deploymentStatusCommand())
+	for _, action := range deploy.Actions {
+		cmd.AddCommand(a.deploymentActionCommand(action))
+	}
+	return cmd
+}
+
+var actionHelp = map[string]string{
+	deploy.ActionRamp:     "Offer the build to a larger share of devices (it cannot go down)",
+	deploy.ActionPause:    "Stop offering the build until the deployment is resumed",
+	deploy.ActionResume:   "Offer the build again after a pause",
+	deploy.ActionComplete: "Mark the deployment finished",
+	deploy.ActionCancel:   "Stop the deployment for good",
+}
+
+func (a *App) deploymentActionCommand(action string) *cobra.Command {
 	var percent int
 	cmd := &cobra.Command{
-		Use:   "rollout <ramp|pause|resume|complete|cancel> <deployment-id>",
-		Short: "Ramp, pause, resume, complete or cancel a deployment",
-		Long: `Change a deployment's state. ramp raises the share of devices offered the
-build (it cannot go down). There is no rollback: SimpleOTA never offers a
-build at or below what a device runs, so to go back you release the
-previous source again as a new, higher build.`,
-		Example: `  simpleota rollout ramp 5f0c2b1e-... --percent 50
-  simpleota rollout pause 5f0c2b1e-...`,
-		ValidArgs: deploy.Actions,
-		Args:      exactArgs(2),
+		Use:     action + " <deployment-id>",
+		Short:   actionHelp[action],
+		Example: "  simpleota deployment " + action + " 5f0c2b1e-...",
+		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var pct *int
 			if cmd.Flags().Changed("percent") {
 				pct = &percent
 			}
-			return a.runRollout(cmd.Context(), args[0], args[1], pct)
+			return a.runRollout(cmd.Context(), action, args[0], pct)
 		},
 	}
-	cmd.Flags().IntVar(&percent, "percent", 0, "new rollout percentage (ramp only)")
+	if action == deploy.ActionRamp {
+		cmd.Use = "ramp <deployment-id> --percent <n>"
+		cmd.Example = "  simpleota deployment ramp 5f0c2b1e-... --percent 50"
+		cmd.Flags().IntVar(&percent, "percent", 0, "new rollout percentage (required)")
+	}
 	return cmd
 }
 
@@ -46,7 +73,7 @@ func (a *App) runRollout(ctx context.Context, action, deploymentID string, perce
 		return usageErr("%v", err)
 	}
 	if !api.IsUUID(deploymentID) {
-		return usageErr("%q is not a deployment ID; release and status print it", deploymentID)
+		return usageErr("%q is not a deployment ID; release and deployment status print it", deploymentID)
 	}
 	s, err := a.openSession()
 	if err != nil {
@@ -67,7 +94,7 @@ func (a *App) runRollout(ctx context.Context, action, deploymentID string, perce
 	})
 }
 
-func (a *App) statusCommand() *cobra.Command {
+func (a *App) deploymentStatusCommand() *cobra.Command {
 	var wait bool
 	var timeout, interval time.Duration
 	cmd := &cobra.Command{
@@ -81,15 +108,15 @@ has confirmed (exit 0). Exit 4 if a device fails or rolls back or the
 deployment is paused, cancelled or not started, and 5 on timeout. Devices
 count once they have checked in and been offered the build. Network and
 gateway errors while polling are retried until the timeout.`,
-		Example: `  simpleota status
-  simpleota status 5f0c2b1e-... --wait --timeout 30m`,
+		Example: `  simpleota deployment status
+  simpleota deployment status 5f0c2b1e-... --wait --timeout 30m`,
 		Args: maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := ""
 			if len(args) == 1 {
 				id = args[0]
 			}
-			return a.runStatus(cmd.Context(), id, wait, timeout, interval)
+			return a.runDeploymentStatus(cmd.Context(), id, wait, timeout, interval)
 		},
 	}
 	fl := cmd.Flags()
@@ -99,7 +126,7 @@ gateway errors while polling are retried until the timeout.`,
 	return cmd
 }
 
-func (a *App) runStatus(ctx context.Context, deploymentID string, wait bool, timeout, interval time.Duration) error {
+func (a *App) runDeploymentStatus(ctx context.Context, deploymentID string, wait bool, timeout, interval time.Duration) error {
 	if deploymentID != "" && !api.IsUUID(deploymentID) {
 		return usageErr("%q is not a deployment ID", deploymentID)
 	}
@@ -132,7 +159,7 @@ func (a *App) runStatus(ctx context.Context, deploymentID string, wait bool, tim
 			return deploymentErr(err, deploymentID)
 		}
 		outcome := deploy.Evaluate(sum)
-		return p.Status(output.NewStatusView(sum, outcome))
+		return p.DeploymentStatus(output.NewDeploymentStatusView(sum, outcome))
 	}
 
 	w := deploy.Waiter{
@@ -151,7 +178,7 @@ func (a *App) runStatus(ctx context.Context, deploymentID string, wait bool, tim
 	if err != nil {
 		return deploymentErr(err, deploymentID)
 	}
-	if err := p.Status(output.NewStatusView(sum, outcome)); err != nil {
+	if err := p.DeploymentStatus(output.NewDeploymentStatusView(sum, outcome)); err != nil {
 		return err
 	}
 	switch outcome {

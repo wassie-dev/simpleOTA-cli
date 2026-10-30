@@ -49,3 +49,28 @@ func TestLoginWithBothTokenTypes(t *testing.T) {
 		t.Fatalf("bad token: %+v", r)
 	}
 }
+
+func TestStatusReportsLogin(t *testing.T) {
+	c := newCLI(t)
+	if r := c.run("", "status"); r.code != 3 {
+		t.Fatalf("status before login: %+v", r)
+	}
+	if r := c.run(env["SIMPLEOTA_DEV_PROJECT_TOKEN"]+"\n", "login"); r.code != 0 {
+		t.Fatalf("login: %+v", r)
+	}
+	r := c.run("", "status", "--json")
+	if r.code != 0 {
+		t.Fatalf("status after login: %+v", r)
+	}
+	v := decode[struct {
+		APIURL string `json:"api_url"`
+		Auth   struct {
+			State     string `json:"state"`
+			TokenType string `json:"token_type"`
+		} `json:"auth"`
+		Project struct{ ID string } `json:"project"`
+	}](t, r.stdout)
+	if v.Auth.State != "valid" || v.Auth.TokenType != "project" || v.Project.ID != env["SIMPLEOTA_DEV_PROJECT_ID"] || v.APIURL != env["SIMPLEOTA_DEV_API_URL"] {
+		t.Fatalf("status: %+v", v)
+	}
+}

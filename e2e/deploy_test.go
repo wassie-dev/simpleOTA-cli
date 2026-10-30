@@ -78,28 +78,28 @@ func TestRolloutLifecycle(t *testing.T) {
 		} `json:"deployment"`
 		NextStep string `json:"next_step"`
 	}
-	r := decode[rolloutOut](t, c.mustRun("rollout", "ramp", id, "--percent", "50", "--json").stdout)
+	r := decode[rolloutOut](t, c.mustRun("deployment", "ramp", id, "--percent", "50", "--json").stdout)
 	if r.Deployment.RolloutPercentage != 50 {
 		t.Fatalf("ramp: %+v", r)
 	}
-	if res := c.run("", "rollout", "ramp", id, "--percent", "20"); res.code != 1 || !strings.Contains(res.stderr, "downward") {
+	if res := c.run("", "deployment", "ramp", id, "--percent", "20"); res.code != 1 || !strings.Contains(res.stderr, "downward") {
 		t.Fatalf("ramp down: %+v", res)
 	}
-	r = decode[rolloutOut](t, c.mustRun("rollout", "pause", id, "--json").stdout)
+	r = decode[rolloutOut](t, c.mustRun("deployment", "pause", id, "--json").stdout)
 	if r.Deployment.State != "paused" || !strings.Contains(r.NextStep, "new build") {
 		t.Fatalf("pause: %+v", r)
 	}
-	r = decode[rolloutOut](t, c.mustRun("rollout", "resume", id, "--json").stdout)
+	r = decode[rolloutOut](t, c.mustRun("deployment", "resume", id, "--json").stdout)
 	if r.Deployment.State != "active" {
 		t.Fatalf("resume: %+v", r)
 	}
-	r = decode[rolloutOut](t, c.mustRun("rollout", "complete", id, "--json").stdout)
+	r = decode[rolloutOut](t, c.mustRun("deployment", "complete", id, "--json").stdout)
 	if r.Deployment.State != "completed" {
 		t.Fatalf("complete: %+v", r)
 	}
 
 	second := release(t, c)
-	r = decode[rolloutOut](t, c.mustRun("rollout", "cancel", second.DeploymentID, "--json").stdout)
+	r = decode[rolloutOut](t, c.mustRun("deployment", "cancel", second.DeploymentID, "--json").stdout)
 	if r.Deployment.State != "cancelled" || r.NextStep == "" {
 		t.Fatalf("cancel: %+v", r)
 	}
@@ -109,7 +109,7 @@ func TestRolloutLifecycle(t *testing.T) {
 func waitAsync(c *cli, id string, timeout string) <-chan result {
 	ch := make(chan result, 1)
 	go func() {
-		ch <- c.run("", "status", id, "--wait", "--timeout", timeout, "--interval", "1s", "--json")
+		ch <- c.run("", "deployment", "status", id, "--wait", "--timeout", timeout, "--interval", "1s", "--json")
 	}()
 	return ch
 }
@@ -169,7 +169,7 @@ func TestStatusWaitFailsWhenRollbackAutoPauses(t *testing.T) {
 	if r.code != 4 || outcome(t, r) != "device_failed" {
 		t.Fatalf("%+v", r)
 	}
-	st := c.mustRun("status", out.DeploymentID, "--json")
+	st := c.mustRun("deployment", "status", out.DeploymentID, "--json")
 	if !strings.Contains(st.stdout, `"state": "paused"`) {
 		t.Fatalf("deployment should be auto-paused: %s", st.stdout)
 	}
@@ -178,7 +178,7 @@ func TestStatusWaitFailsWhenRollbackAutoPauses(t *testing.T) {
 func TestStatusWaitFailsWhenPaused(t *testing.T) {
 	c := ciCLI(t)
 	out := release(t, c)
-	c.mustRun("rollout", "pause", out.DeploymentID)
+	c.mustRun("deployment", "pause", out.DeploymentID)
 	r := <-waitAsync(c, out.DeploymentID, "30s")
 	if r.code != 4 || outcome(t, r) != "stopped" {
 		t.Fatalf("%+v", r)
@@ -198,13 +198,13 @@ func TestStatusWaitTimesOut(t *testing.T) {
 	}
 }
 
-func TestStatusAfterLogoutIsAuthError(t *testing.T) {
+func TestDeploymentStatusAfterLogoutIsAuthError(t *testing.T) {
 	c := newCLI(t)
 	if r := c.run(env["SIMPLEOTA_DEV_PROJECT_TOKEN"]+"\n", "login"); r.code != 0 {
 		t.Fatalf("login: %+v", r)
 	}
 	c.mustRun("logout")
-	if r := c.run("", "status"); r.code != 3 {
-		t.Fatalf("status after logout: %+v", r)
+	if r := c.run("", "deployment", "status"); r.code != 3 {
+		t.Fatalf("deployment status after logout: %+v", r)
 	}
 }

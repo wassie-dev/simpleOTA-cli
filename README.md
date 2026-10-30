@@ -24,7 +24,8 @@ The script downloads the release for your OS and CPU, checks it against the
 release's `checksums.txt`, and installs it without sudo: on Linux and macOS
 where `simpleota` already is, else `/usr/local/bin` if writable, else
 `~/.local/bin`; on Windows in `%LOCALAPPDATA%\Programs\simpleota`, which it
-adds to your user PATH. Run the same command again to update.
+adds to your user PATH. Run the same command again, or `simpleota update`,
+to update.
 
 | Variable | Use |
 | --- | --- |
@@ -57,6 +58,7 @@ on macOS, `%APPDATA%\simpleota` on Windows).
 ```bash
 # 1. Paste a personal token from the dashboard (kept in the OS keychain)
 simpleota login
+simpleota status
 
 # 2. Create a signing key; the private key stays here, encrypted
 simpleota keys generate --key-id prod-2026
@@ -65,8 +67,8 @@ simpleota keys generate --key-id prod-2026
 simpleota release build/app.bin --version-label 1.0.0 --chip esp32s3 --percent 10
 
 # 4. Watch it, then widen it
-simpleota status --wait --timeout 30m
-simpleota rollout ramp <deployment-id> --percent 100
+simpleota deployment status --wait --timeout 30m
+simpleota deployment ramp <deployment-id> --percent 100
 ```
 
 Run `simpleota keys generate` a second time for a backup key, keep that one
@@ -79,27 +81,34 @@ new, higher build number.
 
 ## Commands
 
+Commands about the CLI itself sit at the top level; commands about a
+SimpleOTA resource sit under its name.
+
 | Command | What it does |
 | --- | --- |
+| `status` | Show the CLI's version and available update, login, project and signing key |
 | `login` / `logout` | Store or remove a personal (`soto_pat_`) or project (`soto_proj_`) token |
+| `update [--check] [--version <v>]` | Replace this binary with the latest (or a given) release, after checking its SHA-256 |
+| `release <bin> --version-label <v> --chip <c>` | Sign, upload and deploy in one call, then verify the stored SHA-256. Never retried: each upload uses a build number |
+| `deployment status [id] [--wait]` | Show a deployment's device progress; `--wait` gates CI |
+| `deployment ramp <id> --percent <n>` | Offer the build to more devices |
+| `deployment pause\|resume\|complete\|cancel <id>` | Change a deployment's state |
 | `keys generate --key-id <id>` | Create a key locally and register its public key (personal token only) |
 | `keys export [--format encrypted\|pem]` | Print the private key for a CI secret |
-| `release <bin> --version-label <v> --chip <c>` | Sign, upload and deploy in one call, then verify the stored SHA-256. Never retried: each upload uses a build number |
-| `rollout ramp\|pause\|resume\|complete\|cancel <id>` | Change a deployment's state |
-| `status [id] [--wait]` | Show progress; `--wait` gates CI |
 
 Global flags: `--json` ([schema](docs/json.md)), `--api-url`, `--project`.
-`--wait` exits 0 once every device the current step reached has confirmed,
-and counts a device once it has checked in and been offered the build.
+`deployment status --wait` exits 0 once every device the current step reached
+has confirmed, and counts a device once it has checked in and been offered
+the build.
 
 | Exit code | Meaning |
 | --- | --- |
 | 0 | OK |
-| 1 | Error |
+| 1 | Error (for `status`: the API could not be reached) |
 | 2 | Usage error |
-| 3 | Not logged in, or the token was rejected |
+| 3 | Not logged in, or the token was rejected (`status` too) |
 | 4 | A device failed or rolled back, or the deployment is paused, cancelled or not started |
-| 5 | `--wait` timed out |
+| 5 | `deployment status --wait` timed out |
 
 | Variable | Use |
 | --- | --- |
@@ -109,6 +118,7 @@ and counts a device once it has checked in and been offered the build.
 | `SIMPLEOTA_API_URL` | API URL (default `https://simpleota.com`) |
 | `SIMPLEOTA_CONFIG_DIR` | Config directory (default: the OS user config dir) |
 | `SIMPLEOTA_NO_KEYRING` | Store the token in a 0600 file instead of the keychain |
+| `SIMPLEOTA_DOWNLOAD_URL` | Mirror for `update` downloads (https, or http on localhost) |
 | `NO_COLOR` | Disable colour |
 
 ## CI
@@ -127,7 +137,7 @@ GitHub Actions:
     SIMPLEOTA_SIGNING_KEY_PASSPHRASE: ${{ secrets.SIMPLEOTA_SIGNING_KEY_PASSPHRASE }}
   run: |
     ID=$(simpleota release build/app.bin --version-label "${GITHUB_REF_NAME}" --chip esp32s3 --percent 10 --json | jq -r .deployment_id)
-    simpleota status "$ID" --wait --timeout 30m
+    simpleota deployment status "$ID" --wait --timeout 30m
 ```
 
 GitLab CI:
@@ -136,7 +146,7 @@ GitLab CI:
 release:
   script:
     - ID=$(simpleota release build/app.bin --version-label "$CI_COMMIT_TAG" --chip esp32s3 --percent 10 --json | jq -r .deployment_id)
-    - simpleota status "$ID" --wait --timeout 30m
+    - simpleota deployment status "$ID" --wait --timeout 30m
 ```
 
 ## Development

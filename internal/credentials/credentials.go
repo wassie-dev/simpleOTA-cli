@@ -167,18 +167,33 @@ func (s Fallback) Name() string { return s.Primary.Name() }
 // no token either, so a locked or broken keychain is not mistaken for a
 // logged-out state.
 func (s Fallback) Get(apiURL string) (string, error) {
+	t, _, err := s.GetWhere(apiURL)
+	return t, err
+}
+
+// GetWhere is Get that also names the store the token came from.
+func (s Fallback) GetWhere(apiURL string) (string, string, error) {
 	t, err := s.Primary.Get(apiURL)
 	if err == nil {
-		return t, nil
+		return t, s.Primary.Name(), nil
 	}
 	t, errS := s.Secondary.Get(apiURL)
 	if errS == nil {
-		return t, nil
+		return t, s.Secondary.Name(), nil
 	}
 	if !errors.Is(err, ErrNotFound) {
-		return "", fmt.Errorf("reading %s: %w", s.Primary.Name(), err)
+		return "", "", fmt.Errorf("reading %s: %w", s.Primary.Name(), err)
 	}
-	return "", errS
+	return "", "", errS
+}
+
+// Lookup reads a token from any store and names where it was found.
+func Lookup(s Store, apiURL string) (token, where string, err error) {
+	if fb, ok := s.(Fallback); ok {
+		return fb.GetWhere(apiURL)
+	}
+	token, err = s.Get(apiURL)
+	return token, s.Name(), err
 }
 
 func (s Fallback) Set(apiURL, token string) error {

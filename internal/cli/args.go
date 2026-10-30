@@ -23,3 +23,12 @@ func exactArgs(n int) cobra.PositionalArgs {
 		return nil
 	}
 }
+
+// groupRun makes a command group print its help when called bare and
+// reject an unknown subcommand with the usage exit code.
+func groupRun(cmd *cobra.Command, args []string) error {
+	if len(args) > 0 {
+		return usageErr("unknown command %q for %q; see %s --help", args[0], cmd.CommandPath(), cmd.CommandPath())
+	}
+	return cmd.Help()
+}

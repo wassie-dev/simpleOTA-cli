@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Test install.sh against a goreleaser snapshot served from a local mirror.
+# Test install.sh and simpleota update against a goreleaser snapshot served
+# from a local mirror.
 #
 #   goreleaser release --snapshot --clean --skip=publish
 #   scripts/test-install.sh
@@ -54,6 +55,12 @@ echo "ok   checksum mismatch refused, binary untouched"
 if out="$(run 1.2.3)"; then fail "missing version accepted: $out"; fi
 grep -q "download failed" <<<"$out" || fail "missing version output: $out"
 echo "ok   unknown version refused"
+
+(cd "$ROOT" && go build -ldflags "-X github.com/wassie-dev/simpleOTA-cli/internal/version.Version=0.0.1" -o "$DIR/simpleota" ./cmd/simpleota)
+out="$("$DIR/simpleota" update --version "$VERSION" 2>&1)" || fail "self-update: $out"
+grep -q "Updated simpleota from 0.0.1 to $VERSION" <<<"$out" || fail "self-update output: $out"
+"$DIR/simpleota" --version | grep -q "simpleota version $VERSION" || fail "self-updated binary version"
+echo "ok   simpleota update replaces its own binary"
 
 if out="$(SIMPLEOTA_DOWNLOAD_URL=http://example.com SIMPLEOTA_VERSION="$VERSION" sh "$ROOT/install.sh" 2>&1)"; then fail "plain http mirror accepted"; fi
 grep -q "must be https" <<<"$out" || fail "http mirror output: $out"

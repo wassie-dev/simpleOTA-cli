@@ -7,11 +7,44 @@ their names and types. Times are RFC 3339 in UTC.
 ## Errors
 
 A failed command prints this object to stdout and exits with the code it
-contains. `status --wait` prints its status object first, then the error.
+contains. `deployment status --wait` prints its status object first, then
+the error. `status` prints only its status object and sets the exit code.
 
 ```json
 { "error": "not logged in to https://simpleota.com; run simpleota login, or set SIMPLEOTA_TOKEN", "exit_code": 3 }
 ```
+
+## status
+
+```json
+{
+  "version": "0.1.0",
+  "latest_version": "0.2.0",
+  "update_available": true,
+  "api_url": "https://simpleota.com",
+  "config_dir": "/home/me/.config/simpleota",
+  "auth": { "state": "valid", "token_type": "personal", "source": "the OS keychain" },
+  "project": { "id": "…", "slug": "fleet", "name": "Fleet" },
+  "signing_key": { "source": "file", "path": "/home/me/.config/simpleota/keys/prod-2026.key" }
+}
+```
+
+`latest_version` is empty and `update_error` says why when the check for a
+newer release fails. `auth.state` is `valid`, `not_logged_in`, `rejected` or
+`unreachable`, and `auth.error` gives the reason when there is one. `auth.source` is
+`SIMPLEOTA_TOKEN`, `the OS keychain` or the path of the token file.
+`project` is null when none is selected. `signing_key.source` is `file`,
+`env` (SIMPLEOTA_SIGNING_KEY) or `none`; `signing_key.error` is set when the
+file is missing or readable by other users.
+
+## update
+
+```json
+{ "current": "0.1.0", "latest": "0.2.0", "update_available": true, "updated": true, "path": "/usr/local/bin/simpleota" }
+```
+
+With `--check`, `updated` is false and `path` is omitted. `latest` is the
+version installed or checked: the newest release, or `--version`.
 
 ## login
 
@@ -79,7 +112,7 @@ error, and the new deployment is cancelled.
 
 ## Deployment object
 
-`rollout` and `status` embed this object.
+The `deployment` commands embed this object.
 
 ```json
 {
@@ -97,7 +130,7 @@ error, and the new deployment is cancelled.
 
 `state` is `draft`, `active`, `paused`, `completed` or `cancelled`.
 
-## rollout
+## deployment ramp, pause, resume, complete, cancel
 
 ```json
 { "action": "pause", "deployment": { … }, "next_step": "To ship a fix or go back, …" }
@@ -105,7 +138,7 @@ error, and the new deployment is cancelled.
 
 `next_step` is present when the deployment is paused or cancelled.
 
-## status
+## deployment status
 
 ```json
 {

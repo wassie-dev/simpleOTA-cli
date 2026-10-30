@@ -16,8 +16,14 @@ All notable changes to simpleota are documented here. The format follows
 - `keys export`: print the private key, encrypted or as PEM, for a CI secret.
 - `release`: sign, upload and deploy a firmware binary in one call, then
   check the SHA-256 the server stored.
-- `rollout`: ramp, pause, resume, complete or cancel a deployment.
-- `status`: show a deployment's device progress; `--wait` gates CI on it.
+- `deployment status`: show a deployment's device progress; `--wait` gates
+  CI on it.
+- `deployment ramp`, `pause`, `resume`, `complete` and `cancel`: change a
+  deployment's state.
+- `status`: show the CLI's version and any newer release, the login and
+  whether its token works, the project, and the signing key.
+- `update`: replace the binary with the latest or a given release after
+  checking its SHA-256.
 - `--json` output with a documented schema, and fixed exit codes.
 - Static binaries for Linux, macOS and Windows on amd64 and arm64.
 - `install.sh` and `install.ps1`: one-line install and update scripts,

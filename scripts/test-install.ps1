@@ -1,4 +1,5 @@
-# Test install.ps1 against a goreleaser snapshot served from a local mirror.
+# Test install.ps1 and simpleota update against a goreleaser snapshot served
+# from a local mirror.
 #
 #   goreleaser release --snapshot --clean --skip=publish
 #   pwsh scripts/test-install.ps1
@@ -42,6 +43,16 @@ try {
     if ($out -notmatch "Installed simpleota $([regex]::Escape($version))") { Fail "replace unrunnable binary: $out" }
     if ((& $exe --version) -notmatch [regex]::Escape($version)) { Fail 'replaced binary version' }
     Write-Host 'ok   update replaces a broken binary'
+
+    Push-Location $root
+    try {
+        go build -ldflags '-X github.com/wassie-dev/simpleOTA-cli/internal/version.Version=0.0.1' -o $exe ./cmd/simpleota
+        if ($LASTEXITCODE -ne 0) { Fail 'building the old binary' }
+    } finally { Pop-Location }
+    $out = (& $exe update --version $version 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0 -or $out -notmatch "Updated simpleota from 0\.0\.1 to $([regex]::Escape($version))") { Fail "self-update: $out" }
+    if ((& $exe --version) -notmatch [regex]::Escape($version)) { Fail 'self-updated binary version' }
+    Write-Host 'ok   simpleota update replaces its own binary'
 
     $failed = $false
     try { Install '1.2.3' | Out-Null } catch { $failed = $true }

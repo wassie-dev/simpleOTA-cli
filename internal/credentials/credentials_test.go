@@ -175,3 +175,21 @@ func TestFallbackReportsKeychainErrorWhenFileIsEmpty(t *testing.T) {
 		t.Fatalf("err = %v, want the keychain failure", err)
 	}
 }
+
+func TestLookupNamesTheStore(t *testing.T) {
+	primary := &memStore{name: "the OS keychain", tokens: map[string]string{}}
+	secondary := &memStore{name: "/x/credentials.json", tokens: map[string]string{"u": "t"}}
+	_, where, err := Lookup(Fallback{Primary: primary, Secondary: secondary}, "u")
+	if err != nil || where != "/x/credentials.json" {
+		t.Fatalf("where=%q err=%v", where, err)
+	}
+	primary.tokens["u"] = "t"
+	_, where, _ = Lookup(Fallback{Primary: primary, Secondary: secondary}, "u")
+	if where != "the OS keychain" {
+		t.Fatalf("where=%q", where)
+	}
+	_, where, _ = Lookup(secondary, "u")
+	if where != "/x/credentials.json" {
+		t.Fatalf("where=%q", where)
+	}
+}

@@ -6,6 +6,7 @@ require (
 	filippo.io/age v1.3.2
 	github.com/spf13/cobra v1.10.2
 	github.com/zalando/go-keyring v0.2.8
+	golang.org/x/mod v0.42.0
 	golang.org/x/term v0.47.0
 )
 

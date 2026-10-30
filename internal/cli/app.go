@@ -19,6 +19,7 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/config"
 	"github.com/wassie-dev/simpleOTA-cli/internal/credentials"
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
+	"github.com/wassie-dev/simpleOTA-cli/internal/update"
 	"github.com/wassie-dev/simpleOTA-cli/internal/version"
 )
 
@@ -32,10 +33,12 @@ const (
 	ExitTimeout    = 5
 )
 
-// exitError carries a specific exit code.
+// exitError carries a specific exit code. A quiet one is not printed,
+// because the command's output already explains it.
 type exitError struct {
-	code int
-	err  error
+	code  int
+	err   error
+	quiet bool
 }
 
 func (e *exitError) Error() string { return e.err.Error() }
@@ -62,6 +65,12 @@ type App struct {
 
 	Now   func() time.Time
 	Sleep func(context.Context, time.Duration) error
+
+	// CurrentVersion, Executable and UpdateSource override how update finds
+	// this binary and new releases; nil selects the real ones.
+	CurrentVersion func() string
+	Executable     func() (string, error)
+	UpdateSource   *update.Source
 
 	flags globalFlags
 }
@@ -131,6 +140,10 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return ExitOK
 	}
 	code := exitCode(err)
+	var ee *exitError
+	if errors.As(err, &ee) && ee.quiet {
+		return code
+	}
 	msg := message(err)
 	if a.flags.json {
 		_ = a.printer().WriteJSON(output.ErrorView{Error: msg, ExitCode: code})
@@ -194,8 +207,9 @@ func (a *App) rootCommand() *cobra.Command {
 		a.logoutCommand(),
 		a.keysCommand(),
 		a.releaseCommand(),
-		a.rolloutCommand(),
+		a.deploymentCommand(),
 		a.statusCommand(),
+		a.updateCommand(),
 	)
 	return root
 }

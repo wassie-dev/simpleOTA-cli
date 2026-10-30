@@ -52,7 +52,7 @@ func (p Printer) Release(r ReleaseView) error {
 		check = "not verified"
 	}
 	fmt.Fprintf(p.Out, "  sha256      %s (%d bytes, %s)\n", r.SHA256, r.Size, check)
-	fmt.Fprintf(p.Out, "Watch it with: simpleota status %s --wait\n", r.DeploymentID)
+	fmt.Fprintf(p.Out, "Watch it with: simpleota deployment status %s --wait\n", r.DeploymentID)
 	return nil
 }
 

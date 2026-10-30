@@ -29,8 +29,8 @@ type RolloutView struct {
 	NextStep   string         `json:"next_step,omitempty"`
 }
 
-// StatusView is the result of status, with or without --wait.
-type StatusView struct {
+// DeploymentStatusView is the result of deployment status, with or without --wait.
+type DeploymentStatusView struct {
 	Deployment DeploymentView   `json:"deployment"`
 	Devices    deploy.Counts    `json:"devices"`
 	Failures   []deploy.Failure `json:"failures"`
@@ -52,13 +52,13 @@ func NewDeploymentView(d api.Deployment) DeploymentView {
 	}
 }
 
-// NewStatusView converts a summary and its outcome.
-func NewStatusView(s deploy.Summary, o deploy.Outcome) StatusView {
+// NewDeploymentStatusView converts a summary and its outcome.
+func NewDeploymentStatusView(s deploy.Summary, o deploy.Outcome) DeploymentStatusView {
 	failures := s.Failures
 	if failures == nil {
 		failures = []deploy.Failure{}
 	}
-	return StatusView{Deployment: NewDeploymentView(s.Deployment), Devices: s.Counts, Failures: failures, Outcome: o}
+	return DeploymentStatusView{Deployment: NewDeploymentView(s.Deployment), Devices: s.Counts, Failures: failures, Outcome: o}
 }
 
 // NextStep is the advice printed after a rollout stops. SimpleOTA never
@@ -84,8 +84,8 @@ func (p Printer) Rollout(v RolloutView) error {
 	return nil
 }
 
-// Status prints a deployment summary.
-func (p Printer) Status(v StatusView) error {
+// DeploymentStatus prints a deployment summary.
+func (p Printer) DeploymentStatus(v DeploymentStatusView) error {
 	if p.JSON {
 		return p.WriteJSON(v)
 	}
