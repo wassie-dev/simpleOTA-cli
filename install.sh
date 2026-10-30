@@ -106,6 +106,9 @@ on_path() {
 # that line.
 add_to_path() {
 	line="export PATH=\"$1:\$PATH\""
+	# now puts DIR on PATH in the terminal that ran this script, which a
+	# script cannot change itself.
+	now=$line
 	case "${SHELL##*/}" in
 	zsh) rc="${ZDOTDIR:-$HOME}/.zshrc" ;;
 	bash)
@@ -116,11 +119,13 @@ add_to_path() {
 	fish)
 		rc="${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/simpleota.fish"
 		line="contains -- \"$1\" \$PATH; or set -gx PATH \"$1\" \$PATH"
+		now="set -gx PATH \"$1\" \$PATH"
 		;;
 	*) rc="$HOME/.profile" ;;
 	esac
 	if [ -f "$rc" ] && grep -qxF "$line" "$rc"; then
-		say "$rc already adds $1 to PATH; open a new terminal to use simpleota"
+		say "$rc already adds $1 to PATH. Open a new terminal, or run this to use simpleota in this one:"
+		say "  $now"
 		return
 	fi
 	# A quote, $, backtick or backslash in DIR would change what the line runs.
@@ -130,7 +135,8 @@ add_to_path() {
 	esac
 	if [ "$skip" != 1 ] && { mkdir -p "$(dirname "$rc")" &&
 		printf '\n# Added by the simpleota installer\n%s\n' "$line" >>"$rc"; } 2>/dev/null; then
-		say "Added $1 to your PATH in $rc; open a new terminal to use simpleota"
+		say "Added $1 to your PATH in $rc. Open a new terminal, or run this to use simpleota in this one:"
+		say "  $now"
 		return
 	fi
 	say "Add $1 to your PATH, for example by adding this line to $rc:"

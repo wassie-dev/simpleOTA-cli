@@ -6,6 +6,12 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `install.sh`: after adding the install directory to PATH, it also prints
+  the command that puts it on PATH in the current terminal, which a script
+  cannot change for you.
+
 ## [0.1.1] - 2026-10-30
 
 ### Changed
