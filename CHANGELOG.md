@@ -6,6 +6,8 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-30
+
 The commands are laid out by API resource, and `login` no longer chooses a
 project. Commands that changed name or behaviour are listed under Changed.
 
@@ -113,6 +115,7 @@ project. Commands that changed name or behaviour are listed under Changed.
 - `install.sh` and `install.ps1`: one-line install and update scripts,
   published with each release, that verify the download's checksum.
 
-[Unreleased]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/wassie-dev/simpleOTA-cli/releases/tag/v0.1.0
