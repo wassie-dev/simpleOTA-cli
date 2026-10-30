@@ -98,6 +98,26 @@ on_path() {
 	esac
 }
 
+# path_hint DIR prints how to add DIR to PATH in the user's login shell.
+path_hint() {
+	case "${SHELL##*/}" in
+	zsh) rc="${ZDOTDIR:-$HOME}/.zshrc" ;;
+	bash)
+		# Terminal windows on macOS start bash as a login shell, which reads
+		# ~/.bash_profile and not ~/.bashrc.
+		if [ "$(uname -s)" = Darwin ]; then rc="$HOME/.bash_profile"; else rc="$HOME/.bashrc"; fi
+		;;
+	fish)
+		say "Add $1 to your PATH:"
+		say "  fish_add_path \"$1\""
+		return
+		;;
+	*) rc="$HOME/.profile" ;;
+	esac
+	say "Add $1 to your PATH, then open a new terminal:"
+	say "  echo 'export PATH=\"$1:\$PATH\"' >> \"$rc\""
+}
+
 choose_dir() {
 	if [ -n "${SIMPLEOTA_INSTALL_DIR:-}" ]; then
 		printf '%s\n' "$SIMPLEOTA_INSTALL_DIR"
@@ -172,8 +192,7 @@ main() {
 		say "Installed simpleota $version to $target"
 	fi
 	if ! on_path "$dir"; then
-		say "Add $dir to your PATH, for example:"
-		say "  echo 'export PATH=\"$dir:\$PATH\"' >> ~/.profile"
+		path_hint "$dir"
 	fi
 	found=$(command -v simpleota 2>/dev/null || true)
 	if [ -n "$found" ] && [ "$found" != "$target" ]; then

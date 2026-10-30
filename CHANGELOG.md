@@ -6,6 +6,13 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `install.sh`: when the install directory is not on PATH, the hint names
+  your shell's startup file (`~/.zshrc` for zsh, `~/.bash_profile` or
+  `~/.bashrc` for bash, `fish_add_path` for fish) instead of always
+  `~/.profile`, which zsh does not read.
+
 ## [0.1.0] - 2026-10-30
 
 ### Added

@@ -30,8 +30,9 @@ export SIMPLEOTA_DOWNLOAD_URL="http://127.0.0.1:$PORT" SIMPLEOTA_INSTALL_DIR="$D
 fail() { echo "FAIL: $*" >&2; exit 1; }
 run() { SIMPLEOTA_VERSION="$1" sh "$ROOT/install.sh" 2>&1; }
 
-out="$(run "$VERSION")" || fail "fresh install: $out"
+out="$(SHELL=/bin/zsh run "$VERSION")" || fail "fresh install: $out"
 grep -q "Installed simpleota $VERSION" <<<"$out" || fail "fresh install output: $out"
+grep -q "\.zshrc" <<<"$out" || fail "PATH hint for zsh: $out"
 "$DIR/simpleota" --version | grep -q "simpleota version $VERSION" || fail "installed binary version"
 echo "ok   fresh install"
 
