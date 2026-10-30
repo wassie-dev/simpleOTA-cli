@@ -81,6 +81,12 @@ type Server struct {
 	// CorruptUploads flips a byte of each uploaded binary, as if it changed
 	// in transit.
 	CorruptUploads bool
+	// CheckEvents holds each device's OTA checks by device UUID.
+	CheckEvents map[string][]api.CheckEvent
+	// Audit is the project's audit log, newest first.
+	Audit []api.AuditEvent
+	// LastDeploymentRequest is the body of the last deployment created.
+	LastDeploymentRequest api.DeploymentRequest
 	// StaffProjects are the staff account's own projects, listed for the
 	// staff token with owner_id set to StaffAccountID. Staff can still read
 	// every project by ID.
@@ -102,6 +108,8 @@ func New(t *testing.T) *Server {
 		},
 		Channels:      []api.Channel{{ID: StableChannelID, Name: "stable", IsDefault: true}},
 		Groups:        []api.Group{},
+		CheckEvents:   map[string][]api.CheckEvent{},
+		Audit:         []api.AuditEvent{},
 		StaffProjects: []api.Project{},
 		States:        map[string][]api.DeviceState{},
 		Requests:      map[string]int{},
@@ -220,6 +228,36 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		s.registerKey(w, r)
 	case route == "artifacts" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, s.Artifacts)
+	case route == "artifacts" && r.Method == http.MethodPost:
+		s.uploadArtifact(w, r)
+	case len(parts) == 4 && parts[2] == "artifacts" && r.Method == http.MethodPatch:
+		s.updateArtifact(w, r, parts[3])
+	case route == "deployments" && r.Method == http.MethodPost:
+		s.createDeployment(w, r)
+	case len(parts) == 4 && parts[2] == "devices" && r.Method == http.MethodPatch:
+		s.updateDevice(w, r, parts[3])
+	case len(parts) == 5 && parts[2] == "devices" && parts[4] == "check-events" && r.Method == http.MethodGet:
+		events := s.CheckEvents[parts[3]]
+		if events == nil {
+			events = []api.CheckEvent{}
+		}
+		writeJSON(w, http.StatusOK, events)
+	case route == "channels" && r.Method == http.MethodPost:
+		s.createChannel(w, r)
+	case route == "groups" && r.Method == http.MethodPost:
+		s.createGroup(w, r)
+	case len(parts) == 5 && parts[2] == "groups" && parts[4] == "members":
+		s.groupMembers(w, r, parts[3], "")
+	case len(parts) == 6 && parts[2] == "groups" && parts[4] == "members":
+		s.groupMembers(w, r, parts[3], parts[5])
+	case len(parts) == 4 && parts[2] == "signing-keys" && r.Method == http.MethodDelete:
+		s.revokeKey(w, parts[3])
+	case route == "audit" && r.Method == http.MethodGet:
+		events := s.Audit
+		if t := r.URL.Query().Get("event_type"); t != "" {
+			events = slices.DeleteFunc(slices.Clone(events), func(e api.AuditEvent) bool { return e.EventType != t })
+		}
+		writeJSON(w, http.StatusOK, events)
 	case route == "devices" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, s.devices(r.URL.Query()))
 	case len(parts) == 4 && parts[2] == "devices" && r.Method == http.MethodGet:
@@ -320,14 +358,44 @@ func (s *Server) registerKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) release(w http.ResponseWriter, r *http.Request) {
+	a, ok := s.receiveUpload(w, r, func() bool {
+		if channel := r.FormValue("channel_name"); channel != "stable" {
+			detail(w, http.StatusBadRequest, fmt.Sprintf("channel '%s' not found on this project", channel))
+			return false
+		}
+		return true
+	})
+	if !ok {
+		return
+	}
+	pct, _ := strconv.Atoi(r.FormValue("rollout_percentage"))
+	d := api.Deployment{
+		ID: fmt.Sprintf("00000000-0000-4000-8000-%012d", a.BuildNumber), ProjectID: ProjectID, ArtifactID: a.ID,
+		ArtifactBuildNumber: a.BuildNumber, RolloutStrategy: "immediate", RolloutPercentage: pct, State: api.StateActive, CreatedAt: s.next(),
+		TargetChannelIDs: []string{StableChannelID},
+	}
+	s.Deployments = append([]api.Deployment{d}, s.Deployments...)
+	writeJSON(w, http.StatusCreated, api.ReleaseResult{ArtifactID: a.ID, BuildNumber: a.BuildNumber, DeploymentID: d.ID, State: d.State, Channel: "stable"})
+}
+
+func (s *Server) uploadArtifact(w http.ResponseWriter, r *http.Request) {
+	if a, ok := s.receiveUpload(w, r, func() bool { return true }); ok {
+		writeJSON(w, http.StatusCreated, a)
+	}
+}
+
+// receiveUpload parses and checks a multipart upload like the server does,
+// runs check before allocating a build number, and stores the build. On
+// failure it has written the error response.
+func (s *Server) receiveUpload(w http.ResponseWriter, r *http.Request, check func() bool) (api.Artifact, bool) {
 	if r.ContentLength <= 0 {
 		detail(w, http.StatusBadRequest, "missing Content-Length")
-		return
+		return api.Artifact{}, false
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<20)
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
 		detail(w, http.StatusBadRequest, err.Error())
-		return
+		return api.Artifact{}, false
 	}
 	// Like the server, reject unknown manifest keys.
 	var m Manifest
@@ -335,12 +403,12 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&m); err != nil {
 		detail(w, http.StatusBadRequest, "manifest invalid: "+err.Error())
-		return
+		return api.Artifact{}, false
 	}
 	f, _, err := r.FormFile("binary")
 	if err != nil {
 		detail(w, http.StatusBadRequest, "binary missing")
-		return
+		return api.Artifact{}, false
 	}
 	binary, _ := io.ReadAll(f)
 	if s.CorruptUploads {
@@ -350,31 +418,195 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 	checksum := hex.EncodeToString(sum[:])
 	if m.SHA256 != nil && strings.ToLower(*m.SHA256) != checksum {
 		detail(w, http.StatusBadRequest, fmt.Sprintf("sha256 mismatch: expected %s, received %s", strings.ToLower(*m.SHA256), checksum))
-		return
+		return api.Artifact{}, false
 	}
 	if m.SecurityMode == "signed" {
 		if err := s.verify(m, binary); err != nil {
 			detail(w, http.StatusBadRequest, err.Error())
-			return
+			return api.Artifact{}, false
 		}
 	}
-	pct, _ := strconv.Atoi(r.FormValue("rollout_percentage"))
-	channel := r.FormValue("channel_name")
-	if channel != "stable" {
-		detail(w, http.StatusBadRequest, fmt.Sprintf("channel '%s' not found on this project", channel))
-		return
+	if !check() {
+		return api.Artifact{}, false
 	}
 	s.LastManifest = m
 	build := len(s.Artifacts) + 1
-	a := api.Artifact{ID: fmt.Sprintf("art-%d", build), BuildNumber: build, VersionLabel: m.VersionLabel, ChecksumSHA256: checksum, FileSize: int64(len(binary)), SecurityMode: m.SecurityMode, ChipFamily: m.ChipFamily, Framework: m.Framework, CreatedAt: s.next()}
+	a := api.Artifact{
+		ID: fmt.Sprintf("aaaaaaaa-0000-4000-8000-%012d", build), BuildNumber: build, VersionLabel: m.VersionLabel, ChecksumSHA256: checksum,
+		FileSize: int64(len(binary)), SecurityMode: m.SecurityMode, ChipFamily: m.ChipFamily, Framework: m.Framework, CreatedAt: s.next(),
+	}
 	s.Artifacts = append(s.Artifacts, a)
+	return a, true
+}
+
+func (s *Server) updateArtifact(w http.ResponseWriter, r *http.Request, id string) {
+	var in struct {
+		Archived bool `json:"archived"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	for i := range s.Artifacts {
+		if s.Artifacts[i].ID != id {
+			continue
+		}
+		if in.Archived {
+			for _, d := range s.Deployments {
+				if d.ArtifactID == id && (d.State == api.StateActive || d.State == api.StatePaused || d.State == api.StateDraft) {
+					detail(w, http.StatusBadRequest, "1 deployment still reference this artifact; cancel or complete them first.")
+					return
+				}
+			}
+		}
+		s.Artifacts[i].Archived = in.Archived
+		writeJSON(w, http.StatusOK, s.Artifacts[i])
+		return
+	}
+	detail(w, http.StatusNotFound, "Not Found")
+}
+
+func (s *Server) createDeployment(w http.ResponseWriter, r *http.Request) {
+	var in api.DeploymentRequest
+	if !decode(w, r, &in) {
+		return
+	}
+	var art *api.Artifact
+	for i := range s.Artifacts {
+		if s.Artifacts[i].ID == in.ArtifactID {
+			art = &s.Artifacts[i]
+		}
+	}
+	if art == nil {
+		detail(w, http.StatusNotFound, "artifact not found in this project")
+		return
+	}
+	s.LastDeploymentRequest = in
 	d := api.Deployment{
-		ID: fmt.Sprintf("00000000-0000-4000-8000-%012d", build), ProjectID: ProjectID, ArtifactID: a.ID,
-		ArtifactBuildNumber: build, RolloutStrategy: "immediate", RolloutPercentage: pct, State: api.StateActive, CreatedAt: s.next(),
-		TargetChannelIDs: []string{StableChannelID},
+		ID: fmt.Sprintf("cccccccc-0000-4000-8000-%012d", len(s.Deployments)+1), ProjectID: ProjectID, ArtifactID: art.ID,
+		ArtifactBuildNumber: art.BuildNumber, RolloutStrategy: in.RolloutStrategy, RolloutPercentage: in.RolloutPercentage,
+		TargetChannelIDs: in.TargetChannelIDs, State: api.StateDraft, CreatedAt: s.next(),
 	}
 	s.Deployments = append([]api.Deployment{d}, s.Deployments...)
-	writeJSON(w, http.StatusCreated, api.ReleaseResult{ArtifactID: a.ID, BuildNumber: build, DeploymentID: d.ID, State: d.State, Channel: channel})
+	writeJSON(w, http.StatusCreated, d)
+}
+
+func (s *Server) updateDevice(w http.ResponseWriter, r *http.Request, id string) {
+	var in api.DeviceUpdate
+	if !decode(w, r, &in) {
+		return
+	}
+	for i := range s.Devices {
+		d := &s.Devices[i]
+		if d.ID != id {
+			continue
+		}
+		if in.Name != nil {
+			d.Name = *in.Name
+		}
+		if in.Active != nil {
+			d.Active = *in.Active
+		}
+		if in.ChannelID != nil {
+			d.ChannelID = in.ChannelID
+		}
+		writeJSON(w, http.StatusOK, d)
+		return
+	}
+	detail(w, http.StatusNotFound, "Not Found")
+}
+
+func (s *Server) createChannel(w http.ResponseWriter, r *http.Request) {
+	var in api.ChannelRequest
+	if !decode(w, r, &in) {
+		return
+	}
+	for _, c := range s.Channels {
+		if c.Name == in.Name {
+			detail(w, http.StatusBadRequest, "channel name already exists in this project")
+			return
+		}
+	}
+	c := api.Channel{ID: fmt.Sprintf("eeeeeeee-0000-4000-8000-%012d", len(s.Channels)+1), Name: in.Name, Description: in.Description, IsDefault: in.IsDefault}
+	if c.IsDefault {
+		for i := range s.Channels {
+			s.Channels[i].IsDefault = false
+		}
+	}
+	s.Channels = append(s.Channels, c)
+	writeJSON(w, http.StatusCreated, c)
+}
+
+func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
+	var in api.GroupRequest
+	if !decode(w, r, &in) {
+		return
+	}
+	for _, g := range s.Groups {
+		if g.Name == in.Name {
+			detail(w, http.StatusBadRequest, "group name already exists in this project")
+			return
+		}
+	}
+	g := api.Group{ID: fmt.Sprintf("ffffffff-0000-4000-8000-%012d", len(s.Groups)+1), Name: in.Name, Description: in.Description}
+	s.Groups = append(s.Groups, g)
+	writeJSON(w, http.StatusCreated, g)
+}
+
+// groupMembers serves groups/{id}/members/ and groups/{id}/members/{device}/.
+func (s *Server) groupMembers(w http.ResponseWriter, r *http.Request, groupID, deviceID string) {
+	if !slices.ContainsFunc(s.Groups, func(g api.Group) bool { return g.ID == groupID }) {
+		detail(w, http.StatusNotFound, "Not Found")
+		return
+	}
+	switch {
+	case r.Method == http.MethodGet && deviceID == "":
+		writeJSON(w, http.StatusOK, s.devices(url.Values{"group_id": {groupID}}))
+	case r.Method == http.MethodPost && deviceID == "":
+		var in struct {
+			DeviceIDs []string `json:"device_ids"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		for i := range s.Devices {
+			if slices.Contains(in.DeviceIDs, s.Devices[i].ID) && !slices.Contains(s.Devices[i].GroupIDs, groupID) {
+				s.Devices[i].GroupIDs = append(s.Devices[i].GroupIDs, groupID)
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"id": groupID})
+	case r.Method == http.MethodDelete && deviceID != "":
+		for i := range s.Devices {
+			if s.Devices[i].ID == deviceID {
+				s.Devices[i].GroupIDs = slices.DeleteFunc(s.Devices[i].GroupIDs, func(g string) bool { return g == groupID })
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+		detail(w, http.StatusNotFound, "Not Found")
+	default:
+		detail(w, http.StatusMethodNotAllowed, "Method Not Allowed")
+	}
+}
+
+func (s *Server) revokeKey(w http.ResponseWriter, keyID string) {
+	for i := range s.SigningKeys {
+		if s.SigningKeys[i].KeyID == keyID && s.SigningKeys[i].RevokedAt == nil {
+			now := s.next()
+			s.SigningKeys[i].RevokedAt = &now
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
+	detail(w, http.StatusNotFound, "signing key not found or already revoked")
+}
+
+// decode reads a JSON request body, writing a 400 when it is not JSON.
+func decode(w http.ResponseWriter, r *http.Request, v any) bool {
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		detail(w, http.StatusBadRequest, "bad json")
+		return false
+	}
+	return true
 }
 
 func (s *Server) verify(m Manifest, binary []byte) error {
@@ -437,6 +669,12 @@ func (s *Server) transition(w http.ResponseWriter, r *http.Request, id string) {
 			return
 		}
 		d.RolloutPercentage = *t.RolloutPercentage
+	case "start":
+		if len(d.TargetChannelIDs) == 0 && len(s.Devices) >= 2 && !t.ConfirmAll {
+			detail(w, http.StatusBadRequest, fmt.Sprintf("starting this deployment requires confirm_all=true because it targets all %d project devices", len(s.Devices)))
+			return
+		}
+		d.State = api.StateActive
 	case "pause":
 		d.State = api.StatePaused
 	case "resume":

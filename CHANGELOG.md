@@ -19,8 +19,16 @@ project. Commands that changed name or behaviour are listed under Changed.
 - `deployment list`.
 - `device list` (filter with `--channel`, `--group` or `--state`) and
   `device show <device-id|uuid>`.
-- `channel list`.
-- `key list`.
+- `channel list` and `channel create`.
+- `key list`, and `key revoke`, which needs a personal token and `--yes`.
+- `build upload`, which uploads a build without deploying it, and
+  `build archive` and `build unarchive`.
+- `deployment create`, which deploys an uploaded build to channels,
+  groups or every device, and starts it.
+- `device events`, which shows a device's recent update checks, and
+  `device update`, which renames, moves or (de)activates a device.
+- `group list`, `group create` and `group member list|add|remove`.
+- `audit`, which shows the project's audit log.
 - `status` shows the account a personal token belongs to and where the
   current project came from (`project_source` in JSON).
 - Help with examples on every command and group, and grouped commands in

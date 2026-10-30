@@ -168,10 +168,10 @@ an array.
 the server accepts an upload only when the bytes it received hash the same,
 so it is also the checksum the server stored.
 
-## build list, build show
+## build list, build show, build archive, build unarchive
 
-`build list` prints an array of build objects, newest first; `build show`
-prints one.
+`build list` prints an array of build objects, newest first; `build show`,
+`build archive` and `build unarchive` print one.
 
 ```json
 {
@@ -194,9 +194,18 @@ prints one.
 
 `id` is the API's artifact ID. `warnings` is always an array.
 
-## device list, device show
+## build upload
 
-`device list` prints an array of device objects; `device show` prints one.
+```json
+{ "build_number": 42, "artifact_id": "…", "security_mode": "signed", "key_id": "prod-2026", "chip": "esp32s3", "sha256": "…", "size": 1048576 }
+```
+
+`key_id` is omitted for `basic`.
+
+## device list, device show, device update
+
+`device list` and `group member list` print an array of device objects;
+`device show` and `device update` print one.
 
 ```json
 {
@@ -229,11 +238,66 @@ reports. `channel` is the channel's name. `current_build_number`,
 `nvs_schema_version`, `last_check_at`, `last_seen` and `channel_id` are null
 until the device reports them.
 
-## channel list
+## device events
 
 ```json
-[ { "id": "…", "name": "stable", "description": "", "is_default": true } ]
+[
+  {
+    "at": "…",
+    "decision": "no_update",
+    "status": "not_in_rollout",
+    "deployment_id": null,
+    "offered_build_number": null,
+    "reported_build_number": 41,
+    "reported_version": "1.3.0",
+    "message": "…"
+  }
+]
 ```
+
+Newest first. `decision` is `offered` or `no_update`. `status` is `offered`,
+`up_to_date`, `no_compatible_build`, `device_inactive`, `over_limit`,
+`not_in_rollout` or `no_active_deployment`.
+
+## channel list, channel create
+
+`channel list` prints an array of channel objects; `channel create` prints
+one.
+
+```json
+{ "id": "…", "name": "stable", "description": "", "is_default": true }
+```
+
+## group list, group create
+
+`group list` prints an array of group objects; `group create` prints one.
+
+```json
+{ "id": "…", "name": "kitchen", "description": "Kitchen lights" }
+```
+
+## group member add, group member remove
+
+```json
+{ "group": "kitchen", "devices": ["lamp-1", "lamp-2"], "added": true }
+```
+
+`group` and `devices` are as given on the command line. `added` is false
+for `remove`.
+
+## key revoke
+
+```json
+{ "key_id": "prod-2025", "project_id": "…" }
+```
+
+## audit
+
+```json
+[ { "id": "…", "at": "…", "event_type": "artifact.uploaded", "actor_id": 7, "target_type": "artifact", "target_id": "…", "payload": { "build_number": 42 } } ]
+```
+
+Newest first. `actor_id` is null for an event the server made itself.
 
 ## Deployment object
 
@@ -266,6 +330,16 @@ The `deployment` commands embed this object.
 ## deployment list
 
 An array of [deployment objects](#deployment-object), newest first.
+
+## deployment create
+
+```json
+{ "deployment": { … }, "targets": ["channel stable"], "also_active": [ { … } ] }
+```
+
+`targets` names the channels and groups the deployment reaches, such as
+`channel beta` or `group kitchen`; it is empty for `--all-devices`.
+`also_active` is as in [release](#release).
 
 ## deployment show, deployment wait
 

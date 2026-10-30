@@ -2,7 +2,9 @@ package output
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
@@ -278,12 +280,70 @@ func (p Printer) DeviceShow(d DeviceView) error {
 	return nil
 }
 
+// CheckEventView is one OTA check by a device.
+type CheckEventView struct {
+	At                  time.Time `json:"at"`
+	Decision            string    `json:"decision"`
+	Status              string    `json:"status"`
+	DeploymentID        *string   `json:"deployment_id"`
+	OfferedBuildNumber  *int      `json:"offered_build_number"`
+	ReportedBuildNumber *int      `json:"reported_build_number"`
+	ReportedVersion     string    `json:"reported_version"`
+	Message             string    `json:"message"`
+}
+
+// NewCheckEventView converts an API check event.
+func NewCheckEventView(e api.CheckEvent) CheckEventView {
+	return CheckEventView{
+		At: e.CreatedAt, Decision: e.Decision, Status: e.Status, DeploymentID: e.DeploymentID,
+		OfferedBuildNumber: e.ArtifactBuildNumber, ReportedBuildNumber: e.ReportedBuildNumber,
+		ReportedVersion: e.ReportedVersion, Message: e.Message,
+	}
+}
+
+// CheckEventList prints device events.
+func (p Printer) CheckEventList(events []CheckEventView) error {
+	if p.JSON {
+		return p.WriteJSON(events)
+	}
+	if len(events) == 0 {
+		fmt.Fprintln(p.Out, "No checks recorded yet.")
+		return nil
+	}
+	rows := make([][]string, len(events))
+	for i, e := range events {
+		rows[i] = []string{when(e.At), e.Status, intPtr(e.ReportedBuildNumber), intPtr(e.OfferedBuildNumber), e.Message}
+	}
+	return p.table([]string{"TIME", "RESULT", "RUNNING", "OFFERED", "MESSAGE"}, rows)
+}
+
+func intPtr(n *int) string {
+	if n == nil {
+		return ""
+	}
+	return strconv.Itoa(*n)
+}
+
 // ChannelView is a release channel.
 type ChannelView struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	IsDefault   bool   `json:"is_default"`
+}
+
+// ChannelShow prints one channel, as channel create does.
+func (p Printer) ChannelShow(c ChannelView) error {
+	if p.JSON {
+		return p.WriteJSON(c)
+	}
+	fmt.Fprintf(p.Out, "Channel %s\n", p.bold(c.Name))
+	p.field("id", c.ID)
+	if c.IsDefault {
+		p.field("default", "yes; new devices join it")
+	}
+	p.field("description", c.Description)
+	return nil
 }
 
 // ChannelList prints channel list.
@@ -345,4 +405,103 @@ func (p Printer) DeploymentList(deps []DeploymentView) error {
 		rows[i] = []string{d.ID, strconv.Itoa(d.BuildNumber), d.State, fmt.Sprintf("%d%%", d.RolloutPercentage), when(d.CreatedAt)}
 	}
 	return p.table([]string{"DEPLOYMENT", "BUILD", "STATE", "ROLLOUT", "CREATED"}, rows)
+}
+
+// GroupView is a device group.
+type GroupView struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// GroupList prints group list.
+func (p Printer) GroupList(groups []GroupView) error {
+	if p.JSON {
+		return p.WriteJSON(groups)
+	}
+	if len(groups) == 0 {
+		fmt.Fprintln(p.Out, "No device groups. Create one with: simpleota group create <name>")
+		return nil
+	}
+	rows := make([][]string, len(groups))
+	for i, g := range groups {
+		rows[i] = []string{g.Name, g.Description, g.ID}
+	}
+	return p.table([]string{"NAME", "DESCRIPTION", "ID"}, rows)
+}
+
+// GroupShow prints one group, as group create does.
+func (p Printer) GroupShow(g GroupView) error {
+	if p.JSON {
+		return p.WriteJSON(g)
+	}
+	fmt.Fprintf(p.Out, "Group %s\n", p.bold(g.Name))
+	p.field("id", g.ID)
+	p.field("description", g.Description)
+	return nil
+}
+
+// MembersView is the result of group member add and remove.
+type MembersView struct {
+	Group   string   `json:"group"`
+	Devices []string `json:"devices"`
+	Added   bool     `json:"added"`
+}
+
+// MembersChanged prints the result of group member add and remove.
+func (p Printer) MembersChanged(v MembersView) error {
+	if p.JSON {
+		return p.WriteJSON(v)
+	}
+	verb, prep := "Added", "to"
+	if !v.Added {
+		verb, prep = "Removed", "from"
+	}
+	fmt.Fprintf(p.Out, "%s %s %s group %s.\n", verb, strings.Join(v.Devices, ", "), prep, v.Group)
+	return nil
+}
+
+// AuditView is one audit log entry.
+type AuditView struct {
+	ID         string         `json:"id"`
+	At         time.Time      `json:"at"`
+	EventType  string         `json:"event_type"`
+	ActorID    *int           `json:"actor_id"`
+	TargetType string         `json:"target_type"`
+	TargetID   string         `json:"target_id"`
+	Payload    map[string]any `json:"payload"`
+}
+
+// AuditList prints audit.
+func (p Printer) AuditList(events []AuditView) error {
+	if p.JSON {
+		return p.WriteJSON(events)
+	}
+	if len(events) == 0 {
+		fmt.Fprintln(p.Out, "No audit events.")
+		return nil
+	}
+	rows := make([][]string, len(events))
+	for i, e := range events {
+		actor := "system"
+		if e.ActorID != nil {
+			actor = "user " + strconv.Itoa(*e.ActorID)
+		}
+		rows[i] = []string{when(e.At), e.EventType, actor, e.TargetType + " " + e.TargetID, payloadText(e.Payload)}
+	}
+	return p.table([]string{"TIME", "EVENT", "BY", "TARGET", "DETAILS"}, rows)
+}
+
+// payloadText renders an event payload as sorted key=value pairs.
+func payloadText(payload map[string]any) string {
+	keys := make([]string, 0, len(payload))
+	for k := range payload {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = fmt.Sprintf("%s=%v", k, payload[k])
+	}
+	return strings.Join(parts, " ")
 }

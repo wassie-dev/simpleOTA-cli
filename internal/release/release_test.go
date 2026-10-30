@@ -388,7 +388,7 @@ func TestAlsoActive(t *testing.T) {
 	fake.Deployments[len(fake.Deployments)-1].TargetChannelIDs = []string{"beta"}
 	latest := release1(0x0009, 3)
 
-	got, err := svc.AlsoActive(context.Background(), latest)
+	got, err := svc.AlsoActive(context.Background(), latest.DeploymentID, latest.Chip)
 	if err != nil {
 		t.Fatal(err)
 	}

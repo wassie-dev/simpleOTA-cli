@@ -165,6 +165,67 @@ type ReleaseRequest struct {
 	ChannelName       string
 }
 
+// UploadRequest is a build upload without a deployment.
+type UploadRequest struct {
+	ManifestJSON []byte
+	FileName     string
+	Binary       []byte
+}
+
+// DeploymentRequest mirrors DeploymentIn.
+type DeploymentRequest struct {
+	ArtifactID        string   `json:"artifact_id"`
+	RolloutStrategy   string   `json:"rollout_strategy"`
+	RolloutPercentage int      `json:"rollout_percentage"`
+	TargetGroupIDs    []string `json:"target_group_ids"`
+	TargetChannelIDs  []string `json:"target_channel_ids"`
+	Notes             string   `json:"notes"`
+}
+
+// DeviceUpdate mirrors DeviceUpdateIn; nil fields are left unchanged.
+type DeviceUpdate struct {
+	Name      *string `json:"name,omitempty"`
+	Active    *bool   `json:"active,omitempty"`
+	ChannelID *string `json:"channel_id,omitempty"`
+}
+
+// CheckEvent mirrors DeviceCheckEventOut: one OTA check by a device.
+type CheckEvent struct {
+	ID                  string    `json:"id"`
+	CreatedAt           time.Time `json:"created_at"`
+	Decision            string    `json:"decision"`
+	Status              string    `json:"status"`
+	DeploymentID        *string   `json:"deployment_id"`
+	ArtifactBuildNumber *int      `json:"artifact_build_number"`
+	ReportedBuildNumber *int      `json:"reported_build_number"`
+	ReportedVersion     string    `json:"reported_version"`
+	Message             string    `json:"message"`
+}
+
+// ChannelRequest mirrors ChannelIn.
+type ChannelRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	IsDefault   bool   `json:"is_default"`
+}
+
+// GroupRequest mirrors DeviceGroupIn.
+type GroupRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// AuditEvent mirrors AuditEventOut.
+type AuditEvent struct {
+	ID         string         `json:"id"`
+	CreatedAt  time.Time      `json:"created_at"`
+	EventType  string         `json:"event_type"`
+	ActorID    *int           `json:"actor_id"`
+	TargetType string         `json:"target_type"`
+	TargetID   string         `json:"target_id"`
+	Payload    map[string]any `json:"payload"`
+}
+
 // ReleaseResult mirrors ReleaseOut.
 type ReleaseResult struct {
 	ArtifactID   string `json:"artifact_id"`
@@ -179,4 +240,7 @@ type ReleaseResult struct {
 type Transition struct {
 	Action            string `json:"action"`
 	RolloutPercentage *int   `json:"rollout_percentage,omitempty"`
+	// ConfirmAll is needed to start a deployment that targets every device
+	// in a project with two or more devices.
+	ConfirmAll bool `json:"confirm_all,omitempty"`
 }

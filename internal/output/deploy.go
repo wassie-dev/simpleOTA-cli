@@ -71,6 +71,45 @@ func NextStep(d api.Deployment) string {
 	return ""
 }
 
+// CreatedView is the result of deployment create.
+type CreatedView struct {
+	Deployment DeploymentView `json:"deployment"`
+	// Targets names the channels and groups the deployment reaches; empty
+	// means every device in the project.
+	Targets    []string         `json:"targets"`
+	AlsoActive []DeploymentView `json:"also_active"`
+}
+
+// Created prints the result of deployment create.
+func (p Printer) Created(v CreatedView) error {
+	if p.JSON {
+		return p.WriteJSON(v)
+	}
+	d := v.Deployment
+	audience := "every device in the project"
+	if len(v.Targets) > 0 {
+		audience = strings.Join(v.Targets, ", ")
+	}
+	fmt.Fprintf(p.Out, "%s deployment %s\n", p.green("Started"), d.ID)
+	fmt.Fprintf(p.Out, "  build    %d, offered to %d%% of %s\n", d.BuildNumber, d.RolloutPercentage, audience)
+	p.alsoActive(v.AlsoActive, d.BuildNumber)
+	fmt.Fprintf(p.Out, "Watch it with: simpleota deployment wait %s\n", d.ID)
+	return nil
+}
+
+// alsoActive explains the other active deployments that still reach some
+// of the same devices.
+func (p Printer) alsoActive(others []DeploymentView, build int) {
+	if len(others) == 0 {
+		return
+	}
+	fmt.Fprintln(p.Out, p.yellow("Also active for the same devices:"))
+	for _, d := range others {
+		fmt.Fprintf(p.Out, "  deployment  %s (build %d, %d%%)\n", d.ID, d.BuildNumber, d.RolloutPercentage)
+	}
+	fmt.Fprintf(p.Out, "Each device installs the highest build offered to it, so these still reach\nthe devices build %d does not. Stop one with: simpleota deployment complete <id>\n", build)
+}
+
 // Rollout prints the result of a rollout action.
 func (p Printer) Rollout(v RolloutView) error {
 	if p.JSON {

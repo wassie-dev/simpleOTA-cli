@@ -24,6 +24,16 @@ func exactArgs(n int) cobra.PositionalArgs {
 	}
 }
 
+// minArgs is cobra.MinimumNArgs with the usage exit code.
+func minArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) < n {
+			return usageErr("%s takes at least %d argument(s), got %d; see %s --help", cmd.Name(), n, len(args), cmd.CommandPath())
+		}
+		return nil
+	}
+}
+
 // groupRun makes a command group print its help when called bare and
 // reject an unknown subcommand with the usage exit code.
 func groupRun(cmd *cobra.Command, args []string) error {

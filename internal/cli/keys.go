@@ -31,7 +31,7 @@ func (a *App) keysCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "key",
 		Aliases: []string{"keys"},
-		Short:   "Create, list and export firmware signing keys",
+		Short:   "Create, list, export and revoke firmware signing keys",
 		Long: `Signed releases carry an Ed25519 signature that devices check against the
 public keys pinned in their firmware. The private key is made and kept on
 your machine, encrypted with a passphrase; only the public key is
@@ -44,11 +44,51 @@ both.`,
 		Example: `  simpleota key generate --key-id prod-2026
   simpleota key generate --key-id backup-2026 --out /Volumes/offline/backup-2026.key
   simpleota key list
-  simpleota key export | gh secret set SIMPLEOTA_SIGNING_KEY`,
+  simpleota key export | gh secret set SIMPLEOTA_SIGNING_KEY
+  simpleota key revoke prod-2025 --yes`,
 		Args: cobra.ArbitraryArgs,
 		RunE: groupRun,
 	}
-	cmd.AddCommand(a.keyListCommand(), a.keysGenerateCommand(), a.keysExportCommand())
+	cmd.AddCommand(a.keyListCommand(), a.keysGenerateCommand(), a.keysExportCommand(), a.keyRevokeCommand())
+	return cmd
+}
+
+func (a *App) keyRevokeCommand() *cobra.Command {
+	var yes bool
+	cmd := &cobra.Command{
+		Use:   "revoke <key-id> --yes",
+		Short: "Revoke a public signing key on the project",
+		Long: `Revoke a signing key on the current project, for a key that leaked or is
+retired. The server then refuses new uploads signed with it. Builds it
+already verified stay servable, and the private key file on this machine
+is left alone.
+
+Revoking cannot be undone. Devices keep the keys pinned in their firmware,
+so before revoking, ship firmware that pins the key you will sign with
+next: a device that pins only the revoked key cannot verify a release
+signed with any other.
+
+Needs a personal token, and --yes to confirm.`,
+		Example: `  simpleota key revoke prod-2025 --yes`,
+		Args:    exactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !yes {
+				return usageErr("revoking %s cannot be undone; pass --yes to confirm", args[0])
+			}
+			s, projectID, err := a.projectSession(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if err := s.requirePersonal("key revoke"); err != nil {
+				return err
+			}
+			if err := s.api.RevokeSigningKey(cmd.Context(), projectID, args[0]); err != nil {
+				return err
+			}
+			return a.printer().Revoked(output.RevokedView{KeyID: args[0], ProjectID: projectID})
+		},
+	}
+	cmd.Flags().BoolVar(&yes, "yes", false, "confirm the revocation")
 	return cmd
 }
 

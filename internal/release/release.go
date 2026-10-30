@@ -84,8 +84,9 @@ type Options struct {
 	Chip string
 	// Framework defaults to the project's default framework when empty.
 	Framework string
-	Percent   int
-	Channel   string
+	// Percent and Channel apply to Release only.
+	Percent int
+	Channel string
 	// Key signs the release when set; otherwise it is uploaded as basic.
 	Key ed25519.PrivateKey
 	// AllowDuplicate uploads the binary even when the project already has
@@ -93,7 +94,7 @@ type Options struct {
 	AllowDuplicate bool
 }
 
-// Result describes the created build and deployment.
+// Result describes the created build, and for Release its deployment.
 type Result struct {
 	BuildNumber  int
 	ArtifactID   string
@@ -161,61 +162,108 @@ func ImageChip(data []byte) string {
 	return espChipIDs[uint16(data[12])|uint16(data[13])<<8]
 }
 
-// Release builds the manifest, signs when a key is set, uploads and deploys.
-// The upload is sent once and never retried. The manifest carries the
-// binary's SHA-256, so the server rejects the upload if the bytes it
-// received differ.
-func (s Service) Release(ctx context.Context, o Options) (Result, error) {
-	var res Result
-	if o.Chip != "" {
-		if _, err := manifest.NormalizeChip(o.Chip); err != nil {
-			return res, chipErr("%v", err)
-		}
+// Upload checks, signs when a key is set, and uploads a build without
+// deploying it. Like Release, the upload is sent once and never retried.
+func (s Service) Upload(ctx context.Context, o Options) (Result, error) {
+	p, err := s.prepare(ctx, o)
+	if err != nil {
+		return p.res, err
 	}
+	art, err := s.API.UploadArtifact(ctx, s.ProjectID, api.UploadRequest{ManifestJSON: p.manifest, FileName: p.fileName, Binary: p.binary})
+	if err != nil {
+		return p.res, uploadErr(err, o.AllowDuplicate)
+	}
+	p.res.BuildNumber = art.BuildNumber
+	p.res.ArtifactID = art.ID
+	return p.res, nil
+}
+
+// Release checks, signs when a key is set, uploads and deploys. The upload
+// is sent once and never retried. The manifest carries the binary's
+// SHA-256, so the server rejects the upload if the bytes it received
+// differ.
+func (s Service) Release(ctx context.Context, o Options) (Result, error) {
 	if o.Percent < 0 || o.Percent > 100 {
-		return res, errors.New("--percent must be between 0 and 100")
+		return Result{}, errors.New("--percent must be between 0 and 100")
 	}
 	if strings.TrimSpace(o.Channel) == "" {
-		return res, errors.New("--channel must not be empty")
+		return Result{}, errors.New("--channel must not be empty")
+	}
+	p, err := s.prepare(ctx, o)
+	if err != nil {
+		return p.res, err
+	}
+	out, err := s.API.Release(ctx, s.ProjectID, api.ReleaseRequest{
+		ManifestJSON:      p.manifest,
+		FileName:          p.fileName,
+		Binary:            p.binary,
+		RolloutPercentage: o.Percent,
+		ChannelName:       o.Channel,
+	})
+	if err != nil {
+		return p.res, uploadErr(err, o.AllowDuplicate)
+	}
+	p.res.BuildNumber = out.BuildNumber
+	p.res.ArtifactID = out.ArtifactID
+	p.res.DeploymentID = out.DeploymentID
+	p.res.State = out.State
+	p.res.Channel = out.Channel
+	return p.res, nil
+}
+
+// prepared is a checked and signed build, ready to upload.
+type prepared struct {
+	binary   []byte
+	fileName string
+	manifest []byte
+	res      Result
+}
+
+// prepare reads the binary, settles its chip, refuses a duplicate, and
+// builds and signs the manifest.
+func (s Service) prepare(ctx context.Context, o Options) (prepared, error) {
+	var p prepared
+	if o.Chip != "" {
+		if _, err := manifest.NormalizeChip(o.Chip); err != nil {
+			return p, chipErr("%v", err)
+		}
 	}
 	binary, err := ReadBinary(o.BinaryPath)
 	if err != nil {
-		return res, err
+		return p, err
 	}
+	p.binary, p.fileName = binary, filepath.Base(o.BinaryPath)
 	chip, err := s.chooseChip(ctx, o.Chip, ImageChip(binary), o.BinaryPath)
 	if err != nil {
-		return res, err
+		return p, err
 	}
-	res.Chip = chip
 	sum := sha256.Sum256(binary)
-	res.SHA256 = hex.EncodeToString(sum[:])
-	res.Size = int64(len(binary))
+	p.res.Chip, p.res.SHA256, p.res.Size = chip, hex.EncodeToString(sum[:]), int64(len(binary))
 	if !o.AllowDuplicate {
-		if err := s.refuseDuplicate(ctx, res.SHA256); err != nil {
-			return res, err
+		if err := s.refuseDuplicate(ctx, p.res.SHA256); err != nil {
+			return p, err
 		}
 	}
 
 	framework := o.Framework
 	if framework == "" {
-		p, err := s.API.GetProject(ctx, s.ProjectID)
+		proj, err := s.API.GetProject(ctx, s.ProjectID)
 		if err != nil {
-			return res, fmt.Errorf("reading the project's default framework: %w", err)
+			return p, fmt.Errorf("reading the project's default framework: %w", err)
 		}
-		framework = p.DefaultFramework
+		framework = proj.DefaultFramework
 	}
-
 	m := manifest.Manifest{
 		Framework:    framework,
 		VersionLabel: o.VersionLabel,
 		ChipFamily:   chip,
 		SecurityMode: manifest.SecurityBasic,
-		SHA256:       res.SHA256,
+		SHA256:       p.res.SHA256,
 	}
 	if o.Key != nil {
 		keyID, err := s.registeredKeyID(ctx, o.Key.Public().(ed25519.PublicKey))
 		if err != nil {
-			return res, err
+			return p, err
 		}
 		m.SecurityMode = manifest.SecuritySigned
 		m.SigningMetadata = &manifest.SigningMetadata{
@@ -223,34 +271,14 @@ func (s Service) Release(ctx context.Context, o Options) (Result, error) {
 			Algorithm: manifest.AlgorithmEd25519,
 			Signature: signing.Sign(o.Key, binary),
 		}
-		res.KeyID = keyID
+		p.res.KeyID = keyID
 	}
 	if err := m.Validate(); err != nil {
-		return res, err
+		return p, err
 	}
-	manifestJSON, err := json.Marshal(m)
-	if err != nil {
-		return res, err
-	}
-
-	res.SecurityMode = m.SecurityMode
-
-	out, err := s.API.Release(ctx, s.ProjectID, api.ReleaseRequest{
-		ManifestJSON:      manifestJSON,
-		FileName:          filepath.Base(o.BinaryPath),
-		Binary:            binary,
-		RolloutPercentage: o.Percent,
-		ChannelName:       o.Channel,
-	})
-	if err != nil {
-		return res, uploadErr(err, o.AllowDuplicate)
-	}
-	res.BuildNumber = out.BuildNumber
-	res.ArtifactID = out.ArtifactID
-	res.DeploymentID = out.DeploymentID
-	res.State = out.State
-	res.Channel = out.Channel
-	return res, nil
+	p.res.SecurityMode = m.SecurityMode
+	p.manifest, err = json.Marshal(m)
+	return p, err
 }
 
 // chooseChip settles the manifest's chip family. A --chip that differs from
@@ -280,10 +308,10 @@ func (s Service) chooseChip(ctx context.Context, flag, image, path string) (stri
 }
 
 // AlsoActive returns the project's other active deployments that reach the
-// release's channel with a build for the same chip. A device installs the
-// highest build offered to it, so these go on reaching the devices the
-// release does not.
-func (s Service) AlsoActive(ctx context.Context, res Result) ([]api.Deployment, error) {
+// given deployment's channels with a build for the same chip. A device
+// installs the highest build offered to it, so these go on reaching the
+// devices the given deployment does not.
+func (s Service) AlsoActive(ctx context.Context, deploymentID, chip string) ([]api.Deployment, error) {
 	deps, err := s.API.ListDeployments(ctx, s.ProjectID)
 	if err != nil {
 		return nil, err
@@ -298,16 +326,16 @@ func (s Service) AlsoActive(ctx context.Context, res Result) ([]api.Deployment, 
 	}
 	var channels []string
 	for _, d := range deps {
-		if d.ID == res.DeploymentID {
+		if d.ID == deploymentID {
 			channels = d.TargetChannelIDs
 		}
 	}
 	var out []api.Deployment
 	for _, d := range deps {
-		if d.ID == res.DeploymentID || d.State != api.StateActive || !overlaps(channels, d.TargetChannelIDs) {
+		if d.ID == deploymentID || d.State != api.StateActive || !overlaps(channels, d.TargetChannelIDs) {
 			continue
 		}
-		if chip, ok := chips[d.ArtifactID]; ok && chip != "" && !strings.EqualFold(chip, res.Chip) {
+		if c, ok := chips[d.ArtifactID]; ok && c != "" && !strings.EqualFold(c, chip) {
 			continue
 		}
 		out = append(out, d)
@@ -355,13 +383,13 @@ func uploadErr(err error, allowDuplicate bool) error {
 	case errors.Is(err, context.Canceled):
 		return err
 	case errors.As(err, &ae) && ae.StatusCode == http.StatusBadRequest && strings.HasPrefix(ae.Detail, "sha256 mismatch"):
-		return fmt.Errorf("%w: the server received different bytes than were sent (%s); nothing was created, so it is safe to run the release again", ErrChecksumMismatch, ae.Detail)
+		return fmt.Errorf("%w: the server received different bytes than were sent (%s); nothing was created, so it is safe to run the command again", ErrChecksumMismatch, ae.Detail)
 	case errors.As(err, &ae) && ae.StatusCode < http.StatusInternalServerError:
 		return err
 	case allowDuplicate:
 		return fmt.Errorf("%w; the upload may still have created a build, so check the project's builds before releasing again", err)
 	default:
-		return fmt.Errorf("%w; the upload may still have created a build: run the same release again to find out, since it stops if the project already has this binary", err)
+		return fmt.Errorf("%w; the upload may still have created a build: run the same command again to find out, since it stops if the project already has this binary", err)
 	}
 }
 

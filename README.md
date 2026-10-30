@@ -136,13 +136,18 @@ simpleota
 ├── login | logout | status | update [--check] [--version <v>]
 ├── release <bin> --version-label <v>    sign, upload and deploy in one call
 ├── project   list | show [slug|id] | use <slug|id>
-├── build     list | show <build-number>
+├── build     list | show <n> | upload <bin> | archive <n> | unarchive <n>
 ├── deployment
 │   ├── list | show [id] | wait [id] [--timeout]
+│   ├── create --build <n> [--channel]... [--group]... [--all-devices] [--percent]
 │   └── ramp <id> --percent <n> | pause | resume | complete | cancel <id>
-├── device    list [--channel] [--group] [--state] | show <device-id|uuid>
-├── channel   list
-└── key       list | generate --key-id <id> | export [--format encrypted|pem]
+├── device    list [--channel] [--group] [--state] | show <device>
+│             events <device> | update <device> [--name] [--channel] [--state]
+├── channel   list | create <name> [--default]
+├── group     list | create <name>
+│   └── member  list <group> | add <group> <device>... | remove <group> <device>...
+├── key       list | generate --key-id <id> | export | revoke <key-id> --yes
+└── audit     [--type <event>] [--limit <n>]
 ```
 
 | Command | What it does |
@@ -153,12 +158,20 @@ simpleota
 | `release` | Sign, upload and deploy in one call. Stops if the project already has this binary (`--allow-duplicate` uploads it anyway); never retried |
 | `project list\|show\|use` | List projects, show one, or choose the current project |
 | `build list\|show` | List the project's builds (the API calls them artifacts) or show one by build number |
+| `build upload` | Sign and upload a build without deploying it; checked like `release` |
+| `build archive\|unarchive` | Take a build out of service, or return it |
 | `deployment list\|show` | List deployments, or show one's state and device progress |
+| `deployment create` | Deploy an uploaded build to channels (stable by default), groups, or every device, and start it |
 | `deployment wait` | Wait for a deployment to succeed or fail; gates CI |
 | `deployment ramp\|pause\|resume\|complete\|cancel` | Change a deployment's state |
 | `device list\|show` | List devices, filtered by channel, group or state, or show one |
-| `channel list` | List release channels |
+| `device events` | Show a device's recent update checks and why it was or was not offered a build |
+| `device update` | Rename a device, move it to a channel, or (de)activate it |
+| `channel list\|create` | List release channels, or create one |
+| `group list\|create`, `group member list\|add\|remove` | Manage device groups and their devices |
 | `key list\|generate\|export` | List the project's public keys, create a key locally and register its public key (personal token only), or print a private key for a CI secret |
+| `key revoke` | Revoke a public key on the project; needs a personal token and `--yes` |
+| `audit` | Show the project's audit log |
 
 Global flags: `--json` ([schema](docs/json.md)), `--api-url`, `--project`.
 `deployment wait` exits 0 once every device the current step reached has

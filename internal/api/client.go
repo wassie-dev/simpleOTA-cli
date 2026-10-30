@@ -36,6 +36,18 @@ type API interface {
 	GetDeployment(ctx context.Context, projectID, deploymentID string) (Deployment, error)
 	TransitionDeployment(ctx context.Context, projectID, deploymentID string, t Transition) (Deployment, error)
 	ListDeploymentStates(ctx context.Context, projectID, deploymentID string) ([]DeviceState, error)
+	UploadArtifact(ctx context.Context, projectID string, req UploadRequest) (Artifact, error)
+	UpdateArtifact(ctx context.Context, projectID, artifactID string, archived bool) (Artifact, error)
+	CreateDeployment(ctx context.Context, projectID string, in DeploymentRequest) (Deployment, error)
+	UpdateDevice(ctx context.Context, projectID, deviceID string, in DeviceUpdate) (Device, error)
+	ListCheckEvents(ctx context.Context, projectID, deviceID string, limit int) ([]CheckEvent, error)
+	CreateChannel(ctx context.Context, projectID string, in ChannelRequest) (Channel, error)
+	CreateGroup(ctx context.Context, projectID string, in GroupRequest) (Group, error)
+	ListGroupMembers(ctx context.Context, projectID, groupID string) ([]Device, error)
+	AddGroupMembers(ctx context.Context, projectID, groupID string, deviceIDs []string) error
+	RemoveGroupMember(ctx context.Context, projectID, groupID, deviceID string) error
+	RevokeSigningKey(ctx context.Context, projectID, keyID string) error
+	ListAudit(ctx context.Context, projectID, eventType string, limit int) ([]AuditEvent, error)
 }
 
 // Error is a non-2xx response from the API.
@@ -241,44 +253,113 @@ func (c *Client) ListDeploymentStates(ctx context.Context, projectID, deployment
 	return out, c.get(ctx, projectPath(projectID, "deployments", deploymentID, "states"), &out)
 }
 
-// Release uploads the binary and starts a deployment in one request. The
-// body is streamed with a known Content-Length and is never retried: every
-// accepted upload consumes a new build number.
+// Release uploads the binary and starts a deployment in one request. It is
+// never retried: every accepted upload consumes a new build number.
 func (c *Client) Release(ctx context.Context, projectID string, req ReleaseRequest) (ReleaseResult, error) {
 	var out ReleaseResult
-	var head bytes.Buffer
-	mw := multipart.NewWriter(&head)
 	fields := [][2]string{
 		{"manifest", string(req.ManifestJSON)},
 		{"rollout_percentage", strconv.Itoa(req.RolloutPercentage)},
 		{"channel_name", req.ChannelName},
 	}
+	return out, c.upload(ctx, projectPath(projectID, "release"), fields, req.FileName, req.Binary, &out)
+}
+
+// UploadArtifact uploads a build without deploying it. Like Release, it is
+// never retried.
+func (c *Client) UploadArtifact(ctx context.Context, projectID string, req UploadRequest) (Artifact, error) {
+	var out Artifact
+	fields := [][2]string{{"manifest", string(req.ManifestJSON)}}
+	return out, c.upload(ctx, projectPath(projectID, "artifacts"), fields, req.FileName, req.Binary, &out)
+}
+
+// upload posts form fields and a binary as multipart/form-data. The body is
+// streamed with a known Content-Length and sent once.
+func (c *Client) upload(ctx context.Context, path string, fields [][2]string, fileName string, binary []byte, out any) error {
+	var head bytes.Buffer
+	mw := multipart.NewWriter(&head)
 	for _, f := range fields {
 		if err := mw.WriteField(f[0], f[1]); err != nil {
-			return out, err
+			return err
 		}
 	}
-	if _, err := mw.CreateFormFile("binary", req.FileName); err != nil {
-		return out, err
+	if _, err := mw.CreateFormFile("binary", fileName); err != nil {
+		return err
 	}
 	prefixLen := head.Len()
 	if err := mw.Close(); err != nil {
-		return out, err
+		return err
 	}
 	all := head.Bytes()
 	prefix, trailer := all[:prefixLen], all[prefixLen:]
-	body := io.MultiReader(bytes.NewReader(prefix), bytes.NewReader(req.Binary), bytes.NewReader(trailer))
+	body := io.MultiReader(bytes.NewReader(prefix), bytes.NewReader(binary), bytes.NewReader(trailer))
 
 	ctx, cancel := context.WithTimeout(ctx, uploadTimeout)
 	defer cancel()
-	path := projectPath(projectID, "release")
-	httpReq, err := c.newRequest(ctx, http.MethodPost, path, body)
+	req, err := c.newRequest(ctx, http.MethodPost, path, body)
 	if err != nil {
-		return out, err
+		return err
 	}
-	httpReq.ContentLength = int64(len(prefix) + len(req.Binary) + len(trailer))
-	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
-	return out, c.doOnce(httpReq, path, &out)
+	req.ContentLength = int64(len(prefix) + len(binary) + len(trailer))
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	return c.doOnce(req, path, out)
+}
+
+func (c *Client) UpdateArtifact(ctx context.Context, projectID, artifactID string, archived bool) (Artifact, error) {
+	var out Artifact
+	return out, c.sendJSON(ctx, http.MethodPatch, projectPath(projectID, "artifacts", artifactID), map[string]bool{"archived": archived}, &out)
+}
+
+func (c *Client) CreateDeployment(ctx context.Context, projectID string, in DeploymentRequest) (Deployment, error) {
+	var out Deployment
+	return out, c.sendJSON(ctx, http.MethodPost, projectPath(projectID, "deployments"), in, &out)
+}
+
+func (c *Client) UpdateDevice(ctx context.Context, projectID, deviceID string, in DeviceUpdate) (Device, error) {
+	var out Device
+	return out, c.sendJSON(ctx, http.MethodPatch, projectPath(projectID, "devices", deviceID), in, &out)
+}
+
+func (c *Client) ListCheckEvents(ctx context.Context, projectID, deviceID string, limit int) ([]CheckEvent, error) {
+	var out []CheckEvent
+	path := projectPath(projectID, "devices", deviceID, "check-events") + "?limit=" + strconv.Itoa(limit)
+	return out, c.get(ctx, path, &out)
+}
+
+func (c *Client) CreateChannel(ctx context.Context, projectID string, in ChannelRequest) (Channel, error) {
+	var out Channel
+	return out, c.sendJSON(ctx, http.MethodPost, projectPath(projectID, "channels"), in, &out)
+}
+
+func (c *Client) CreateGroup(ctx context.Context, projectID string, in GroupRequest) (Group, error) {
+	var out Group
+	return out, c.sendJSON(ctx, http.MethodPost, projectPath(projectID, "groups"), in, &out)
+}
+
+func (c *Client) ListGroupMembers(ctx context.Context, projectID, groupID string) ([]Device, error) {
+	var out []Device
+	return out, c.get(ctx, projectPath(projectID, "groups", groupID, "members"), &out)
+}
+
+func (c *Client) AddGroupMembers(ctx context.Context, projectID, groupID string, deviceIDs []string) error {
+	return c.sendJSON(ctx, http.MethodPost, projectPath(projectID, "groups", groupID, "members"), map[string][]string{"device_ids": deviceIDs}, nil)
+}
+
+func (c *Client) RemoveGroupMember(ctx context.Context, projectID, groupID, deviceID string) error {
+	return c.sendJSON(ctx, http.MethodDelete, projectPath(projectID, "groups", groupID, "members", deviceID), nil, nil)
+}
+
+func (c *Client) RevokeSigningKey(ctx context.Context, projectID, keyID string) error {
+	return c.sendJSON(ctx, http.MethodDelete, projectPath(projectID, "signing-keys", keyID), nil, nil)
+}
+
+func (c *Client) ListAudit(ctx context.Context, projectID, eventType string, limit int) ([]AuditEvent, error) {
+	q := url.Values{"limit": {strconv.Itoa(limit)}}
+	if eventType != "" {
+		q.Set("event_type", eventType)
+	}
+	var out []AuditEvent
+	return out, c.get(ctx, projectPath(projectID, "audit")+"?"+q.Encode(), &out)
 }
 
 func (c *Client) newRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
@@ -295,17 +376,30 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 }
 
 func (c *Client) postJSON(ctx context.Context, path string, in, out any) error {
-	data, err := json.Marshal(in)
-	if err != nil {
-		return err
+	return c.sendJSON(ctx, http.MethodPost, path, in, out)
+}
+
+// sendJSON sends a write request, with in as the JSON body unless it is
+// nil, and decodes the response into out unless it is nil. Writes are sent
+// once and never retried.
+func (c *Client) sendJSON(ctx context.Context, method, path string, in, out any) error {
+	var body io.Reader
+	if in != nil {
+		data, err := json.Marshal(in)
+		if err != nil {
+			return err
+		}
+		body = bytes.NewReader(data)
 	}
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
-	req, err := c.newRequest(ctx, http.MethodPost, path, bytes.NewReader(data))
+	req, err := c.newRequest(ctx, method, path, body)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	return c.doOnce(req, path, out)
 }
 

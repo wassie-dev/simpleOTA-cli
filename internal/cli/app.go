@@ -199,8 +199,8 @@ func (a *App) rootCommand() *cobra.Command {
 		Long: `simpleota signs, uploads and rolls out ESP32 firmware through SimpleOTA.
 
 Commands follow the API's resources. login stores a token; a project holds
-your fleet; and builds, deployments, devices, channels and signing keys
-live in a project. Resource commands act on the current project:
+your fleet; and builds, deployments, devices, channels, groups, signing
+keys and the audit log live in a project. Resource commands act on the current project:
 --project, then SIMPLEOTA_PROJECT, then the one chosen with
 simpleota project use, then the only project the token can see.
 
@@ -241,7 +241,10 @@ codes: 0 OK, 1 error, 2 usage, 3 not logged in or token rejected,
 	project := a.projectCommand()
 	project.GroupID = groupProject
 	root.AddCommand(project)
-	for _, c := range []*cobra.Command{a.releaseCommand(), a.buildCommand(), a.deploymentCommand(), a.deviceCommand(), a.channelCommand(), a.keysCommand()} {
+	for _, c := range []*cobra.Command{
+		a.releaseCommand(), a.buildCommand(), a.deploymentCommand(), a.deviceCommand(),
+		a.channelCommand(), a.groupCommand(), a.keysCommand(), a.auditCommand(),
+	} {
 		c.GroupID = groupResources
 		root.AddCommand(c)
 	}
