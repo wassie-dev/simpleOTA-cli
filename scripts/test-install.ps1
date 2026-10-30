@@ -14,7 +14,16 @@ Copy-Item (Join-Path $dist '*.zip'), (Join-Path $dist 'checksums.txt') $www
 $port = 8767
 $python = if (Get-Command python3 -ErrorAction SilentlyContinue) { 'python3' } else { 'python' }
 $server = Start-Process -PassThru -NoNewWindow -FilePath $python -ArgumentList '-m', 'http.server', "$port", '--bind', '127.0.0.1', '--directory', (Join-Path $work 'www')
-Start-Sleep -Seconds 2
+$ready = $false
+for ($i = 0; $i -lt 60 -and -not $ready; $i++) {
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$port/" | Out-Null
+        $ready = $true
+    } catch {
+        Start-Sleep -Milliseconds 500
+    }
+}
+if (-not $ready) { throw 'FAIL: the local mirror did not start' }
 
 function Fail($msg) { throw "FAIL: $msg" }
 function Install($v) {
