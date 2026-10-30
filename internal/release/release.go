@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,8 +35,13 @@ var nonAppSuffixes = []string{
 	".spiffs.bin", ".littlefs.bin", ".fatfs.bin",
 }
 
-// ErrChecksumMismatch means the server stored different bytes than were sent.
-var ErrChecksumMismatch = errors.New("checksum mismatch")
+var (
+	// ErrChecksumMismatch means the server received different bytes than
+	// were sent and rejected the upload.
+	ErrChecksumMismatch = errors.New("checksum mismatch")
+	// ErrDuplicate means the project already has a build of this binary.
+	ErrDuplicate = errors.New("binary already uploaded")
+)
 
 // Options describe one release.
 type Options struct {
@@ -48,6 +54,9 @@ type Options struct {
 	Channel   string
 	// Key signs the release when set; otherwise it is uploaded as basic.
 	Key ed25519.PrivateKey
+	// AllowDuplicate uploads the binary even when the project already has
+	// a build with the same SHA-256.
+	AllowDuplicate bool
 }
 
 // Result describes the created build and deployment.
@@ -61,10 +70,6 @@ type Result struct {
 	KeyID        string
 	SHA256       string
 	Size         int64
-	// SHA256Verified is false when the stored checksum could not be read
-	// back; Warning then says why.
-	SHA256Verified bool
-	Warning        string
 }
 
 // Service runs releases for one project.
@@ -112,8 +117,10 @@ func ReadBinary(path string) ([]byte, error) {
 	return data, nil
 }
 
-// Release builds the manifest, signs when a key is set, uploads and deploys,
-// then checks the server stored exactly the bytes that were sent.
+// Release builds the manifest, signs when a key is set, uploads and deploys.
+// The upload is sent once and never retried. The manifest carries the
+// binary's SHA-256, so the server rejects the upload if the bytes it
+// received differ.
 func (s Service) Release(ctx context.Context, o Options) (Result, error) {
 	var res Result
 	chip, err := manifest.NormalizeChip(o.Chip)
@@ -130,6 +137,14 @@ func (s Service) Release(ctx context.Context, o Options) (Result, error) {
 	if err != nil {
 		return res, err
 	}
+	sum := sha256.Sum256(binary)
+	res.SHA256 = hex.EncodeToString(sum[:])
+	res.Size = int64(len(binary))
+	if !o.AllowDuplicate {
+		if err := s.refuseDuplicate(ctx, res.SHA256); err != nil {
+			return res, err
+		}
+	}
 
 	framework := o.Framework
 	if framework == "" {
@@ -145,6 +160,7 @@ func (s Service) Release(ctx context.Context, o Options) (Result, error) {
 		VersionLabel: o.VersionLabel,
 		ChipFamily:   chip,
 		SecurityMode: manifest.SecurityBasic,
+		SHA256:       res.SHA256,
 	}
 	if o.Key != nil {
 		keyID, err := s.registeredKeyID(ctx, o.Key.Public().(ed25519.PublicKey))
@@ -167,9 +183,6 @@ func (s Service) Release(ctx context.Context, o Options) (Result, error) {
 		return res, err
 	}
 
-	sum := sha256.Sum256(binary)
-	res.SHA256 = hex.EncodeToString(sum[:])
-	res.Size = int64(len(binary))
 	res.SecurityMode = m.SecurityMode
 
 	out, err := s.API.Release(ctx, s.ProjectID, api.ReleaseRequest{
@@ -180,27 +193,49 @@ func (s Service) Release(ctx context.Context, o Options) (Result, error) {
 		ChannelName:       o.Channel,
 	})
 	if err != nil {
-		var ae *api.Error
-		if !errors.As(err, &ae) && !errors.Is(err, context.Canceled) {
-			return res, fmt.Errorf("%w; the upload may still have created a build, so check with simpleota deployment status before releasing again (a retry uses another build number)", err)
-		}
-		return res, err
+		return res, uploadErr(err, o.AllowDuplicate)
 	}
 	res.BuildNumber = out.BuildNumber
 	res.ArtifactID = out.ArtifactID
 	res.DeploymentID = out.DeploymentID
 	res.State = out.State
 	res.Channel = out.Channel
-
-	verified, err := s.verifyChecksum(ctx, out, res.SHA256)
-	if err != nil {
-		return res, err
-	}
-	res.SHA256Verified = verified
-	if !verified {
-		res.Warning = fmt.Sprintf("build %d is released, but the server's stored checksum could not be read back to verify it", out.BuildNumber)
-	}
 	return res, nil
+}
+
+// refuseDuplicate fails when the project already has a build of this
+// binary, so running a release again after an unclear failure cannot
+// create a second build.
+func (s Service) refuseDuplicate(ctx context.Context, sha string) error {
+	artifacts, err := s.API.ListArtifacts(ctx, s.ProjectID)
+	if err != nil {
+		return fmt.Errorf("checking the project for an earlier upload of this binary: %w", err)
+	}
+	for _, a := range artifacts {
+		if strings.EqualFold(a.ChecksumSHA256, sha) {
+			return fmt.Errorf("%w: build %d (version %s) has the same sha256 %s; pass --allow-duplicate to upload it again as a new build",
+				ErrDuplicate, a.BuildNumber, a.VersionLabel, sha)
+		}
+	}
+	return nil
+}
+
+// uploadErr explains a failed upload. When the connection failed or the
+// server answered 5xx, the build may exist anyway.
+func uploadErr(err error, allowDuplicate bool) error {
+	var ae *api.Error
+	switch {
+	case errors.Is(err, context.Canceled):
+		return err
+	case errors.As(err, &ae) && ae.StatusCode == http.StatusBadRequest && strings.HasPrefix(ae.Detail, "sha256 mismatch"):
+		return fmt.Errorf("%w: the server received different bytes than were sent (%s); nothing was created, so it is safe to run the release again", ErrChecksumMismatch, ae.Detail)
+	case errors.As(err, &ae) && ae.StatusCode < http.StatusInternalServerError:
+		return err
+	case allowDuplicate:
+		return fmt.Errorf("%w; the upload may still have created a build, so check the project's builds before releasing again", err)
+	default:
+		return fmt.Errorf("%w; the upload may still have created a build: run the same release again to find out, since it stops if the project already has this binary", err)
+	}
 }
 
 // registeredKeyID finds the active project key matching pub, so a release
@@ -221,30 +256,4 @@ func (s Service) registeredKeyID(ctx context.Context, pub ed25519.PublicKey) (st
 		return k.KeyID, nil
 	}
 	return "", errors.New("this signing key is not registered on the project; register it with simpleota keys generate, or use the key file that command created")
-}
-
-// verifyChecksum compares the server's stored SHA-256 with the local one and
-// reports false when it cannot be read. On a mismatch the new deployment is
-// cancelled so no device is offered it.
-func (s Service) verifyChecksum(ctx context.Context, out api.ReleaseResult, want string) (bool, error) {
-	artifacts, err := s.API.ListArtifacts(ctx, s.ProjectID)
-	if err != nil {
-		return false, nil
-	}
-	for _, a := range artifacts {
-		if a.ID != out.ArtifactID {
-			continue
-		}
-		if strings.EqualFold(a.ChecksumSHA256, want) {
-			return true, nil
-		}
-		_, cancelErr := s.API.TransitionDeployment(ctx, s.ProjectID, out.DeploymentID, api.Transition{Action: "cancel"})
-		if cancelErr != nil {
-			return false, fmt.Errorf("%w: the server stored sha256 %s but %s was sent, and cancelling deployment %s failed (%v); cancel it now with simpleota deployment cancel %s",
-				ErrChecksumMismatch, a.ChecksumSHA256, want, out.DeploymentID, cancelErr, out.DeploymentID)
-		}
-		return false, fmt.Errorf("%w: the server stored sha256 %s but %s was sent; deployment %s was cancelled",
-			ErrChecksumMismatch, a.ChecksumSHA256, want, out.DeploymentID)
-	}
-	return false, nil
 }

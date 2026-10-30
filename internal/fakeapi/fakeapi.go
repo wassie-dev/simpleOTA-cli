@@ -38,6 +38,7 @@ type Manifest struct {
 	ChipFamily      string           `json:"chip_family"`
 	SecurityMode    string           `json:"security_mode"`
 	SigningMetadata *SigningMetadata `json:"signing_metadata"`
+	SHA256          *string          `json:"sha256"`
 }
 
 // SigningMetadata is the manifest's signature block.
@@ -65,8 +66,9 @@ type Server struct {
 	Requests map[string]int
 	// LastManifest is the manifest of the last release.
 	LastManifest Manifest
-	// StoredChecksumOverride replaces the checksum the server reports.
-	StoredChecksumOverride string
+	// CorruptUploads flips a byte of each uploaded binary, as if it changed
+	// in transit.
+	CorruptUploads bool
 	// FailNext makes the next requests to a path fail with these statuses,
 	// one per request.
 	FailNext map[string][]int
@@ -247,9 +249,12 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 		detail(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Like the server, reject unknown manifest keys.
 	var m Manifest
-	if err := json.Unmarshal([]byte(r.FormValue("manifest")), &m); err != nil {
-		detail(w, http.StatusBadRequest, "manifest must be JSON")
+	dec := json.NewDecoder(strings.NewReader(r.FormValue("manifest")))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&m); err != nil {
+		detail(w, http.StatusBadRequest, "manifest invalid: "+err.Error())
 		return
 	}
 	f, _, err := r.FormFile("binary")
@@ -258,6 +263,15 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	binary, _ := io.ReadAll(f)
+	if s.CorruptUploads {
+		binary[len(binary)-1] ^= 0xff
+	}
+	sum := sha256.Sum256(binary)
+	checksum := hex.EncodeToString(sum[:])
+	if m.SHA256 != nil && strings.ToLower(*m.SHA256) != checksum {
+		detail(w, http.StatusBadRequest, fmt.Sprintf("sha256 mismatch: expected %s, received %s", strings.ToLower(*m.SHA256), checksum))
+		return
+	}
 	if m.SecurityMode == "signed" {
 		if err := s.verify(m, binary); err != nil {
 			detail(w, http.StatusBadRequest, err.Error())
@@ -271,13 +285,8 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.LastManifest = m
-	sum := sha256.Sum256(binary)
-	checksum := hex.EncodeToString(sum[:])
-	if s.StoredChecksumOverride != "" {
-		checksum = s.StoredChecksumOverride
-	}
 	build := len(s.Artifacts) + 1
-	a := api.Artifact{ID: fmt.Sprintf("art-%d", build), BuildNumber: build, ChecksumSHA256: checksum, FileSize: int64(len(binary)), SecurityMode: m.SecurityMode}
+	a := api.Artifact{ID: fmt.Sprintf("art-%d", build), BuildNumber: build, VersionLabel: m.VersionLabel, ChecksumSHA256: checksum, FileSize: int64(len(binary)), SecurityMode: m.SecurityMode}
 	s.Artifacts = append(s.Artifacts, a)
 	d := api.Deployment{
 		ID: fmt.Sprintf("00000000-0000-4000-8000-%012d", build), ProjectID: ProjectID, ArtifactID: a.ID,

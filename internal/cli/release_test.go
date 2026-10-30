@@ -2,6 +2,7 @@ package cli
 
 import (
 	"crypto/ed25519"
+	"crypto/rand"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,13 +14,35 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/signing"
 )
 
+// writeFirmware writes a unique fake app image.
 func writeFirmware(t *testing.T) string {
 	t.Helper()
+	b := []byte{0xe9, 0, 0, 0, 0, 0, 0, 0, 0}
+	if _, err := rand.Read(b[1:]); err != nil {
+		t.Fatal(err)
+	}
 	p := filepath.Join(t.TempDir(), "app.bin")
-	if err := os.WriteFile(p, []byte{0xe9, 1, 2, 3, 4, 5, 6, 7}, 0o644); err != nil {
+	if err := os.WriteFile(p, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return p
+}
+
+func TestReleaseRefusesDuplicateUnlessAllowed(t *testing.T) {
+	h := newHarness(t)
+	h.env["SIMPLEOTA_TOKEN"] = fakeapi.ProjectToken
+	bin := writeFirmware(t)
+	if r := h.run("release", bin, "--version-label", "1", "--chip", "esp32"); r.code != 0 {
+		t.Fatalf("first release: %+v", r)
+	}
+	r := h.run("release", bin, "--version-label", "2", "--chip", "esp32")
+	if r.code != ExitError || !strings.Contains(r.stderr, "--allow-duplicate") {
+		t.Fatalf("duplicate: %+v", r)
+	}
+	r = h.run("release", bin, "--version-label", "2", "--chip", "esp32", "--allow-duplicate")
+	if r.code != 0 || !strings.Contains(r.stdout, "Released build 2") {
+		t.Fatalf("--allow-duplicate: %+v", r)
+	}
 }
 
 func TestReleaseSignsWithDefaultKey(t *testing.T) {

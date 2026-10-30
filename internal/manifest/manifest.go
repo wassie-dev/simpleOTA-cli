@@ -22,8 +22,9 @@ const (
 )
 
 var (
-	chipPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
-	keyIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	chipPattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+	keyIDPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
 // Manifest is the JSON document the server validates before allocating a
@@ -34,6 +35,10 @@ type Manifest struct {
 	ChipFamily      string           `json:"chip_family"`
 	SecurityMode    string           `json:"security_mode"`
 	SigningMetadata *SigningMetadata `json:"signing_metadata,omitempty"`
+	// SHA256 is the binary's digest in lower-case hex. The server rejects
+	// the upload, before creating anything, when the bytes it received
+	// hash differently.
+	SHA256 string `json:"sha256,omitempty"`
 }
 
 // SigningMetadata carries the detached Ed25519 signature over the binary.
@@ -68,6 +73,9 @@ func (m Manifest) Validate() error {
 	}
 	if !chipPattern.MatchString(m.ChipFamily) {
 		return fmt.Errorf("invalid chip %q", m.ChipFamily)
+	}
+	if m.SHA256 != "" && !sha256Pattern.MatchString(m.SHA256) {
+		return fmt.Errorf("invalid sha256 %q: use 64 lower-case hexadecimal characters", m.SHA256)
 	}
 	switch m.SecurityMode {
 	case SecurityBasic:

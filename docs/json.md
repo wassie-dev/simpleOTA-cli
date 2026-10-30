@@ -99,16 +99,14 @@ keychain` or the path of the token file.
   "security_mode": "signed",
   "key_id": "prod-2026",
   "sha256": "…",
-  "sha256_verified": true,
   "size": 1048576
 }
 ```
 
 `security_mode` is `basic` or `signed`. `key_id` is omitted for `basic`.
-`sha256_verified` is true when the checksum the server stored matches the
-local file. It is false when the server's copy could not be read back; the
-release still went out, and a warning is printed to stderr. A mismatch is an
-error, and the new deployment is cancelled.
+`sha256` is the SHA-256 of the local file. It was sent in the manifest, and
+the server accepts an upload only when the bytes it received hash the same,
+so it is also the checksum the server stored.
 
 ## Deployment object
 

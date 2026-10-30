@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -113,9 +114,15 @@ func rawSignedRelease(t *testing.T, bin []byte, keyID, signature string) (int, s
 		"framework": "esp_idf", "version_label": "tampered", "chip_family": "esp32", "security_mode": "signed",
 		"signing_metadata": map[string]string{"key_id": keyID, "algorithm": "ed25519", "signature": signature},
 	})
+	return rawRelease(t, bin, string(manifest))
+}
+
+// rawRelease posts a binary and manifest to the release endpoint directly.
+func rawRelease(t *testing.T, bin []byte, manifest string) (int, string) {
+	t.Helper()
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
-	_ = mw.WriteField("manifest", string(manifest))
+	_ = mw.WriteField("manifest", manifest)
 	fw, _ := mw.CreateFormFile("binary", "app.bin")
 	_, _ = fw.Write(bin)
 	_ = mw.Close()
@@ -159,5 +166,35 @@ func TestReleaseValidatesBeforeUpload(t *testing.T) {
 	}
 	if r := c.run("", "release", firmware(t), "--version-label", "x", "--chip", "esp32", "--channel", "nope-"+uid()); r.code != 1 || !strings.Contains(r.stderr, "not found") {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestReleaseRefusesDuplicateBinary(t *testing.T) {
+	c := ciCLI(t)
+	bin := firmware(t)
+	first := release0(t, c, []string{"release", bin, "--version-label", "e2e-" + uid(), "--chip", "esp32", "--json"})
+	t.Cleanup(func() { cancelDeployment(t, first.DeploymentID) })
+
+	r := c.run("", "release", bin, "--version-label", "e2e-"+uid(), "--chip", "esp32")
+	want := fmt.Sprintf("build %d", first.BuildNumber)
+	if r.code != 1 || !strings.Contains(r.stderr, want) || !strings.Contains(r.stderr, "--allow-duplicate") {
+		t.Fatalf("duplicate: %+v", r)
+	}
+
+	again := release0(t, c, []string{"release", bin, "--version-label", "e2e-" + uid(), "--chip", "esp32", "--allow-duplicate", "--json"})
+	t.Cleanup(func() { cancelDeployment(t, again.DeploymentID) })
+	if again.BuildNumber <= first.BuildNumber || again.SHA256 != first.SHA256 {
+		t.Fatalf("--allow-duplicate: %+v after %+v", again, first)
+	}
+}
+
+// TestServerRejectsWrongSHA256 checks the server side of the manifest's
+// sha256, which the CLI always fills from the bytes it sends.
+func TestServerRejectsWrongSHA256(t *testing.T) {
+	bin, _ := os.ReadFile(firmware(t))
+	manifest := fmt.Sprintf(`{"framework":"esp_idf","version_label":"e2e-%s","chip_family":"esp32","security_mode":"basic","sha256":"%s"}`, uid(), strings.Repeat("0", 64))
+	status, body := rawRelease(t, bin, manifest)
+	if status != http.StatusBadRequest || !strings.Contains(body, "sha256 mismatch") {
+		t.Fatalf("wrong sha256: %d %s", status, body)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -64,14 +65,11 @@ func TestBasicRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(firmware)
-	if !res.SHA256Verified || res.Warning != "" {
-		t.Fatalf("checksum should be verified: %+v", res)
-	}
 	if res.BuildNumber != 1 || res.SecurityMode != "basic" || res.KeyID != "" || res.SHA256 != hex.EncodeToString(sum[:]) || res.Size != int64(len(firmware)) {
 		t.Fatalf("res = %+v", res)
 	}
 	m := fake.LastManifest
-	if m.Framework != "esp_idf" || m.ChipFamily != "esp32s3" || m.VersionLabel != "1.0.0" || m.SigningMetadata != nil {
+	if m.Framework != "esp_idf" || m.ChipFamily != "esp32s3" || m.VersionLabel != "1.0.0" || m.SigningMetadata != nil || m.SHA256 == nil || *m.SHA256 != res.SHA256 {
 		t.Fatalf("manifest = %+v", m)
 	}
 	if fake.Deployments[0].RolloutPercentage != 10 {
@@ -136,17 +134,60 @@ func TestRevokedKeyIsRefused(t *testing.T) {
 	}
 }
 
-func TestChecksumMismatchCancelsDeployment(t *testing.T) {
+func TestChecksumMismatchCreatesNothing(t *testing.T) {
 	fake, svc := service(t)
-	fake.StoredChecksumOverride = strings.Repeat("0", 64)
+	fake.CorruptUploads = true
 	_, err := svc.Release(context.Background(), release.Options{
 		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Percent: 100, Channel: "stable",
 	})
-	if !errors.Is(err, release.ErrChecksumMismatch) {
+	if !errors.Is(err, release.ErrChecksumMismatch) || !strings.Contains(err.Error(), "nothing was created") {
 		t.Fatalf("err = %v", err)
 	}
-	if fake.Deployments[0].State != api.StateCancelled {
-		t.Fatalf("deployment state = %s, want cancelled", fake.Deployments[0].State)
+	if len(fake.Artifacts) != 0 || len(fake.Deployments) != 0 {
+		t.Fatal("a rejected upload must not create a build")
+	}
+	if n := fake.Count("POST /api/v1/projects/" + fakeapi.ProjectID + "/release/"); n != 1 {
+		t.Fatalf("upload sent %d times, want once", n)
+	}
+}
+
+func TestDuplicateBinaryIsRefusedBeforeUpload(t *testing.T) {
+	fake, svc := service(t)
+	bin := writeBin(t, "app.bin", firmware)
+	opts := release.Options{BinaryPath: bin, VersionLabel: "1.0.0", Chip: "esp32", Percent: 100, Channel: "stable"}
+	if _, err := svc.Release(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	opts.VersionLabel = "1.0.1"
+	_, err := svc.Release(context.Background(), opts)
+	if !errors.Is(err, release.ErrDuplicate) || !strings.Contains(err.Error(), "build 1 (version 1.0.0)") || !strings.Contains(err.Error(), "--allow-duplicate") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(fake.Artifacts) != 1 {
+		t.Fatalf("%d builds, want 1", len(fake.Artifacts))
+	}
+
+	opts.AllowDuplicate = true
+	res, err := svc.Release(context.Background(), opts)
+	if err != nil || res.BuildNumber != 2 {
+		t.Fatalf("--allow-duplicate: %+v %v", res, err)
+	}
+	if fake.Count("GET /api/v1/projects/"+fakeapi.ProjectID+"/artifacts/") != 2 {
+		t.Fatal("--allow-duplicate should skip the artifact lookup")
+	}
+}
+
+func TestUnreadableArtifactListStopsBeforeUpload(t *testing.T) {
+	fake, svc := service(t)
+	fake.FailNext["/api/v1/projects/"+fakeapi.ProjectID+"/artifacts/"] = []int{500}
+	_, err := svc.Release(context.Background(), release.Options{
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Percent: 100, Channel: "stable",
+	})
+	if err == nil || !strings.Contains(err.Error(), "earlier upload of this binary") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(fake.Artifacts) != 0 {
+		t.Fatal("nothing should be uploaded")
 	}
 }
 
@@ -214,41 +255,54 @@ func TestInvalidInputFailsBeforeNetwork(t *testing.T) {
 	}
 }
 
-func TestUnreadableChecksumIsAWarningNotAFailure(t *testing.T) {
-	fake, svc := service(t)
-	fake.FailNext["/api/v1/projects/"+fakeapi.ProjectID+"/artifacts/"] = []int{500}
-	res, err := svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Percent: 100, Channel: "stable",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.SHA256Verified || res.Warning == "" || res.BuildNumber != 1 {
-		t.Fatalf("res = %+v", res)
-	}
-	if fake.Deployments[0].State != api.StateActive {
-		t.Fatal("an unverifiable checksum must not cancel the deployment")
-	}
+// unclearServer fails every upload with fail and counts the attempts.
+func unclearServer(t *testing.T, fail func(http.ResponseWriter)) (release.Service, *atomic.Int32) {
+	var uploads atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/release/"):
+			uploads.Add(1)
+			_, _ = io.Copy(io.Discard, r.Body)
+			fail(w)
+		case strings.HasSuffix(r.URL.Path, "/artifacts/"):
+			_, _ = io.WriteString(w, `[]`)
+		default:
+			_, _ = io.WriteString(w, `{"id":"p","default_framework":"esp_idf"}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c := api.New(srv.URL, fakeapi.ProjectToken, "test", api.WithSleep(func(context.Context, time.Duration) error { return nil }))
+	return release.Service{API: c, ProjectID: fakeapi.ProjectID}, &uploads
 }
 
-func TestDroppedConnectionWarnsThatTheBuildMayExist(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/release/") {
-			_, _ = io.Copy(io.Discard, r.Body)
-			conn, _, err := w.(http.Hijacker).Hijack()
-			if err == nil {
+func TestUnclearUploadFailureIsNotRetried(t *testing.T) {
+	failures := map[string]func(http.ResponseWriter){
+		"dropped connection": func(w http.ResponseWriter) {
+			if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
 				conn.Close()
 			}
-			return
-		}
-		_, _ = io.WriteString(w, `{"id":"p","default_framework":"esp_idf"}`)
-	}))
-	defer srv.Close()
-	svc := release.Service{API: api.New(srv.URL, fakeapi.ProjectToken, "test"), ProjectID: fakeapi.ProjectID}
-	_, err := svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Percent: 100, Channel: "stable",
-	})
-	if err == nil || !strings.Contains(err.Error(), "may still have created a build") {
-		t.Fatalf("err = %v", err)
+		},
+		"bad gateway":      func(w http.ResponseWriter) { w.WriteHeader(http.StatusBadGateway) },
+		"gateway timeout":  func(w http.ResponseWriter) { w.WriteHeader(http.StatusGatewayTimeout) },
+		"unavailable":      func(w http.ResponseWriter) { w.WriteHeader(http.StatusServiceUnavailable) },
+		"too many request": func(w http.ResponseWriter) { w.WriteHeader(http.StatusTooManyRequests) },
+	}
+	for name, fail := range failures {
+		t.Run(name, func(t *testing.T) {
+			svc, uploads := unclearServer(t, fail)
+			_, err := svc.Release(context.Background(), release.Options{
+				BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Percent: 100, Channel: "stable",
+			})
+			if err == nil {
+				t.Fatal("want an error")
+			}
+			if uploads.Load() != 1 {
+				t.Fatalf("upload sent %d times, want once", uploads.Load())
+			}
+			unclear := name != "too many request"
+			if strings.Contains(err.Error(), "may still have created a build") != unclear {
+				t.Fatalf("err = %v", err)
+			}
+		})
 	}
 }

@@ -77,7 +77,21 @@ two keys and cannot change them over the air.
 
 There is no rollback command: SimpleOTA never offers a build at or below the
 one a device runs. To go back, release the previous source again; it gets a
-new, higher build number.
+new, higher build number. If the rebuilt binary is byte-for-byte the earlier
+one, `release` stops because the project already has it; pass
+`--allow-duplicate` to upload it again.
+
+### Failed uploads
+
+`release` sends the upload once and never retries it, because every accepted
+upload uses a new build number and counts against your plan's monthly limit.
+The manifest carries the binary's SHA-256, so if the bytes change on the way,
+the server rejects the upload and nothing is created.
+
+If the connection drops or a gateway answers 5xx mid-upload, the build may
+exist anyway. Run the same `release` again: it checks the project's builds
+first and stops with the existing build number if the binary is already
+there, so it cannot create a second build.
 
 ## Commands
 
@@ -89,7 +103,7 @@ SimpleOTA resource sit under its name.
 | `status` | Show the CLI's version and available update, login, project and signing key |
 | `login` / `logout` | Store or remove a personal (`soto_pat_`) or project (`soto_proj_`) token |
 | `update [--check] [--version <v>]` | Replace this binary with the latest (or a given) release, after checking its SHA-256 |
-| `release <bin> --version-label <v> --chip <c>` | Sign, upload and deploy in one call, then verify the stored SHA-256. Never retried: each upload uses a build number |
+| `release <bin> --version-label <v> --chip <c>` | Sign, upload and deploy in one call. Stops if the project already has this binary (`--allow-duplicate` uploads it anyway); never retried |
 | `deployment status [id] [--wait]` | Show a deployment's device progress; `--wait` gates CI |
 | `deployment ramp <id> --percent <n>` | Offer the build to more devices |
 | `deployment pause\|resume\|complete\|cancel <id>` | Change a deployment's state |

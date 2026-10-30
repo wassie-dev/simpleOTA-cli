@@ -16,13 +16,14 @@ import (
 const signingKeyEnv = "SIMPLEOTA_SIGNING_KEY"
 
 type releaseFlags struct {
-	versionLabel string
-	chip         string
-	framework    string
-	percent      int
-	channel      string
-	keyFile      string
-	securityMode string
+	versionLabel   string
+	chip           string
+	framework      string
+	percent        int
+	channel        string
+	keyFile        string
+	securityMode   string
+	allowDuplicate bool
 }
 
 func (a *App) releaseCommand() *cobra.Command {
@@ -38,8 +39,12 @@ The release is signed when a key is available: --key-file, then
 SIMPLEOTA_SIGNING_KEY (an exported key; set SIMPLEOTA_SIGNING_KEY_PASSPHRASE
 for an encrypted one), then the default key from keys generate.
 
-The upload is never retried: every accepted upload uses a new build number
-and counts against the plan's monthly limit.`,
+The manifest carries the binary's SHA-256, and the server rejects the upload
+if the bytes it received differ. The upload is sent once and never retried:
+every accepted upload uses a new build number and counts against the plan's
+monthly limit. release stops before uploading when the project already has a
+build of the same binary, so running it again after a failed upload cannot
+create a second build; pass --allow-duplicate to upload it anyway.`,
 		Example: `  simpleota release build/app.bin --version-label 1.4.0 --chip esp32s3
   simpleota release build/app.bin --version-label 1.4.1 --chip esp32 --percent 10 --channel beta`,
 		Args: exactArgs(1),
@@ -55,6 +60,7 @@ and counts against the plan's monthly limit.`,
 	fl.StringVar(&f.channel, "channel", "stable", "release channel; it must already exist on the project")
 	fl.StringVar(&f.keyFile, "key-file", "", "signing key file")
 	fl.StringVar(&f.securityMode, "security-mode", "auto", "auto (signed when a key is available), basic or signed")
+	fl.BoolVar(&f.allowDuplicate, "allow-duplicate", false, "upload even if the project already has a build of this binary")
 	return cmd
 }
 
@@ -100,19 +106,17 @@ func (a *App) runRelease(ctx context.Context, binPath string, f releaseFlags) er
 		p.Notice("Uploading unsigned (basic). Devices that enforce signed firmware will not be offered this build.")
 	}
 	res, err := release.Service{API: s.api, ProjectID: projectID}.Release(ctx, release.Options{
-		BinaryPath:   binPath,
-		VersionLabel: f.versionLabel,
-		Chip:         f.chip,
-		Framework:    f.framework,
-		Percent:      f.percent,
-		Channel:      f.channel,
-		Key:          key,
+		BinaryPath:     binPath,
+		VersionLabel:   f.versionLabel,
+		Chip:           f.chip,
+		Framework:      f.framework,
+		Percent:        f.percent,
+		Channel:        f.channel,
+		Key:            key,
+		AllowDuplicate: f.allowDuplicate,
 	})
 	if err != nil {
 		return err
-	}
-	if res.Warning != "" {
-		p.Notice("Warning: %s", res.Warning)
 	}
 	return p.Release(output.NewReleaseView(res))
 }

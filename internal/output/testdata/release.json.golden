@@ -7,6 +7,5 @@
   "security_mode": "signed",
   "key_id": "prod-2026",
   "sha256": "ab12",
-  "sha256_verified": true,
   "size": 1024
 }

@@ -32,6 +32,7 @@ type SigningKey struct {
 type Artifact struct {
 	ID             string `json:"id"`
 	BuildNumber    int    `json:"build_number"`
+	VersionLabel   string `json:"version_label"`
 	ChecksumSHA256 string `json:"checksum_sha256"`
 	FileSize       int64  `json:"file_size"`
 	SecurityMode   string `json:"security_mode"`

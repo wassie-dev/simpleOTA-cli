@@ -14,8 +14,10 @@ All notable changes to simpleota are documented here. The format follows
   encrypted with a passphrase, register only the public key, and print the
   `signing_keys` snippet for the 1.0 firmware clients.
 - `keys export`: print the private key, encrypted or as PEM, for a CI secret.
-- `release`: sign, upload and deploy a firmware binary in one call, then
-  check the SHA-256 the server stored.
+- `release`: sign, upload and deploy a firmware binary in one call. The
+  manifest carries the binary's SHA-256 for the server to check, the upload
+  is never retried, and a binary the project already has is refused unless
+  `--allow-duplicate` is passed.
 - `deployment status`: show a deployment's device progress; `--wait` gates
   CI on it.
 - `deployment ramp`, `pause`, `resume`, `complete` and `cancel`: change a
