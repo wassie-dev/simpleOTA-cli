@@ -58,8 +58,13 @@ try {
         go build -ldflags '-X github.com/wassie-dev/simpleOTA-cli/internal/version.Version=0.0.1' -o $exe ./cmd/simpleota
         if ($LASTEXITCODE -ne 0) { Fail 'building the old binary' }
     } finally { Pop-Location }
+    # Windows PowerShell 5.1 turns a native program's stderr into errors
+    # under 'Stop'; update writes its progress there.
+    $ErrorActionPreference = 'Continue'
     $out = (& $exe update --version $version 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 0 -or $out -notmatch "Updated simpleota from 0\.0\.1 to $([regex]::Escape($version))") { Fail "self-update: $out" }
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    if ($code -ne 0 -or $out -notmatch "Updated simpleota from 0\.0\.1 to $([regex]::Escape($version))") { Fail "self-update: $out" }
     if ((& $exe --version) -notmatch [regex]::Escape($version)) { Fail 'self-updated binary version' }
     Write-Host 'ok   simpleota update replaces its own binary'
 
