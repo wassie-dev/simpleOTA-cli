@@ -8,15 +8,49 @@ signatures are sent to SimpleOTA.
 
 ## Install
 
-Download a binary for Linux, macOS or Windows (amd64 or arm64) from the
-[releases page](https://github.com/wassie-dev/simpleOTA-cli/releases) and
-check it against `checksums.txt`. On macOS, a binary downloaded in a browser
-is quarantined until you run `xattr -d com.apple.quarantine simpleota`.
-Or build it with Go 1.27+:
+Linux and macOS:
+
+```bash
+curl -fsSL https://github.com/wassie-dev/simpleOTA-cli/releases/latest/download/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://github.com/wassie-dev/simpleOTA-cli/releases/latest/download/install.ps1 | iex
+```
+
+The script downloads the release for your OS and CPU, checks it against the
+release's `checksums.txt`, and installs it without sudo: on Linux and macOS
+where `simpleota` already is, else `/usr/local/bin` if writable, else
+`~/.local/bin`; on Windows in `%LOCALAPPDATA%\Programs\simpleota`, which it
+adds to your user PATH. Run the same command again to update.
+
+| Variable | Use |
+| --- | --- |
+| `SIMPLEOTA_VERSION` | Install a specific version, e.g. `0.1.0` |
+| `SIMPLEOTA_INSTALL_DIR` | Install somewhere else |
+| `SIMPLEOTA_NO_MODIFY_PATH=1` | Windows: leave the user PATH alone |
+
+For example, to pin a version:
+
+```bash
+curl -fsSL https://github.com/wassie-dev/simpleOTA-cli/releases/latest/download/install.sh | SIMPLEOTA_VERSION=0.1.0 sh
+```
+
+You can also download an archive from the
+[releases page](https://github.com/wassie-dev/simpleOTA-cli/releases) (on
+macOS, a browser download is quarantined until you run
+`xattr -d com.apple.quarantine simpleota`), or build with Go 1.27+:
 
 ```bash
 go install github.com/wassie-dev/simpleOTA-cli/cmd/simpleota@latest
 ```
+
+To uninstall, run `simpleota logout` to remove the token from the OS
+keychain, then delete the `simpleota` binary and the config directory
+(`~/.config/simpleota` on Linux, `~/Library/Application Support/simpleota`
+on macOS, `%APPDATA%\simpleota` on Windows).
 
 ## Quickstart
 

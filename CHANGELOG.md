@@ -20,3 +20,5 @@ All notable changes to simpleota are documented here. The format follows
 - `status`: show a deployment's device progress; `--wait` gates CI on it.
 - `--json` output with a documented schema, and fixed exit codes.
 - Static binaries for Linux, macOS and Windows on amd64 and arm64.
+- `install.sh` and `install.ps1`: one-line install and update scripts,
+  published with each release, that verify the download's checksum.

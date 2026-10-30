@@ -40,7 +40,7 @@ SERVER_ENV=(env -i
   HOME="$HOME" PATH="/usr/bin:/bin" LANG=C.UTF-8
   DEBUG=True
   SECRET_KEY=simpleota-cli-devserver-not-a-secret
-  ALLOWED_HOSTS=127.0.0.1,localhost
+  "ALLOWED_HOSTS=127.0.0.1,localhost"
   MAILER_EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
   INDEXNOW_ENABLED=False)
 
@@ -136,7 +136,7 @@ EOF
 case "${1:-up}" in
   up) checkout; install; stop; seed; start; show_env ;;
   down) stop ;;
-  reset) stop; rm -rf "$SRC/db.sqlite3" "$SRC/media" "$ENV_FILE"; log "reset" ;;
+  reset) stop; rm -rf "${SRC:?}/db.sqlite3" "${SRC:?}/media" "$ENV_FILE"; log "reset" ;;
   env) show_env ;;
   *) die "usage: scripts/devserver.sh [up|down|reset|env]" ;;
 esac
