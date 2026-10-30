@@ -104,8 +104,9 @@ func (a *App) deploymentStatusCommand() *cobra.Command {
 been offered it, confirmed, failed or rolled back.
 
 With --wait, poll until every device the current rollout step has reached
-has confirmed (exit 0). Exit 4 if a device fails or rolls back or the
-deployment is paused, cancelled or not started, and 5 on timeout. Devices
+has confirmed (exit 0). Exit 4 if a device fails or rolls back, if the
+deployment is paused, cancelled or not started, or if it was completed
+before any device was offered the build, and 5 on timeout. Devices
 count once they have checked in and been offered the build. Network and
 gateway errors while polling are retried until the timeout.`,
 		Example: `  simpleota deployment status
@@ -190,7 +191,12 @@ func (a *App) runDeploymentStatus(ctx context.Context, deploymentID string, wait
 			msg += ". " + next
 		}
 		return &exitError{code: ExitDeployment, err: fmt.Errorf("%s", msg)}
+	case deploy.OutcomeNoDevices:
+		return &exitError{code: ExitDeployment, err: fmt.Errorf("deployment %s was completed before any device was offered build %d, so no device updated", deploymentID, sum.Deployment.ArtifactBuildNumber)}
 	case deploy.OutcomeTimedOut:
+		if sum.Counts.Offered == 0 {
+			return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s: no device has been offered build %d yet; a device is offered it when it checks in, if it is on the channel, in the rollout and compatible", timeout, sum.Deployment.ArtifactBuildNumber)}
+		}
 		return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s: %d of %d offered devices confirmed", timeout, sum.Counts.Confirmed, sum.Counts.Offered)}
 	}
 	return nil

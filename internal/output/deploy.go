@@ -66,7 +66,7 @@ func NewDeploymentStatusView(s deploy.Summary, o deploy.Outcome) DeploymentStatu
 func NextStep(d api.Deployment) string {
 	switch d.State {
 	case api.StatePaused, api.StateCancelled:
-		return "To ship a fix or go back, release the fixed or previous source again as a new build: simpleota release <bin> --version-label <label> --chip <chip>"
+		return "To ship a fix or go back, release the fixed or previous source again as a new build: simpleota release <bin> --version-label <label>"
 	}
 	return ""
 }
@@ -108,6 +108,8 @@ func (p Printer) DeploymentStatus(v DeploymentStatusView) error {
 		fmt.Fprintln(p.Out, p.red("A device failed or rolled back."))
 	case deploy.OutcomeStopped:
 		fmt.Fprintln(p.Out, p.yellow("The deployment is not running."))
+	case deploy.OutcomeNoDevices:
+		fmt.Fprintln(p.Out, p.yellow("The deployment was completed before any device was offered the build."))
 	case deploy.OutcomeTimedOut:
 		fmt.Fprintln(p.Out, p.yellow("Timed out before every device confirmed."))
 	}

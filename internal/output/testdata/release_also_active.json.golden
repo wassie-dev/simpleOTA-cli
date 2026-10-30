@@ -1,0 +1,25 @@
+{
+  "build_number": 42,
+  "artifact_id": "art",
+  "deployment_id": "5f0c2b1e-1d2c-4b7a-9a3e-0123456789ab",
+  "state": "active",
+  "channel": "stable",
+  "security_mode": "signed",
+  "key_id": "prod-2026",
+  "chip": "esp32s3",
+  "sha256": "ab12",
+  "size": 1024,
+  "also_active": [
+    {
+      "id": "0d8e7a14-3b5c-4f2a-8e1d-abcdef012345",
+      "project_id": "",
+      "build_number": 41,
+      "state": "active",
+      "rollout_strategy": "immediate",
+      "rollout_percentage": 100,
+      "created_at": "0001-01-01T00:00:00Z",
+      "started_at": null,
+      "completed_at": null
+    }
+  ]
+}

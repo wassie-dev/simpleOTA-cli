@@ -68,7 +68,7 @@ simpleota status
 simpleota keys generate --key-id prod-2026
 
 # 3. Pin the printed signing_keys snippet in your firmware, then release
-simpleota release build/app.bin --version-label 1.0.0 --chip esp32s3 --percent 10
+simpleota release build/app.bin --version-label 1.0.0 --percent 10
 
 # 4. Watch it, then widen it
 simpleota deployment status --wait --timeout 30m
@@ -82,7 +82,20 @@ Project ID from the project's page when `login` asks, or pass
 
 Run `simpleota keys generate` a second time for a backup key, keep that one
 offline, and pin both keys in your first signed firmware. Devices pin at most
-two keys and cannot change them over the air.
+two keys and cannot change them over the air. Each `keys generate` prints a
+snippet that pins the new key and the project's newest other active key, so
+the second run's snippet holds both.
+
+`release` reads the chip family from the image header, which names the chip
+the image was built for. It refuses a `--chip` that differs from the header
+unless a device in the project reports that chip, since no other device would
+be offered the build.
+
+A device installs the highest build offered to it, so several deployments can
+be active on one channel: an older one goes on reaching the devices a newer
+one does not, such as those outside a 10% rollout. `release` lists the other
+active deployments for the same chip on its channel; stop one with
+`simpleota deployment complete <id>`.
 
 There is no rollback command: SimpleOTA never offers a build at or below the
 one a device runs. To go back, release the previous source again; it gets a
@@ -112,7 +125,7 @@ SimpleOTA resource sit under its name.
 | `status` | Show the CLI's version and available update, login, project and signing key |
 | `login` / `logout` | Store or remove a personal (`soto_pat_`) or project (`soto_proj_`) token |
 | `update [--check] [--version <v>]` | Replace this binary with the latest (or a given) release, after checking its SHA-256 |
-| `release <bin> --version-label <v> --chip <c>` | Sign, upload and deploy in one call. Stops if the project already has this binary (`--allow-duplicate` uploads it anyway); never retried |
+| `release <bin> --version-label <v>` | Sign, upload and deploy in one call. Stops if the project already has this binary (`--allow-duplicate` uploads it anyway); never retried |
 | `deployment status [id] [--wait]` | Show a deployment's device progress; `--wait` gates CI |
 | `deployment ramp <id> --percent <n>` | Offer the build to more devices |
 | `deployment pause\|resume\|complete\|cancel <id>` | Change a deployment's state |
@@ -122,15 +135,16 @@ SimpleOTA resource sit under its name.
 Global flags: `--json` ([schema](docs/json.md)), `--api-url`, `--project`.
 `deployment status --wait` exits 0 once every device the current step reached
 has confirmed, and counts a device once it has checked in and been offered
-the build.
+the build. A deployment completed before any device was offered the build
+exits 4, since no device updated.
 
 | Exit code | Meaning |
 | --- | --- |
 | 0 | OK |
 | 1 | Error (for `status`: the API could not be reached) |
-| 2 | Usage error |
+| 2 | Usage error (for `status`: `--project` or the project saved at login cannot be found) |
 | 3 | Not logged in, or the token was rejected (`status` too) |
-| 4 | A device failed or rolled back, or the deployment is paused, cancelled or not started |
+| 4 | A device failed or rolled back, the deployment is paused, cancelled or not started, or it was completed before any device was offered the build |
 | 5 | `deployment status --wait` timed out |
 
 | Variable | Use |
@@ -159,7 +173,7 @@ GitHub Actions:
     SIMPLEOTA_SIGNING_KEY: ${{ secrets.SIMPLEOTA_SIGNING_KEY }}
     SIMPLEOTA_SIGNING_KEY_PASSPHRASE: ${{ secrets.SIMPLEOTA_SIGNING_KEY_PASSPHRASE }}
   run: |
-    ID=$(simpleota release build/app.bin --version-label "${GITHUB_REF_NAME}" --chip esp32s3 --percent 10 --json | jq -r .deployment_id)
+    ID=$(simpleota release build/app.bin --version-label "${GITHUB_REF_NAME}" --percent 10 --json | jq -r .deployment_id)
     simpleota deployment status "$ID" --wait --timeout 30m
 ```
 
@@ -168,7 +182,7 @@ GitLab CI:
 ```yaml
 release:
   script:
-    - ID=$(simpleota release build/app.bin --version-label "$CI_COMMIT_TAG" --chip esp32s3 --percent 10 --json | jq -r .deployment_id)
+    - ID=$(simpleota release build/app.bin --version-label "$CI_COMMIT_TAG" --percent 10 --json | jq -r .deployment_id)
     - simpleota deployment status "$ID" --wait --timeout 30m
 ```
 

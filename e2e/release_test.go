@@ -25,6 +25,10 @@ type releaseOut struct {
 	SecurityMode string `json:"security_mode"`
 	KeyID        string `json:"key_id"`
 	SHA256       string `json:"sha256"`
+	Chip         string `json:"chip"`
+	AlsoActive   []struct {
+		ID string `json:"id"`
+	} `json:"also_active"`
 }
 
 // firmware writes a unique fake ESP32 app image.
@@ -35,6 +39,7 @@ func firmware(t *testing.T) string {
 		t.Fatal(err)
 	}
 	b[0] = 0xe9
+	b[12], b[13] = 0, 0 // the header's chip ID: esp32
 	p := filepath.Join(t.TempDir(), "app.bin")
 	if err := os.WriteFile(p, b, 0o644); err != nil {
 		t.Fatal(err)
@@ -196,5 +201,26 @@ func TestServerRejectsWrongSHA256(t *testing.T) {
 	status, body := rawRelease(t, bin, manifest)
 	if status != http.StatusBadRequest || !strings.Contains(body, "sha256 mismatch") {
 		t.Fatalf("wrong sha256: %d %s", status, body)
+	}
+}
+
+func TestReleaseChipComesFromImage(t *testing.T) {
+	c := ciCLI(t)
+	bin := firmware(t)
+	if r := c.run("", "release", bin, "--version-label", "e2e-"+uid(), "--chip", "esp99"); r.code != 2 || !strings.Contains(r.stderr, "built for esp32, but --chip is esp99") {
+		t.Fatalf("mismatched --chip: %+v", r)
+	}
+	first := release0(t, c, []string{"release", bin, "--version-label", "e2e-" + uid(), "--json"})
+	t.Cleanup(func() { cancelDeployment(t, first.DeploymentID) })
+	if first.Chip != "esp32" {
+		t.Fatalf("chip = %q", first.Chip)
+	}
+	second := release(t, c)
+	found := false
+	for _, d := range second.AlsoActive {
+		found = found || d.ID == first.DeploymentID
+	}
+	if !found {
+		t.Fatalf("also_active = %+v, want it to name %s", second.AlsoActive, first.DeploymentID)
 	}
 }

@@ -20,6 +20,7 @@ type StatusView struct {
 	ConfigDir       string          `json:"config_dir"`
 	Auth            AuthView        `json:"auth"`
 	Project         *ProjectView    `json:"project"`
+	ProjectError    string          `json:"project_error,omitempty"`
 	SigningKey      SigningKeyState `json:"signing_key"`
 }
 
@@ -64,9 +65,12 @@ func (p Printer) Status(v StatusView) error {
 		fmt.Fprintf(p.Out, "  logged in    %s token from %s, not checked: %s\n", v.Auth.TokenType, v.Auth.Source, v.Auth.Error)
 	}
 
-	if v.Project != nil {
+	switch {
+	case v.ProjectError != "":
+		fmt.Fprintf(p.Out, "  project      %s\n", p.red(v.ProjectError))
+	case v.Project != nil:
 		fmt.Fprintf(p.Out, "  project      %s (%s)\n", v.Project.Slug, v.Project.ID)
-	} else {
+	default:
 		fmt.Fprintln(p.Out, "  project      none selected")
 	}
 

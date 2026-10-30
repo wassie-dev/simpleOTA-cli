@@ -26,8 +26,10 @@ type statusJSON struct {
 	Project *struct {
 		ID   string `json:"id"`
 		Slug string `json:"slug"`
+		Name string `json:"name"`
 	} `json:"project"`
-	SigningKey struct {
+	ProjectError string `json:"project_error"`
+	SigningKey   struct {
 		Source string `json:"source"`
 		Path   string `json:"path"`
 		Error  string `json:"error"`
@@ -144,5 +146,57 @@ func TestStatusSigningKey(t *testing.T) {
 	h.env[signingKeyEnv] = "PEM"
 	if _, v := cliStatus(t, h); v.SigningKey.Source != "env" {
 		t.Fatalf("%+v", v.SigningKey)
+	}
+}
+
+func TestStatusUnknownProject(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.PersonalToken)
+	for _, ref := range []string{"does-not-exist", fakeapi.OtherID} {
+		r := h.run("--project", ref, "status", "--json")
+		var v statusJSON
+		if err := json.Unmarshal([]byte(r.stdout), &v); err != nil {
+			t.Fatalf("%q: %v", r.stdout, err)
+		}
+		if r.code != ExitUsage || v.Project != nil || v.ProjectError == "" || r.stderr != "" {
+			t.Fatalf("--project %s: %+v %+v", ref, r, v)
+		}
+		r = h.run("--project", ref, "status")
+		if r.code != ExitUsage || !strings.Contains(r.stdout, "project      ") || !strings.Contains(r.stdout, ref) {
+			t.Fatalf("human output for --project %s: %+v", ref, r)
+		}
+	}
+	if r := h.run("--project", "fleet", "status"); r.code != 0 {
+		t.Fatalf("a visible project: %+v", r)
+	}
+}
+
+func TestStatusStaffProjectHasName(t *testing.T) {
+	h := newHarness(t)
+	h.stdin = fakeapi.StaffToken + "\n"
+	if r := h.run("login", "--project", fakeapi.ProjectID); r.code != 0 {
+		t.Fatalf("login: %+v", r)
+	}
+	r, v := cliStatus(t, h)
+	if r.code != 0 || v.Project == nil || v.Project.Name != "Fleet" || v.Project.Slug != "fleet" {
+		t.Fatalf("%+v %+v", r, v)
+	}
+	r = h.run("--project", "fleet", "status")
+	if r.code != ExitUsage || !strings.Contains(r.stdout, "by ID, not slug") {
+		t.Fatalf("staff --project slug: %+v", r)
+	}
+}
+
+func TestStatusSavedProjectGone(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.PersonalToken)
+	cfg, _ := config.Load(h.configDir)
+	cfg.ProjectID, cfg.ProjectSlug = fakeapi.OtherID, "gone"
+	if err := config.Save(h.configDir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	r, v := cliStatus(t, h)
+	if r.code != ExitUsage || !strings.Contains(v.ProjectError, "saved at login (gone)") {
+		t.Fatalf("%+v %+v", r, v)
 	}
 }

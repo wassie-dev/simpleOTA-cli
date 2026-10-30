@@ -32,6 +32,8 @@ const (
 	StaffToken = "soto_pat_staffstaffstaffstaffstaff"
 	ProjectID  = "11111111-1111-4111-8111-111111111111"
 	OtherID    = "22222222-2222-4222-8222-222222222222"
+	// StableChannelID is the ID of the project's only channel, stable.
+	StableChannelID = "33333333-3333-4333-8333-333333333333"
 )
 
 // Manifest is the upload manifest as the server parses it.
@@ -63,6 +65,7 @@ type Server struct {
 	Projects    []api.Project
 	SigningKeys []api.SigningKey
 	Artifacts   []api.Artifact
+	Devices     []api.Device
 	Deployments []api.Deployment
 	States      map[string][]api.DeviceState
 	// Requests counts calls by "METHOD path".
@@ -191,6 +194,12 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		s.registerKey(w, r)
 	case route == "artifacts" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, s.Artifacts)
+	case route == "devices" && r.Method == http.MethodGet:
+		devices := s.Devices
+		if devices == nil {
+			devices = []api.Device{}
+		}
+		writeJSON(w, http.StatusOK, devices)
 	case route == "release" && r.Method == http.MethodPost:
 		s.release(w, r)
 	case route == "deployments" && r.Method == http.MethodGet:
@@ -242,7 +251,7 @@ func (s *Server) registerKey(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	k := api.SigningKey{ID: fmt.Sprintf("key-%d", len(s.SigningKeys)+1), ProjectID: ProjectID, KeyID: in.KeyID, Algorithm: "ed25519", PublicKeyPEM: *in.PublicKeyPEM}
+	k := api.SigningKey{ID: fmt.Sprintf("key-%d", len(s.SigningKeys)+1), ProjectID: ProjectID, KeyID: in.KeyID, Algorithm: "ed25519", PublicKeyPEM: *in.PublicKeyPEM, CreatedAt: s.next()}
 	s.SigningKeys = append(s.SigningKeys, k)
 	writeJSON(w, http.StatusCreated, k)
 }
@@ -294,11 +303,12 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 	}
 	s.LastManifest = m
 	build := len(s.Artifacts) + 1
-	a := api.Artifact{ID: fmt.Sprintf("art-%d", build), BuildNumber: build, VersionLabel: m.VersionLabel, ChecksumSHA256: checksum, FileSize: int64(len(binary)), SecurityMode: m.SecurityMode}
+	a := api.Artifact{ID: fmt.Sprintf("art-%d", build), BuildNumber: build, VersionLabel: m.VersionLabel, ChecksumSHA256: checksum, FileSize: int64(len(binary)), SecurityMode: m.SecurityMode, ChipFamily: m.ChipFamily}
 	s.Artifacts = append(s.Artifacts, a)
 	d := api.Deployment{
 		ID: fmt.Sprintf("00000000-0000-4000-8000-%012d", build), ProjectID: ProjectID, ArtifactID: a.ID,
 		ArtifactBuildNumber: build, RolloutStrategy: "immediate", RolloutPercentage: pct, State: api.StateActive, CreatedAt: s.next(),
+		TargetChannelIDs: []string{StableChannelID},
 	}
 	s.Deployments = append([]api.Deployment{d}, s.Deployments...)
 	writeJSON(w, http.StatusCreated, api.ReleaseResult{ArtifactID: a.ID, BuildNumber: build, DeploymentID: d.ID, State: d.State, Channel: channel})

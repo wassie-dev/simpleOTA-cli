@@ -57,13 +57,17 @@ func TestStatusWaitExitCodes(t *testing.T) {
 		{name: "rolled back", state: api.StatePaused, status: "rolled_back", want: ExitDeployment},
 		{name: "paused", state: api.StatePaused, status: "confirmed", want: ExitDeployment},
 		{name: "timeout", state: api.StateActive, status: "downloaded", want: ExitTimeout},
+		{name: "completed with no devices", state: api.StateCompleted, want: ExitDeployment},
+		{name: "no devices yet", state: api.StateActive, want: ExitTimeout},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newHarness(t)
 			h.login(fakeapi.ProjectToken)
 			h.fake.AddDeployment(depA, tt.state, 5, 100)
-			h.fake.SetStates(depA, api.DeviceState{DeviceID: "d1", FinalStatus: tt.status, AssignedToRollout: true})
+			if tt.status != "" {
+				h.fake.SetStates(depA, api.DeviceState{DeviceID: "d1", FinalStatus: tt.status, AssignedToRollout: true})
+			}
 			r := h.run("deployment", "status", depA, "--wait", "--timeout", "30s", "--json")
 			if r.code != tt.want {
 				t.Fatalf("exit = %d, want %d: %+v", r.code, tt.want, r)

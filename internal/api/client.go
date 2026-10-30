@@ -27,6 +27,7 @@ type API interface {
 	RegisterSigningKey(ctx context.Context, projectID, keyID, publicKeyPEM string) (SigningKey, error)
 	Release(ctx context.Context, projectID string, req ReleaseRequest) (ReleaseResult, error)
 	ListArtifacts(ctx context.Context, projectID string) ([]Artifact, error)
+	ListDevices(ctx context.Context, projectID string) ([]Device, error)
 	ListDeployments(ctx context.Context, projectID string) ([]Deployment, error)
 	GetDeployment(ctx context.Context, projectID, deploymentID string) (Deployment, error)
 	TransitionDeployment(ctx context.Context, projectID, deploymentID string, t Transition) (Deployment, error)
@@ -159,6 +160,11 @@ func (c *Client) RegisterSigningKey(ctx context.Context, projectID, keyID, publi
 func (c *Client) ListArtifacts(ctx context.Context, projectID string) ([]Artifact, error) {
 	var out []Artifact
 	return out, c.get(ctx, projectPath(projectID, "artifacts"), &out)
+}
+
+func (c *Client) ListDevices(ctx context.Context, projectID string) ([]Device, error) {
+	var out []Device
+	return out, c.get(ctx, projectPath(projectID, "devices"), &out)
 }
 
 func (c *Client) ListDeployments(ctx context.Context, projectID string) ([]Deployment, error) {

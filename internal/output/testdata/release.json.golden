@@ -6,6 +6,8 @@
   "channel": "stable",
   "security_mode": "signed",
   "key_id": "prod-2026",
+  "chip": "esp32s3",
   "sha256": "ab12",
-  "size": 1024
+  "size": 1024,
+  "also_active": []
 }

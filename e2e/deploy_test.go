@@ -208,3 +208,13 @@ func TestDeploymentStatusAfterLogoutIsAuthError(t *testing.T) {
 		t.Fatalf("deployment status after logout: %+v", r)
 	}
 }
+
+func TestStatusWaitFailsWhenCompletedWithNoDevices(t *testing.T) {
+	c := ciCLI(t)
+	out := release(t, c)
+	c.mustRun("deployment", "complete", out.DeploymentID)
+	r := <-waitAsync(c, out.DeploymentID, "30s")
+	if r.code != 4 || outcome(t, r) != "no_devices" || !strings.Contains(r.stdout+r.stderr, "no device updated") {
+		t.Fatalf("%+v", r)
+	}
+}

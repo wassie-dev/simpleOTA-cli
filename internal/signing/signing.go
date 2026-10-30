@@ -232,24 +232,44 @@ func Sign(priv ed25519.PrivateKey, firmware []byte) string {
 	return base64.StdEncoding.EncodeToString(ed25519.Sign(priv, firmware))
 }
 
+// MaxPinnedKeys is how many signing keys the 1.0 Arduino and ESP-IDF
+// clients pin.
+const MaxPinnedKeys = 2
+
+// PinnedKey is one key in a firmware snippet.
+type PinnedKey struct {
+	KeyID        string
+	PublicKeyPEM string
+}
+
 // FirmwareSnippet is the signing_keys block for the 1.0 Arduino and ESP-IDF
-// clients, which pin at most two keys.
-func FirmwareSnippet(keyID, publicPEM string) string {
+// clients, pinning the first MaxPinnedKeys keys. With one key it leaves a
+// slot for the backup key.
+func FirmwareSnippet(keys ...PinnedKey) string {
+	keys = keys[:min(len(keys), MaxPinnedKeys)]
 	var b strings.Builder
 	b.WriteString("static const simpleota_signing_key_t kSigningKeys[] = {\n")
-	fmt.Fprintf(&b, "    { %q,\n", keyID)
-	lines := strings.Split(strings.TrimRight(publicPEM, "\n"), "\n")
-	for i, line := range lines {
-		sep := ""
-		if i == len(lines)-1 {
-			sep = " },"
+	for _, k := range keys {
+		fmt.Fprintf(&b, "    { %q,\n", k.KeyID)
+		lines := strings.Split(strings.TrimRight(k.PublicKeyPEM, "\n"), "\n")
+		for i, line := range lines {
+			sep := ""
+			if i == len(lines)-1 {
+				sep = " },"
+			}
+			fmt.Fprintf(&b, "      \"%s\\n\"%s\n", line, sep)
 		}
-		fmt.Fprintf(&b, "      \"%s\\n\"%s\n", line, sep)
 	}
-	b.WriteString("    // { \"backup-key-id\", \"...backup public key PEM...\" },\n")
+	if len(keys) == 1 {
+		b.WriteString("    // { \"backup-key-id\", \"...backup public key PEM...\" },\n")
+	}
 	b.WriteString("};\n\n")
 	b.WriteString("cfg.security_mode = SIMPLEOTA_SECURITY_SIGNED;\n")
 	b.WriteString("cfg.signing_keys = kSigningKeys;\n")
-	b.WriteString("cfg.num_signing_keys = 1;  // 2 once the backup key is added\n")
+	if len(keys) == 1 {
+		b.WriteString("cfg.num_signing_keys = 1;  // 2 once the backup key is added\n")
+	} else {
+		fmt.Fprintf(&b, "cfg.num_signing_keys = %d;\n", len(keys))
+	}
 	return b.String()
 }

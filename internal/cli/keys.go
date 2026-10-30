@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/config"
 	"github.com/wassie-dev/simpleOTA-cli/internal/credentials"
 	"github.com/wassie-dev/simpleOTA-cli/internal/manifest"
@@ -52,7 +55,8 @@ func (a *App) keysGenerateCommand() *cobra.Command {
 		Short: "Create an Ed25519 signing key on this machine and register its public key",
 		Long: `Create an Ed25519 keypair locally, save the private key encrypted with a
 passphrase (0600), and register only the public key with the project.
-Prints the signing_keys snippet for the 1.0 Arduino and ESP-IDF clients.
+Prints the signing_keys snippet for the 1.0 Arduino and ESP-IDF clients,
+which pin two keys: the new key and the project's newest other active key.
 
 Needs a personal token. The passphrase is prompted for, or read from
 SIMPLEOTA_SIGNING_KEY_PASSPHRASE.`,
@@ -138,16 +142,25 @@ func (a *App) runKeysGenerate(ctx context.Context, keyID, out string) error {
 		isDefault = true
 	}
 
+	pinned, others := pinnedKeys(existing, signing.PinnedKey{KeyID: keyID, PublicKeyPEM: publicPEM})
 	view := output.KeyView{
 		KeyID:             keyID,
 		ProjectID:         projectID,
 		PublicKeyPEM:      publicPEM,
 		PrivateKeyFile:    out,
 		DefaultSigningKey: isDefault,
-		FirmwareSnippet:   signing.FirmwareSnippet(keyID, publicPEM),
+		FirmwareSnippet:   signing.FirmwareSnippet(pinned...),
+		PinnedKeyIDs:      make([]string, len(pinned)),
+	}
+	for i, k := range pinned {
+		view.PinnedKeyIDs[i] = k.KeyID
 	}
 	p := a.printer()
 	p.Notice("%s", keyWarning)
+	if len(others) > len(pinned)-1 {
+		p.Notice("The project has %d other active keys (%s). 1.0 clients pin %d keys, so the snippet pins %s; swap in another key ID if you need it.",
+			len(others), strings.Join(others, ", "), signing.MaxPinnedKeys, strings.Join(view.PinnedKeyIDs, " and "))
+	}
 	if p.JSON {
 		return p.WriteJSON(view)
 	}
@@ -158,9 +171,44 @@ func (a *App) runKeysGenerate(ctx context.Context, keyID, out string) error {
 	} else {
 		fmt.Fprintf(a.Out, "Sign with it using: simpleota release --key-file %s ...\n", out)
 	}
-	fmt.Fprintf(a.Out, "\nPublic key:\n%s\nPin it in your firmware (1.0 clients):\n\n%s", publicPEM, view.FirmwareSnippet)
-	fmt.Fprintln(a.Out, "\nNext: run keys generate again for an offline backup key, and pin both keys before your first signed release.")
+	fmt.Fprintf(a.Out, "\nPublic key:\n%s\n", publicPEM)
+	if len(pinned) == 1 {
+		fmt.Fprintf(a.Out, "Pin it in your firmware (1.0 clients):\n\n%s", view.FirmwareSnippet)
+		fmt.Fprintln(a.Out, "\nNext: run keys generate again for an offline backup key, and pin both keys before your first signed release.")
+		return nil
+	}
+	fmt.Fprintf(a.Out, "Pin %s in your firmware (1.0 clients):\n\n%s", strings.Join(view.PinnedKeyIDs, " and "), view.FirmwareSnippet)
 	return nil
+}
+
+// pinnedKeys returns the keys for the firmware snippet: the new key, then
+// the project's newest other active key. It also returns the IDs of all the
+// other active keys. Public keys from the server are parsed and re-encoded
+// before they go into the snippet's C strings.
+func pinnedKeys(existing []api.SigningKey, created signing.PinnedKey) ([]signing.PinnedKey, []string) {
+	active := make([]api.SigningKey, 0, len(existing))
+	for _, k := range existing {
+		if k.RevokedAt == nil && manifest.ValidKeyID(k.KeyID) {
+			active = append(active, k)
+		}
+	}
+	sort.SliceStable(active, func(i, j int) bool { return active[i].CreatedAt.After(active[j].CreatedAt) })
+	pinned := []signing.PinnedKey{created}
+	var others []string
+	for _, k := range active {
+		pub, err := signing.ParsePublicKeyPEM(k.PublicKeyPEM)
+		if err != nil {
+			continue
+		}
+		others = append(others, k.KeyID)
+		if len(pinned) < signing.MaxPinnedKeys {
+			pemText, err := signing.PublicKeyPEM(pub)
+			if err == nil {
+				pinned = append(pinned, signing.PinnedKey{KeyID: k.KeyID, PublicKeyPEM: pemText})
+			}
+		}
+	}
+	return pinned, others
 }
 
 // newPassphrase reads and confirms a passphrase for a new key.

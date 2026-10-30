@@ -15,6 +15,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
@@ -27,6 +29,27 @@ const MaxBinarySize = 32 << 20
 
 // espImageMagic is the first byte of every ESP32-family app image.
 const espImageMagic = 0xE9
+
+// imageHeaderLen is the size of an app image header (esp_image_header_t).
+const imageHeaderLen = 24
+
+// espChipIDs maps the chip_id field of an app image header to the chip
+// family devices report, which is ESP-IDF's IDF_TARGET. The IDs come from
+// esp_chip_id_t in ESP-IDF's esp_app_format.h.
+var espChipIDs = map[uint16]string{
+	0x0000: "esp32",
+	0x0002: "esp32s2",
+	0x0005: "esp32c3",
+	0x0009: "esp32s3",
+	0x000C: "esp32c2",
+	0x000D: "esp32c6",
+	0x0010: "esp32h2",
+	0x0012: "esp32p4",
+	0x0014: "esp32c61",
+	0x0017: "esp32c5",
+	0x0019: "esp32h21",
+	0x001C: "esp32h4",
+}
 
 // nonAppSuffixes are toolchain outputs that are not OTA app images; the
 // server keeps the same list.
@@ -43,11 +66,22 @@ var (
 	ErrDuplicate = errors.New("binary already uploaded")
 )
 
+// ChipError means the chip family is missing or invalid, or no device could
+// match it.
+type ChipError struct{ msg string }
+
+func (e *ChipError) Error() string { return e.msg }
+
+func chipErr(format string, args ...any) error {
+	return &ChipError{msg: fmt.Sprintf(format, args...)}
+}
+
 // Options describe one release.
 type Options struct {
 	BinaryPath   string
 	VersionLabel string
-	Chip         string
+	// Chip defaults to the chip the image header names when empty.
+	Chip string
 	// Framework defaults to the project's default framework when empty.
 	Framework string
 	Percent   int
@@ -68,6 +102,7 @@ type Result struct {
 	Channel      string
 	SecurityMode string
 	KeyID        string
+	Chip         string
 	SHA256       string
 	Size         int64
 }
@@ -117,15 +152,25 @@ func ReadBinary(path string) ([]byte, error) {
 	return data, nil
 }
 
+// ImageChip returns the chip family an app image was built for, read from
+// its header, or "" when the header names no chip simpleota knows.
+func ImageChip(data []byte) string {
+	if len(data) < imageHeaderLen || data[0] != espImageMagic {
+		return ""
+	}
+	return espChipIDs[uint16(data[12])|uint16(data[13])<<8]
+}
+
 // Release builds the manifest, signs when a key is set, uploads and deploys.
 // The upload is sent once and never retried. The manifest carries the
 // binary's SHA-256, so the server rejects the upload if the bytes it
 // received differ.
 func (s Service) Release(ctx context.Context, o Options) (Result, error) {
 	var res Result
-	chip, err := manifest.NormalizeChip(o.Chip)
-	if err != nil {
-		return res, err
+	if o.Chip != "" {
+		if _, err := manifest.NormalizeChip(o.Chip); err != nil {
+			return res, chipErr("%v", err)
+		}
 	}
 	if o.Percent < 0 || o.Percent > 100 {
 		return res, errors.New("--percent must be between 0 and 100")
@@ -137,6 +182,11 @@ func (s Service) Release(ctx context.Context, o Options) (Result, error) {
 	if err != nil {
 		return res, err
 	}
+	chip, err := s.chooseChip(ctx, o.Chip, ImageChip(binary), o.BinaryPath)
+	if err != nil {
+		return res, err
+	}
+	res.Chip = chip
 	sum := sha256.Sum256(binary)
 	res.SHA256 = hex.EncodeToString(sum[:])
 	res.Size = int64(len(binary))
@@ -201,6 +251,83 @@ func (s Service) Release(ctx context.Context, o Options) (Result, error) {
 	res.State = out.State
 	res.Channel = out.Channel
 	return res, nil
+}
+
+// chooseChip settles the manifest's chip family. A --chip that differs from
+// the chip the image was built for is refused unless a device in the
+// project reports it, since no other device would be offered the build.
+func (s Service) chooseChip(ctx context.Context, flag, image, path string) (string, error) {
+	if flag == "" {
+		if image == "" {
+			return "", chipErr("--chip is required, since the header of %s names no chip simpleota knows; e.g. --chip esp32s3", path)
+		}
+		return image, nil
+	}
+	chip, err := manifest.NormalizeChip(flag)
+	if err != nil || image == "" || chip == image {
+		return chip, err
+	}
+	devices, err := s.API.ListDevices(ctx, s.ProjectID)
+	if err != nil {
+		return "", fmt.Errorf("%s was built for %s, not %s; checking whether a device reports %s failed: %w", path, image, chip, chip, err)
+	}
+	for _, d := range devices {
+		if strings.EqualFold(strings.TrimSpace(d.ChipFamily), chip) {
+			return chip, nil
+		}
+	}
+	return "", chipErr("%s was built for %s, but --chip is %s and no device in this project reports %s, so no device would be offered the build; leave out --chip to use %s", path, image, chip, chip, image)
+}
+
+// AlsoActive returns the project's other active deployments that reach the
+// release's channel with a build for the same chip. A device installs the
+// highest build offered to it, so these go on reaching the devices the
+// release does not.
+func (s Service) AlsoActive(ctx context.Context, res Result) ([]api.Deployment, error) {
+	deps, err := s.API.ListDeployments(ctx, s.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	artifacts, err := s.API.ListArtifacts(ctx, s.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	chips := make(map[string]string, len(artifacts))
+	for _, a := range artifacts {
+		chips[a.ID] = a.ChipFamily
+	}
+	var channels []string
+	for _, d := range deps {
+		if d.ID == res.DeploymentID {
+			channels = d.TargetChannelIDs
+		}
+	}
+	var out []api.Deployment
+	for _, d := range deps {
+		if d.ID == res.DeploymentID || d.State != api.StateActive || !overlaps(channels, d.TargetChannelIDs) {
+			continue
+		}
+		if chip, ok := chips[d.ArtifactID]; ok && chip != "" && !strings.EqualFold(chip, res.Chip) {
+			continue
+		}
+		out = append(out, d)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ArtifactBuildNumber > out[j].ArtifactBuildNumber })
+	return out, nil
+}
+
+// overlaps reports whether two deployments' channel targets share a channel.
+// A deployment without channel targets reaches every channel.
+func overlaps(a, b []string) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return true
+	}
+	for _, x := range a {
+		if slices.Contains(b, x) {
+			return true
+		}
+	}
+	return false
 }
 
 // refuseDuplicate fails when the project already has a build of this

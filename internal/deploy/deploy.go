@@ -120,12 +120,14 @@ const (
 	OutcomeSucceeded    Outcome = "succeeded"
 	OutcomeDeviceFailed Outcome = "device_failed"
 	OutcomeStopped      Outcome = "stopped"
+	OutcomeNoDevices    Outcome = "no_devices"
 	OutcomeTimedOut     Outcome = "timed_out"
 )
 
 // Evaluate applies the --wait rule: success once every device the current
-// step reached has confirmed; failure on any failed or rolled-back device or
-// when the deployment is no longer running.
+// step reached has confirmed; failure on any failed or rolled-back device,
+// when the deployment is no longer running, or when it was completed before
+// any device was offered the build.
 func Evaluate(s Summary) Outcome {
 	if s.Counts.Failed > 0 || s.Counts.RolledBack > 0 {
 		return OutcomeDeviceFailed
@@ -134,6 +136,9 @@ func Evaluate(s Summary) Outcome {
 	case api.StatePaused, api.StateCancelled, api.StateDraft:
 		return OutcomeStopped
 	case api.StateCompleted:
+		if s.Counts.Offered == 0 {
+			return OutcomeNoDevices
+		}
 		return OutcomeSucceeded
 	}
 	if s.Counts.Offered > 0 && s.Counts.Confirmed == s.Counts.Offered {

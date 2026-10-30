@@ -74,10 +74,13 @@ func TestLoginWithStaffToken(t *testing.T) {
 	}
 	st := decode[struct {
 		Auth    struct{ State string }
-		Project struct{ ID string }
+		Project struct{ ID, Name string }
 	}](t, c.mustRun("status", "--json").stdout)
-	if st.Auth.State != "valid" || st.Project.ID != env["SIMPLEOTA_DEV_PROJECT_ID"] {
+	if st.Auth.State != "valid" || st.Project.ID != env["SIMPLEOTA_DEV_PROJECT_ID"] || st.Project.Name == "" {
 		t.Fatalf("status: %+v", st)
+	}
+	if r := c.run("", "--project", "does-not-exist-"+uid(), "status"); r.code != 2 || !strings.Contains(r.stdout, "by ID, not slug") {
+		t.Fatalf("status with an unknown project: %+v", r)
 	}
 }
 

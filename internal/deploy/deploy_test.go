@@ -31,6 +31,7 @@ func TestEvaluate(t *testing.T) {
 		{name: "cancelled", dep: api.Deployment{State: api.StateCancelled}, want: OutcomeStopped},
 		{name: "draft", dep: api.Deployment{State: api.StateDraft}, want: OutcomeStopped},
 		{name: "completed", dep: api.Deployment{State: api.StateCompleted}, states: []api.DeviceState{st("offered")}, want: OutcomeSucceeded},
+		{name: "completed with no device offered", dep: api.Deployment{State: api.StateCompleted}, want: OutcomeNoDevices},
 		{name: "failure beats completed", dep: api.Deployment{State: api.StateCompleted}, states: []api.DeviceState{st("failed")}, want: OutcomeDeviceFailed},
 		{name: "unassigned pending row ignored", dep: active, states: []api.DeviceState{st("confirmed"), {FinalStatus: "pending"}}, want: OutcomeSucceeded},
 	}

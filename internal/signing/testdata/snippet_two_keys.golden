@@ -1,0 +1,14 @@
+static const simpleota_signing_key_t kSigningKeys[] = {
+    { "prod-2026",
+      "-----BEGIN PUBLIC KEY-----\n"
+      "MCowBQYDK2VwAyEAaQcAzcqEJyJmEBTOkEtM9+6wX0ET8SvA8i2ABsEcs3w=\n"
+      "-----END PUBLIC KEY-----\n" },
+    { "backup-2026",
+      "-----BEGIN PUBLIC KEY-----\n"
+      "MCowBQYDK2VwAyEA2SJ3i0zkvYpZq6HcAF4lJ3m7ZtpCwf6RUNBBXbOC2xU=\n"
+      "-----END PUBLIC KEY-----\n" },
+};
+
+cfg.security_mode = SIMPLEOTA_SECURITY_SIGNED;
+cfg.signing_keys = kSigningKeys;
+cfg.num_signing_keys = 2;

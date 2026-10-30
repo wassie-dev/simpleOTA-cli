@@ -4,5 +4,8 @@
   "public_key_pem": "PEM",
   "private_key_file": "/k",
   "default_signing_key": true,
-  "firmware_snippet": "snippet"
+  "firmware_snippet": "snippet",
+  "pinned_key_ids": [
+    "prod-2026"
+  ]
 }

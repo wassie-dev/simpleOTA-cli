@@ -11,5 +11,5 @@
     "started_at": "2026-10-01T12:00:01Z",
     "completed_at": null
   },
-  "next_step": "To ship a fix or go back, release the fixed or previous source again as a new build: simpleota release <bin> --version-label <label> --chip <chip>"
+  "next_step": "To ship a fix or go back, release the fixed or previous source again as a new build: simpleota release <bin> --version-label <label>"
 }

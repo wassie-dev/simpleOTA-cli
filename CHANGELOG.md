@@ -6,11 +6,33 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `release` reads the chip family from the image header, so `--chip` is
+  optional. A `--chip` that differs from the header is refused unless a
+  device in the project reports that chip.
+- `release` lists the other active deployments for the same chip on its
+  channel (`also_active` in JSON), which go on reaching the devices the new
+  build does not.
+
 ### Fixed
 
 - `login` with a staff account's personal token failed with "this token
   cannot list projects". It now asks for the Project ID on a terminal, and
   otherwise explains that `--project <project-id>` is needed.
+- `deployment status --wait` exited 0 for a deployment completed before any
+  device was offered the build. It now exits 4 with outcome `no_devices`.
+- `status --project <ref>` exited 0 without saying the project was not
+  found. It now reports it in `project_error` and exits 2, as it does for a
+  project saved at login that is gone.
+- `status` showed an empty project name for a staff account.
+- `keys generate` for a backup key printed a snippet with only the new key.
+  The snippet now pins the new key and the project's newest other active
+  key (`pinned_key_ids` in JSON).
+- `logout` said "Logged out" when nothing was stored; it now says so, and
+  `logged_out` is false.
+- `update --version` to an older release said "Updated"; it now says
+  "Downgraded".
 
 ### Changed
 

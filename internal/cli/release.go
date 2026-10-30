@@ -29,11 +29,20 @@ type releaseFlags struct {
 func (a *App) releaseCommand() *cobra.Command {
 	var f releaseFlags
 	cmd := &cobra.Command{
-		Use:   "release <bin> --version-label <label> --chip <chip>",
+		Use:   "release <bin> --version-label <label>",
 		Short: "Sign, upload and deploy a firmware binary in one step",
 		Long: `Upload an application binary and start a deployment to a channel in one
 call. The server assigns the build number; devices are offered only builds
 higher than the one they run.
+
+The chip family comes from the image header, which names the chip the
+image was built for. A --chip that differs from it is refused unless a
+device in the project reports that chip, since no other device would be
+offered the build.
+
+When another deployment for the same chip is still active on the channel,
+release names it. A device installs the highest build offered to it, so
+the older deployment goes on reaching the devices this release does not.
 
 The release is signed when a key is available: --key-file, then
 SIMPLEOTA_SIGNING_KEY (an exported key; set SIMPLEOTA_SIGNING_KEY_PASSPHRASE
@@ -45,8 +54,8 @@ every accepted upload uses a new build number and counts against the plan's
 monthly limit. release stops before uploading when the project already has a
 build of the same binary, so running it again after a failed upload cannot
 create a second build; pass --allow-duplicate to upload it anyway.`,
-		Example: `  simpleota release build/app.bin --version-label 1.4.0 --chip esp32s3
-  simpleota release build/app.bin --version-label 1.4.1 --chip esp32 --percent 10 --channel beta`,
+		Example: `  simpleota release build/app.bin --version-label 1.4.0
+  simpleota release build/app.bin --version-label 1.4.1 --percent 10 --channel beta`,
 		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.runRelease(cmd.Context(), args[0], f)
@@ -54,7 +63,7 @@ create a second build; pass --allow-duplicate to upload it anyway.`,
 	}
 	fl := cmd.Flags()
 	fl.StringVar(&f.versionLabel, "version-label", "", "human-readable version, e.g. 1.4.0 (required)")
-	fl.StringVar(&f.chip, "chip", "", "chip family the build targets, e.g. esp32, esp32s3 (required)")
+	fl.StringVar(&f.chip, "chip", "", "chip family the build targets, e.g. esp32s3 (default: the chip the image header names)")
 	fl.StringVar(&f.framework, "framework", "", "arduino or esp_idf (default: the project's default framework)")
 	fl.IntVar(&f.percent, "percent", 100, "percentage of the channel's devices to offer the build to")
 	fl.StringVar(&f.channel, "channel", "stable", "release channel; it must already exist on the project")
@@ -67,9 +76,6 @@ create a second build; pass --allow-duplicate to upload it anyway.`,
 func (a *App) runRelease(ctx context.Context, binPath string, f releaseFlags) error {
 	if f.versionLabel == "" {
 		return usageErr("--version-label is required")
-	}
-	if f.chip == "" {
-		return usageErr("--chip is required, e.g. --chip esp32s3")
 	}
 	if f.framework != "" && f.framework != manifest.FrameworkArduino && f.framework != manifest.FrameworkESPIDF {
 		return usageErr("--framework must be arduino or esp_idf")
@@ -105,7 +111,8 @@ func (a *App) runRelease(ctx context.Context, binPath string, f releaseFlags) er
 	if key == nil {
 		p.Notice("Uploading unsigned (basic). Devices that enforce signed firmware will not be offered this build.")
 	}
-	res, err := release.Service{API: s.api, ProjectID: projectID}.Release(ctx, release.Options{
+	svc := release.Service{API: s.api, ProjectID: projectID}
+	res, err := svc.Release(ctx, release.Options{
 		BinaryPath:     binPath,
 		VersionLabel:   f.versionLabel,
 		Chip:           f.chip,
@@ -115,10 +122,22 @@ func (a *App) runRelease(ctx context.Context, binPath string, f releaseFlags) er
 		Key:            key,
 		AllowDuplicate: f.allowDuplicate,
 	})
+	var chipErr *release.ChipError
+	if errors.As(err, &chipErr) {
+		return &exitError{code: ExitUsage, err: err}
+	}
 	if err != nil {
 		return err
 	}
-	return p.Release(output.NewReleaseView(res))
+	view := output.NewReleaseView(res)
+	others, err := svc.AlsoActive(ctx, res)
+	if err != nil {
+		p.Notice("Released, but checking for other active deployments failed: %v", err)
+	}
+	for _, d := range others {
+		view.AlsoActive = append(view.AlsoActive, output.NewDeploymentView(d))
+	}
+	return p.Release(view)
 }
 
 // loadSigningKey applies --key-file, then SIMPLEOTA_SIGNING_KEY, then the

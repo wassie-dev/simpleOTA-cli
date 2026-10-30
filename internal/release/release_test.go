@@ -306,3 +306,97 @@ func TestUnclearUploadFailureIsNotRetried(t *testing.T) {
 		})
 	}
 }
+
+// image returns an app image whose header names chipID.
+func image(chipID uint16, fill byte) []byte {
+	b := make([]byte, 64)
+	for i := range b {
+		b[i] = fill
+	}
+	b[0] = 0xe9
+	b[12], b[13] = byte(chipID), byte(chipID>>8)
+	return b
+}
+
+func TestImageChip(t *testing.T) {
+	for id, want := range map[uint16]string{0x0000: "esp32", 0x0009: "esp32s3", 0x0005: "esp32c3", 0x0014: "esp32c61", 0x001C: "esp32h4", 0x0042: ""} {
+		if got := release.ImageChip(image(id, 0)); got != want {
+			t.Errorf("chip ID 0x%04x: got %q, want %q", id, got, want)
+		}
+	}
+	if got := release.ImageChip(firmware); got != "" {
+		t.Errorf("a short image names no chip, got %q", got)
+	}
+}
+
+func TestChipComesFromImageHeader(t *testing.T) {
+	fake, svc := service(t)
+	res, err := svc.Release(context.Background(), release.Options{
+		BinaryPath: writeBin(t, "app.bin", image(0x0009, 1)), VersionLabel: "1", Percent: 100, Channel: "stable",
+	})
+	if err != nil || res.Chip != "esp32s3" || fake.LastManifest.ChipFamily != "esp32s3" {
+		t.Fatalf("res = %+v, err = %v", res, err)
+	}
+	_, err = svc.Release(context.Background(), release.Options{
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Percent: 100, Channel: "stable",
+	})
+	var chipErr *release.ChipError
+	if !errors.As(err, &chipErr) || !strings.Contains(err.Error(), "--chip is required") {
+		t.Fatalf("an image without a known chip needs --chip: %v", err)
+	}
+}
+
+func TestChipMismatchIsRefusedUnlessADeviceReportsIt(t *testing.T) {
+	fake, svc := service(t)
+	opts := release.Options{BinaryPath: writeBin(t, "app.bin", image(0x0009, 2)), VersionLabel: "1", Chip: "esp99", Percent: 100, Channel: "stable"}
+	_, err := svc.Release(context.Background(), opts)
+	var chipErr *release.ChipError
+	if !errors.As(err, &chipErr) || !strings.Contains(err.Error(), "built for esp32s3, but --chip is esp99") {
+		t.Fatalf("err = %v", err)
+	}
+	if fake.Count("POST /api/v1/projects/"+fakeapi.ProjectID+"/release/") != 0 {
+		t.Fatal("a refused chip must not upload")
+	}
+	fake.Devices = []api.Device{{ID: "d1", DeviceID: "lamp-1", ChipFamily: "ESP99"}}
+	res, err := svc.Release(context.Background(), opts)
+	if err != nil || res.Chip != "esp99" {
+		t.Fatalf("a chip a device reports is allowed: %+v %v", res, err)
+	}
+	opts.Chip, opts.AllowDuplicate = "esp32s3", true
+	if _, err := svc.Release(context.Background(), opts); err != nil {
+		t.Fatalf("a matching --chip: %v", err)
+	}
+}
+
+func TestAlsoActive(t *testing.T) {
+	fake, svc := service(t)
+	release1 := func(id uint16, fill byte) release.Result {
+		t.Helper()
+		res, err := svc.Release(context.Background(), release.Options{
+			BinaryPath: writeBin(t, "app.bin", image(id, fill)), VersionLabel: "1", Percent: 100, Channel: "stable",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	first := release1(0x0009, 1)
+	release1(0x0000, 2) // another chip
+	fake.AddDeployment("all-channels", api.StateActive, 0, 100)
+	fake.AddDeployment("paused", api.StatePaused, 0, 100)
+	other := fake.AddDeployment("other-channel", api.StateActive, 0, 100)
+	fake.Deployments[len(fake.Deployments)-1].TargetChannelIDs = []string{"beta"}
+	latest := release1(0x0009, 3)
+
+	got, err := svc.AlsoActive(context.Background(), latest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, d := range got {
+		ids = append(ids, d.ID)
+	}
+	if strings.Join(ids, ",") != first.DeploymentID+",all-channels" {
+		t.Fatalf("also active = %v (other channel %s must be left out)", ids, other.ID)
+	}
+}

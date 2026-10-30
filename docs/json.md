@@ -33,7 +33,9 @@ the error. `status` prints only its status object and sets the exit code.
 newer release fails. `auth.state` is `valid`, `not_logged_in`, `rejected` or
 `unreachable`, and `auth.error` gives the reason when there is one. `auth.source` is
 `SIMPLEOTA_TOKEN`, `the OS keychain` or the path of the token file.
-`project` is null when none is selected. `signing_key.source` is `file`,
+`project` is null when none is selected. `project_error` is set, `project`
+is null and the exit code is 2 when `--project` or the project saved at
+login cannot be found. `signing_key.source` is `file`,
 `env` (SIMPLEOTA_SIGNING_KEY) or `none`; `signing_key.error` is set when the
 file is missing or readable by other users.
 
@@ -66,6 +68,8 @@ keychain` or the path of the token file.
 { "api_url": "https://simpleota.com", "logged_out": true }
 ```
 
+`logged_out` is false when there was no stored token or project to remove.
+
 ## keys generate
 
 ```json
@@ -75,9 +79,13 @@ keychain` or the path of the token file.
   "public_key_pem": "-----BEGIN PUBLIC KEY-----\n…\n-----END PUBLIC KEY-----\n",
   "private_key_file": "/home/me/.config/simpleota/keys/prod-2026.key",
   "default_signing_key": true,
-  "firmware_snippet": "static const simpleota_signing_key_t kSigningKeys[] = {…"
+  "firmware_snippet": "static const simpleota_signing_key_t kSigningKeys[] = {…",
+  "pinned_key_ids": ["prod-2026"]
 }
 ```
+
+`pinned_key_ids` names the keys `firmware_snippet` pins: the new key, then
+the project's newest other active key.
 
 ## keys export
 
@@ -98,12 +106,18 @@ keychain` or the path of the token file.
   "channel": "stable",
   "security_mode": "signed",
   "key_id": "prod-2026",
+  "chip": "esp32s3",
   "sha256": "…",
-  "size": 1048576
+  "size": 1048576,
+  "also_active": [ { … } ]
 }
 ```
 
 `security_mode` is `basic` or `signed`. `key_id` is omitted for `basic`.
+`chip` is the chip family in the manifest. `also_active` lists the other
+active deployments for the same chip on the channel as
+[deployment objects](#deployment-object), highest build first; it is always
+an array.
 `sha256` is the SHA-256 of the local file. It was sent in the manifest, and
 the server accepts an upload only when the bytes it received hash the same,
 so it is also the checksum the server stored.
@@ -155,8 +169,9 @@ the device's SimpleOTA UUID. `failures` is always an array.
 
 | Outcome | Meaning | `--wait` exit code |
 | --- | --- | --- |
-| `succeeded` | Every offered device confirmed, or the deployment is completed | 0 |
+| `succeeded` | Every offered device confirmed, or the deployment is completed after at least one device was offered the build | 0 |
 | `in_progress` | Still rolling out (only without `--wait`) | |
 | `device_failed` | A device reported `failed` or `rolled_back` | 4 |
 | `stopped` | The deployment is paused, cancelled or draft | 4 |
+| `no_devices` | The deployment was completed before any device was offered the build | 4 |
 | `timed_out` | `--timeout` passed first | 5 |

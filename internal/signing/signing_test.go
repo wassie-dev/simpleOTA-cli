@@ -182,8 +182,14 @@ func TestReadKeyFileMissing(t *testing.T) {
 
 func TestFirmwareSnippetGolden(t *testing.T) {
 	pub := "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAaQcAzcqEJyJmEBTOkEtM9+6wX0ET8SvA8i2ABsEcs3w=\n-----END PUBLIC KEY-----\n"
-	got := FirmwareSnippet("prod-2026", pub)
-	golden := filepath.Join("testdata", "snippet.golden")
+	backup := "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA2SJ3i0zkvYpZq6HcAF4lJ3m7ZtpCwf6RUNBBXbOC2xU=\n-----END PUBLIC KEY-----\n"
+	snippetGolden(t, "snippet.golden", FirmwareSnippet(PinnedKey{"prod-2026", pub}))
+	snippetGolden(t, "snippet_two_keys.golden", FirmwareSnippet(PinnedKey{"prod-2026", pub}, PinnedKey{"backup-2026", backup}, PinnedKey{"third", pub}))
+}
+
+func snippetGolden(t *testing.T, name, got string) {
+	t.Helper()
+	golden := filepath.Join("testdata", name)
 	if *update {
 		if err := os.WriteFile(golden, []byte(got), 0o644); err != nil {
 			t.Fatal(err)

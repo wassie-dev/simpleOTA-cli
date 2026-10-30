@@ -3,6 +3,7 @@ package cli
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -140,5 +141,42 @@ func TestEnvTokenTakesPrecedence(t *testing.T) {
 	h.env["SIMPLEOTA_TOKEN"] = "soto_proj_invalidinvalidinvalid"
 	if r := h.run("release", writeFirmware(t), "--version-label", "1", "--chip", "esp32"); r.code != ExitAuth {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestReleaseChipFromImageAndAlsoActive(t *testing.T) {
+	h := newHarness(t)
+	h.env["SIMPLEOTA_TOKEN"] = fakeapi.ProjectToken
+	img := make([]byte, 64)
+	if _, err := rand.Read(img); err != nil {
+		t.Fatal(err)
+	}
+	img[0], img[12], img[13] = 0xe9, 0x09, 0x00 // esp32s3
+	bin := filepath.Join(t.TempDir(), "app.bin")
+	if err := os.WriteFile(bin, img, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := h.run("release", bin, "--version-label", "1", "--chip", "esp99")
+	if r.code != ExitUsage || !strings.Contains(r.stderr, "built for esp32s3, but --chip is esp99") {
+		t.Fatalf("mismatched --chip: %+v", r)
+	}
+	r = h.run("release", bin, "--version-label", "1")
+	if r.code != 0 || !strings.Contains(r.stdout, "Released build 1 for esp32s3") || strings.Contains(r.stdout, "Also active") {
+		t.Fatalf("first release: %+v", r)
+	}
+	r = h.run("release", bin, "--version-label", "2", "--allow-duplicate", "--json")
+	var v struct {
+		Chip       string `json:"chip"`
+		AlsoActive []struct {
+			ID          string `json:"id"`
+			BuildNumber int    `json:"build_number"`
+		} `json:"also_active"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &v); err != nil {
+		t.Fatalf("%+v: %v", r, err)
+	}
+	if r.code != 0 || v.Chip != "esp32s3" || len(v.AlsoActive) != 1 || v.AlsoActive[0].BuildNumber != 1 {
+		t.Fatalf("%+v %+v", r, v)
 	}
 }

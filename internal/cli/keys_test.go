@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/fakeapi"
@@ -99,5 +100,45 @@ func TestKeysGenerateRejectsShortEnvPassphrase(t *testing.T) {
 	}
 	if len(h.fake.SigningKeys) != 0 {
 		t.Fatal("no key should be registered")
+	}
+}
+
+func TestKeysGenerateSnippetPinsBackupKey(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.PersonalToken)
+	h.env[passphraseEnv] = "correct horse battery"
+	type keyJSON struct {
+		FirmwareSnippet string   `json:"firmware_snippet"`
+		PinnedKeyIDs    []string `json:"pinned_key_ids"`
+	}
+	generate := func(id string) (result, keyJSON) {
+		t.Helper()
+		r := h.run("keys", "generate", "--key-id", id, "--json")
+		var kv keyJSON
+		if err := json.Unmarshal([]byte(r.stdout), &kv); err != nil || r.code != 0 {
+			t.Fatalf("%+v: %v", r, err)
+		}
+		return r, kv
+	}
+	if _, kv := generate("prod"); strings.Join(kv.PinnedKeyIDs, ",") != "prod" || !strings.Contains(kv.FirmwareSnippet, "num_signing_keys = 1") {
+		t.Fatalf("first key: %+v", kv)
+	}
+	r, kv := generate("backup")
+	if strings.Join(kv.PinnedKeyIDs, ",") != "backup,prod" || !strings.Contains(kv.FirmwareSnippet, "num_signing_keys = 2;") ||
+		strings.Contains(kv.FirmwareSnippet, "backup-key-id") || strings.Contains(r.stderr, "other active keys") {
+		t.Fatalf("second key: %+v %+v", r, kv)
+	}
+	now := time.Now()
+	h.fake.SigningKeys[0].RevokedAt = &now // prod
+	if _, kv := generate("next"); strings.Join(kv.PinnedKeyIDs, ",") != "next,backup" {
+		t.Fatalf("a revoked key is not pinned: %+v", kv)
+	}
+	r, kv = generate("fourth")
+	if strings.Join(kv.PinnedKeyIDs, ",") != "fourth,next" || !strings.Contains(r.stderr, "2 other active keys (next, backup)") {
+		t.Fatalf("more keys than slots: %+v %+v", r, kv)
+	}
+	r = h.run("keys", "generate", "--key-id", "fifth")
+	if r.code != 0 || !strings.Contains(r.stdout, "Pin fifth and fourth in your firmware") || strings.Contains(r.stdout, "Next: run keys generate again") {
+		t.Fatalf("human output: %+v", r)
 	}
 }

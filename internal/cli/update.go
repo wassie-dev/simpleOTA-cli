@@ -153,6 +153,13 @@ func (a *App) runUpdate(ctx context.Context, check bool, want string) error {
 	if p.JSON {
 		return p.WriteJSON(view)
 	}
-	fmt.Fprintf(a.Out, "Updated simpleota from %s to %s at %s.\n", current, view.Latest, exe)
+	switch {
+	case update.Normalize(current) == "":
+		fmt.Fprintf(a.Out, "Replaced development build %s with simpleota %s at %s.\n", current, view.Latest, exe)
+	case update.Newer(current, target):
+		fmt.Fprintf(a.Out, "Downgraded simpleota from %s to %s at %s.\n", current, view.Latest, exe)
+	default:
+		fmt.Fprintf(a.Out, "Updated simpleota from %s to %s at %s.\n", current, view.Latest, exe)
+	}
 	return nil
 }

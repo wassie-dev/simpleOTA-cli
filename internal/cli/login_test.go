@@ -143,6 +143,14 @@ func TestLogout(t *testing.T) {
 	if cfg.ProjectID != "" || cfg.APIURL != "" {
 		t.Fatalf("config not cleared: %+v", cfg)
 	}
+	r := h.run("logout")
+	if r.code != 0 || !strings.Contains(r.stdout, "Not logged in to") || strings.Contains(r.stdout, "Logged out") {
+		t.Fatalf("second logout: %+v", r)
+	}
+	r = h.run("logout", "--json")
+	if r.code != 0 || !strings.Contains(r.stdout, `"logged_out": false`) {
+		t.Fatalf("second logout --json: %+v", r)
+	}
 }
 
 func TestLoginUnknownProjectID(t *testing.T) {

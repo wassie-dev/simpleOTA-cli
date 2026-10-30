@@ -105,7 +105,7 @@ func TestUpdateJSON(t *testing.T) {
 
 func TestUpdateSpecificVersionIncludingDowngrade(t *testing.T) {
 	r, exe, _ := runUpdate(t, "0.3.0", "0.2.0", nil, "--version", "0.2.0")
-	if r.code != 0 || content(t, exe) != "new binary 0.2.0" {
+	if r.code != 0 || content(t, exe) != "new binary 0.2.0" || !strings.Contains(r.stdout, "Downgraded simpleota from 0.3.0 to 0.2.0") {
 		t.Fatalf("%+v", r)
 	}
 	r, _, _ = runUpdate(t, "0.2.0", "0.2.0", nil, "--version", "v0.2.0")
@@ -124,7 +124,7 @@ func TestUpdateDevBuild(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	r, exe, _ = runUpdate(t, "dev", "0.2.0", nil, "--version", "0.2.0")
-	if r.code != 0 || content(t, exe) != "new binary 0.2.0" {
+	if r.code != 0 || content(t, exe) != "new binary 0.2.0" || !strings.Contains(r.stdout, "Replaced development build dev with simpleota 0.2.0") {
 		t.Fatalf("%+v", r)
 	}
 }

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"strings"
@@ -29,7 +30,8 @@ URL, whether you are logged in and the token still works, the selected
 project, and the key release would sign with.
 
 Exit 0 when logged in with a working token, 3 when not logged in or the
-token is rejected, and 1 when the API cannot be reached. For a deployment,
+token is rejected, 2 when --project or the project saved at login cannot
+be found, and 1 when the API cannot be reached. For a deployment,
 use simpleota deployment status.`,
 		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -58,9 +60,12 @@ func (a *App) runCLIStatus(ctx context.Context) error {
 		SigningKey: a.signingKeyState(cfg),
 	}
 	a.checkForUpdate(ctx, &v)
-	project := a.checkAuth(ctx, cfg, dir, &v)
+	project, projectErr := a.checkAuth(ctx, cfg, dir, &v)
 	if project != nil {
 		v.Project = &output.ProjectView{ID: project.ID, Slug: project.Slug, Name: project.Name}
+	}
+	if projectErr != nil {
+		v.ProjectError = message(projectErr)
 	}
 
 	if err := a.printer().Status(v); err != nil {
@@ -73,6 +78,9 @@ func (a *App) runCLIStatus(ctx context.Context) error {
 		return &exitError{code: ExitAuth, err: errors.New("the token was rejected"), quiet: true}
 	case output.AuthUnreachable:
 		return &exitError{code: ExitError, err: errors.New("could not reach the API"), quiet: true}
+	}
+	if projectErr != nil {
+		return &exitError{code: exitCode(projectErr), err: projectErr, quiet: true}
 	}
 	return nil
 }
@@ -95,7 +103,7 @@ func (a *App) checkForUpdate(ctx context.Context, v *output.StatusView) {
 }
 
 // checkAuth fills v.Auth and returns the project commands would use.
-func (a *App) checkAuth(ctx context.Context, cfg config.Config, dir string, v *output.StatusView) *api.Project {
+func (a *App) checkAuth(ctx context.Context, cfg config.Config, dir string, v *output.StatusView) (*api.Project, error) {
 	token := strings.TrimSpace(a.Getenv("SIMPLEOTA_TOKEN"))
 	source := "SIMPLEOTA_TOKEN"
 	if token == "" {
@@ -103,23 +111,24 @@ func (a *App) checkAuth(ctx context.Context, cfg config.Config, dir string, v *o
 		switch {
 		case errors.Is(err, credentials.ErrNotFound):
 			v.Auth = output.AuthView{State: output.AuthNotLoggedIn}
-			return nil
+			return nil, nil
 		case err != nil:
 			v.Auth = output.AuthView{State: output.AuthNotLoggedIn, Error: err.Error()}
-			return nil
+			return nil, nil
 		}
 		token, source = t, where
 	}
 	kind, err := credentials.Classify(token)
 	if err != nil {
 		v.Auth = output.AuthView{State: output.AuthRejected, Source: source, Error: err.Error()}
-		return nil
+		return nil, nil
 	}
 	v.Auth = output.AuthView{TokenType: string(kind), Source: source}
 
 	ctx, cancel := context.WithTimeout(ctx, statusCheckTimeout)
 	defer cancel()
-	projects, err := a.newAPI(v.APIURL, token).ListProjects(ctx)
+	client := a.newAPI(v.APIURL, token)
+	projects, err := client.ListProjects(ctx)
 	var ae *api.Error
 	switch {
 	case err == nil:
@@ -127,7 +136,7 @@ func (a *App) checkAuth(ctx context.Context, cfg config.Config, dir string, v *o
 	case errors.As(err, &ae) && ae.StatusCode == http.StatusUnauthorized:
 		v.Auth.State = output.AuthRejected
 		v.Auth.Error = "the server rejected the token (401)"
-		return nil
+		return nil, nil
 	case errors.As(err, &ae):
 		// Any other API answer means the token was accepted, such as the
 		// 400 staff tokens get without a filter.
@@ -136,27 +145,45 @@ func (a *App) checkAuth(ctx context.Context, cfg config.Config, dir string, v *o
 		v.Auth.State = output.AuthUnreachable
 		v.Auth.Error = err.Error()
 	}
+	return a.statusProject(ctx, client, cfg, v, projects)
+}
 
-	if ref := a.flags.project; ref != "" {
-		for _, p := range projects {
-			if p.ID == ref || p.Slug == ref {
-				return &p
-			}
+// statusProject finds the project commands would use: --project, then the
+// project saved at login, then the only project the token can see. A
+// project that was named but cannot be found is an error.
+func (a *App) statusProject(ctx context.Context, client api.API, cfg config.Config, v *output.StatusView, projects []api.Project) (*api.Project, error) {
+	ref := a.flags.project
+	saved := ref == "" && cfg.ProjectID != "" && cfg.APIURL == v.APIURL && a.Getenv("SIMPLEOTA_TOKEN") == ""
+	switch {
+	case saved:
+		ref = cfg.ProjectID
+	case ref == "":
+		if len(projects) == 1 {
+			return &projects[0], nil
 		}
-		return nil
+		return nil, nil
 	}
-	if cfg.ProjectID != "" && cfg.APIURL == v.APIURL && a.Getenv("SIMPLEOTA_TOKEN") == "" {
-		for _, p := range projects {
-			if p.ID == cfg.ProjectID {
-				return &p
-			}
+	for _, p := range projects {
+		if p.ID == ref || p.Slug == ref {
+			return &p, nil
 		}
-		return &api.Project{ID: cfg.ProjectID, Slug: cfg.ProjectSlug}
 	}
-	if len(projects) == 1 {
-		return &projects[0]
+	if v.Auth.State != output.AuthValid {
+		if saved {
+			return &api.Project{ID: cfg.ProjectID, Slug: cfg.ProjectSlug}, nil
+		}
+		return nil, nil
 	}
-	return nil
+	// Staff tokens list no projects, and a project token lists only its
+	// own, so look the project up directly.
+	p, err := findProject(ctx, client, ref)
+	if err != nil && saved {
+		return nil, fmt.Errorf("the project saved at login (%s): %w; run simpleota login to choose another", cfg.ProjectSlug, err)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
 }
 
 // signingKeyState reports the key release would use, in the same order.

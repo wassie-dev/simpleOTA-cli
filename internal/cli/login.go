@@ -199,20 +199,29 @@ func (a *App) logoutCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.store(dir).Delete(apiURL); err != nil {
+			store := a.store(dir)
+			_, err = store.Get(apiURL)
+			hadToken := err == nil
+			if err := store.Delete(apiURL); err != nil {
 				return fmt.Errorf("removing the stored token: %w", err)
 			}
-			if cfg.APIURL == apiURL {
+			hadProject := cfg.APIURL == apiURL
+			if hadProject {
 				cfg.APIURL, cfg.ProjectID, cfg.ProjectSlug = "", "", ""
 				if err := config.Save(dir, cfg); err != nil {
 					return err
 				}
 			}
+			loggedOut := hadToken || hadProject
 			p := a.printer()
 			if p.JSON {
-				return p.WriteJSON(output.LogoutView{APIURL: apiURL, LoggedOut: true})
+				return p.WriteJSON(output.LogoutView{APIURL: apiURL, LoggedOut: loggedOut})
 			}
-			fmt.Fprintf(a.Out, "Logged out of %s.\n", apiURL)
+			if loggedOut {
+				fmt.Fprintf(a.Out, "Logged out of %s.\n", apiURL)
+			} else {
+				fmt.Fprintf(a.Out, "Not logged in to %s; nothing to remove.\n", apiURL)
+			}
 			if a.Getenv("SIMPLEOTA_TOKEN") != "" {
 				p.Notice("Note: SIMPLEOTA_TOKEN is still set in this environment.")
 			}

@@ -26,6 +26,7 @@ type SigningKey struct {
 	Algorithm    string     `json:"algorithm"`
 	PublicKeyPEM string     `json:"public_key_pem"`
 	RevokedAt    *time.Time `json:"revoked_at"`
+	CreatedAt    time.Time  `json:"created_at"`
 }
 
 // Artifact mirrors the fields of ArtifactOut the CLI uses.
@@ -36,6 +37,14 @@ type Artifact struct {
 	ChecksumSHA256 string `json:"checksum_sha256"`
 	FileSize       int64  `json:"file_size"`
 	SecurityMode   string `json:"security_mode"`
+	ChipFamily     string `json:"chip_family"`
+}
+
+// Device mirrors the fields of DeviceOut the CLI uses.
+type Device struct {
+	ID         string `json:"id"`
+	DeviceID   string `json:"device_id"`
+	ChipFamily string `json:"chip_family"`
 }
 
 // Deployment mirrors DeploymentOut.
@@ -46,6 +55,7 @@ type Deployment struct {
 	ArtifactBuildNumber int        `json:"artifact_build_number"`
 	RolloutStrategy     string     `json:"rollout_strategy"`
 	RolloutPercentage   int        `json:"rollout_percentage"`
+	TargetChannelIDs    []string   `json:"target_channel_ids"`
 	State               string     `json:"state"`
 	StartedAt           *time.Time `json:"started_at"`
 	CompletedAt         *time.Time `json:"completed_at"`
