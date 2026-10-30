@@ -26,19 +26,30 @@ SERVER=$!
 for _ in $(seq 1 50); do curl -fs "http://127.0.0.1:$PORT/" >/dev/null && break; sleep 0.1; done
 
 DIR="$WORK/bin"
+# The installer runs with a scratch HOME and shell, so it edits no real
+# startup file.
+H="$WORK/home"
+mkdir -p "$H"
 export SIMPLEOTA_DOWNLOAD_URL="http://127.0.0.1:$PORT" SIMPLEOTA_INSTALL_DIR="$DIR"
 fail() { echo "FAIL: $*" >&2; exit 1; }
-run() { SIMPLEOTA_VERSION="$1" sh "$ROOT/install.sh" 2>&1; }
+run() { HOME="${RUN_HOME:-$H}" SHELL=/bin/zsh ZDOTDIR="" SIMPLEOTA_VERSION="$1" sh "$ROOT/install.sh" 2>&1; }
 
-out="$(SHELL=/bin/zsh run "$VERSION")" || fail "fresh install: $out"
+out="$(run "$VERSION")" || fail "fresh install: $out"
 grep -q "Installed simpleota $VERSION" <<<"$out" || fail "fresh install output: $out"
-grep -q "\.zshrc" <<<"$out" || fail "PATH hint for zsh: $out"
+grep -q "Added $DIR to your PATH in $H/.zshrc" <<<"$out" || fail "PATH setup output: $out"
+[ "$(grep -cxF "export PATH=\"$DIR:\$PATH\"" "$H/.zshrc")" = 1 ] || fail "PATH line in .zshrc: $(cat "$H/.zshrc")"
 "$DIR/simpleota" --version | grep -q "simpleota version $VERSION" || fail "installed binary version"
-echo "ok   fresh install"
+echo "ok   fresh install adds the directory to PATH once"
 
 out="$(run "v$VERSION")" || fail "re-run: $out"
 grep -q "already installed" <<<"$out" || fail "re-run output: $out"
+[ "$(grep -c "simpleota installer" "$H/.zshrc")" = 1 ] || fail "re-run added the PATH line again: $(cat "$H/.zshrc")"
 echo "ok   re-run is a no-op"
+
+out="$(RUN_HOME="$WORK/home2" SIMPLEOTA_NO_MODIFY_PATH=1 run "$VERSION")" || fail "no-modify run: $out"
+[ ! -e "$WORK/home2/.zshrc" ] || fail "SIMPLEOTA_NO_MODIFY_PATH=1 wrote $WORK/home2/.zshrc"
+grep -q "export PATH=" <<<"$out" || fail "no-modify hint: $out"
+echo "ok   SIMPLEOTA_NO_MODIFY_PATH leaves startup files alone"
 
 printf '#!/bin/sh\necho "simpleota version 0.0.1"\n' >"$DIR/simpleota"
 chmod +x "$DIR/simpleota"
@@ -63,6 +74,6 @@ grep -q "Updated simpleota from 0.0.1 to $VERSION" <<<"$out" || fail "self-updat
 "$DIR/simpleota" --version | grep -q "simpleota version $VERSION" || fail "self-updated binary version"
 echo "ok   simpleota update replaces its own binary"
 
-if out="$(SIMPLEOTA_DOWNLOAD_URL=http://example.com SIMPLEOTA_VERSION="$VERSION" sh "$ROOT/install.sh" 2>&1)"; then fail "plain http mirror accepted"; fi
+if out="$(HOME="$H" SIMPLEOTA_DOWNLOAD_URL=http://example.com SIMPLEOTA_VERSION="$VERSION" sh "$ROOT/install.sh" 2>&1)"; then fail "plain http mirror accepted"; fi
 grep -q "must be https" <<<"$out" || fail "http mirror output: $out"
 echo "ok   plain http mirror refused"

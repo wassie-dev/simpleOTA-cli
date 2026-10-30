@@ -23,15 +23,18 @@ irm https://github.com/wassie-dev/simpleOTA-cli/releases/latest/download/install
 The script downloads the release for your OS and CPU, checks it against the
 release's `checksums.txt`, and installs it without sudo: on Linux and macOS
 where `simpleota` already is, else `/usr/local/bin` if writable, else
-`~/.local/bin`; on Windows in `%LOCALAPPDATA%\Programs\simpleota`, which it
-adds to your user PATH. Run the same command again, or `simpleota update`,
-to update.
+`~/.local/bin`; on Windows in `%LOCALAPPDATA%\Programs\simpleota`. If that
+directory is not on your PATH, the script adds it: on Windows to your user
+PATH, and on Linux and macOS with one line in your shell's startup file
+(`~/.zshrc` for zsh; `~/.bash_profile` on macOS or `~/.bashrc` on Linux for
+bash; `conf.d/simpleota.fish` for fish; otherwise `~/.profile`). Open a new terminal afterwards.
+Run the same command again, or `simpleota update`, to update.
 
 | Variable | Use |
 | --- | --- |
 | `SIMPLEOTA_VERSION` | Install a specific version, e.g. `0.1.0` |
 | `SIMPLEOTA_INSTALL_DIR` | Install somewhere else |
-| `SIMPLEOTA_NO_MODIFY_PATH=1` | Windows: leave the user PATH alone |
+| `SIMPLEOTA_NO_MODIFY_PATH=1` | Leave your PATH and shell startup files alone |
 
 For example, to pin a version:
 

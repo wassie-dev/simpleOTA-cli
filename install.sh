@@ -13,6 +13,9 @@
 #                           ~/.local/bin)
 #   SIMPLEOTA_DOWNLOAD_URL  base URL of a mirror of the GitHub release
 #                           downloads (https, or http on localhost)
+#   SIMPLEOTA_NO_MODIFY_PATH  set to 1 to leave your shell's startup file
+#                           alone; otherwise, when the install directory is
+#                           not on PATH, a line adding it is appended once
 #
 # Everything runs inside main, so a truncated download of this script does
 # nothing.
@@ -98,8 +101,11 @@ on_path() {
 	esac
 }
 
-# path_hint DIR prints how to add DIR to PATH in the user's login shell.
-path_hint() {
+# add_to_path DIR appends a line that puts DIR on PATH to the startup file
+# of the user's shell, once. With SIMPLEOTA_NO_MODIFY_PATH=1 it only prints
+# that line.
+add_to_path() {
+	line="export PATH=\"$1:\$PATH\""
 	case "${SHELL##*/}" in
 	zsh) rc="${ZDOTDIR:-$HOME}/.zshrc" ;;
 	bash)
@@ -108,14 +114,27 @@ path_hint() {
 		if [ "$(uname -s)" = Darwin ]; then rc="$HOME/.bash_profile"; else rc="$HOME/.bashrc"; fi
 		;;
 	fish)
-		say "Add $1 to your PATH:"
-		say "  fish_add_path \"$1\""
-		return
+		rc="${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/simpleota.fish"
+		line="contains -- \"$1\" \$PATH; or set -gx PATH \"$1\" \$PATH"
 		;;
 	*) rc="$HOME/.profile" ;;
 	esac
-	say "Add $1 to your PATH, then open a new terminal:"
-	say "  echo 'export PATH=\"$1:\$PATH\"' >> \"$rc\""
+	if [ -f "$rc" ] && grep -qxF "$line" "$rc"; then
+		say "$rc already adds $1 to PATH; open a new terminal to use simpleota"
+		return
+	fi
+	# A quote, $, backtick or backslash in DIR would change what the line runs.
+	case $1 in
+	*[\"\$\`\\\']*) skip=1 ;;
+	*) skip=${SIMPLEOTA_NO_MODIFY_PATH:-} ;;
+	esac
+	if [ "$skip" != 1 ] && { mkdir -p "$(dirname "$rc")" &&
+		printf '\n# Added by the simpleota installer\n%s\n' "$line" >>"$rc"; } 2>/dev/null; then
+		say "Added $1 to your PATH in $rc; open a new terminal to use simpleota"
+		return
+	fi
+	say "Add $1 to your PATH, for example by adding this line to $rc:"
+	say "  $line"
 }
 
 choose_dir() {
@@ -160,6 +179,7 @@ main() {
 	current=$(installed_version "$target")
 	if [ "$current" = "$version" ]; then
 		say "simpleota $version is already installed at $target"
+		on_path "$dir" || add_to_path "$dir"
 		return
 	fi
 
@@ -191,9 +211,7 @@ main() {
 	else
 		say "Installed simpleota $version to $target"
 	fi
-	if ! on_path "$dir"; then
-		path_hint "$dir"
-	fi
+	on_path "$dir" || add_to_path "$dir"
 	found=$(command -v simpleota 2>/dev/null || true)
 	if [ -n "$found" ] && [ "$found" != "$target" ]; then
 		say "Note: $found comes first on your PATH and will run instead; remove it, or update it by running this script with sudo"
