@@ -71,6 +71,7 @@ func (h *harness) run(args ...string) result {
 			prompts = prompts[1:]
 			return p, nil
 		}
+		a.PromptLine = a.Prompt
 	}
 	h.env["SIMPLEOTA_CONFIG_DIR"] = h.configDir
 	code := a.Run(context.Background(), args)

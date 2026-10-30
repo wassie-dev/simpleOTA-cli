@@ -6,8 +6,16 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `login` with a staff account's personal token failed with "this token
+  cannot list projects". It now asks for the Project ID on a terminal, and
+  otherwise explains that `--project <project-id>` is needed.
+
 ### Changed
 
+- `login` explains which tokens it accepts and where to make them in the
+  dashboard before asking for one.
 - `install.sh`: after adding the install directory to PATH, it also prints
   the command that puts it on PATH in the current terminal, which a script
   cannot change for you.

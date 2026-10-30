@@ -27,8 +27,11 @@ import (
 const (
 	PersonalToken = "soto_pat_personalpersonalpersonal"
 	ProjectToken  = "soto_proj_projectprojectproject1"
-	ProjectID     = "11111111-1111-4111-8111-111111111111"
-	OtherID       = "22222222-2222-4222-8222-222222222222"
+	// StaffToken is a staff account's personal token: listing projects
+	// needs an owner filter, as on the real server.
+	StaffToken = "soto_pat_staffstaffstaffstaffstaff"
+	ProjectID  = "11111111-1111-4111-8111-111111111111"
+	OtherID    = "22222222-2222-4222-8222-222222222222"
 )
 
 // Manifest is the upload manifest as the server parses it.
@@ -154,7 +157,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if token != PersonalToken && token != ProjectToken {
+	if token != PersonalToken && token != ProjectToken && token != StaffToken {
 		detail(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
@@ -166,6 +169,11 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 1 {
+		q := r.URL.Query()
+		if token == StaffToken && q.Get("email") == "" && q.Get("owner_id") == "" {
+			detail(w, http.StatusBadRequest, "staff project listing requires email or owner_id")
+			return
+		}
 		writeJSON(w, http.StatusOK, s.Projects)
 		return
 	}

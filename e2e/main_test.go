@@ -68,7 +68,7 @@ func readEnv(path string) (map[string]string, error) {
 			out[k] = v
 		}
 	}
-	for _, k := range []string{"SIMPLEOTA_DEV_API_URL", "SIMPLEOTA_DEV_PROJECT_ID", "SIMPLEOTA_DEV_PERSONAL_TOKEN", "SIMPLEOTA_DEV_PROJECT_TOKEN", "SIMPLEOTA_DEV_DEVICE_TOKEN"} {
+	for _, k := range []string{"SIMPLEOTA_DEV_API_URL", "SIMPLEOTA_DEV_PROJECT_ID", "SIMPLEOTA_DEV_PERSONAL_TOKEN", "SIMPLEOTA_DEV_STAFF_TOKEN", "SIMPLEOTA_DEV_PROJECT_TOKEN", "SIMPLEOTA_DEV_DEVICE_TOKEN"} {
 		if out[k] == "" {
 			return nil, fmt.Errorf("%s is missing %s", path, k)
 		}

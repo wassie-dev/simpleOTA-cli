@@ -59,7 +59,8 @@ on macOS, `%APPDATA%\simpleota` on Windows).
 ## Quickstart
 
 ```bash
-# 1. Paste a personal token from the dashboard (kept in the OS keychain)
+# 1. Paste a personal token, made under API tokens in the dashboard's
+#    account menu (kept in the OS keychain)
 simpleota login
 simpleota status
 
@@ -73,6 +74,11 @@ simpleota release build/app.bin --version-label 1.0.0 --chip esp32s3 --percent 1
 simpleota deployment status --wait --timeout 30m
 simpleota deployment ramp <deployment-id> --percent 100
 ```
+
+`login` picks the project when the token can see exactly one. Otherwise pass
+`--project <slug>`. A staff account selects its project by ID: paste the
+Project ID from the project's page when `login` asks, or pass
+`--project <project-id>`.
 
 Run `simpleota keys generate` a second time for a backup key, keep that one
 offline, and pin both keys in your first signed firmware. Devices pin at most

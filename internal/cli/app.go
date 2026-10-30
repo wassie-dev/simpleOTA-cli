@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -58,6 +59,8 @@ type App struct {
 	NewAPI func(baseURL, token string) api.API
 	// Prompt reads a secret from the terminal; nil disables prompting.
 	Prompt func(label string) (string, error)
+	// PromptLine reads a visible line from the terminal; nil disables it.
+	PromptLine func(label string) (string, error)
 	// StdinIsTerminal reports whether In is an interactive terminal.
 	StdinIsTerminal bool
 	// Color enables ANSI colour in human output.
@@ -97,8 +100,21 @@ func NewApp() *App {
 	}
 	if stdinTTY {
 		a.Prompt = terminalPrompt(os.Stdin, os.Stderr)
+		a.PromptLine = linePrompt(os.Stdin, os.Stderr)
 	}
 	return a
+}
+
+func linePrompt(in io.Reader, w io.Writer) func(string) (string, error) {
+	r := bufio.NewReader(io.LimitReader(in, 64<<10))
+	return func(label string) (string, error) {
+		fmt.Fprint(w, label)
+		line, err := r.ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return "", fmt.Errorf("reading input: %w", err)
+		}
+		return line, nil
+	}
 }
 
 func terminalPrompt(in *os.File, w io.Writer) func(string) (string, error) {

@@ -50,6 +50,37 @@ func TestLoginWithBothTokenTypes(t *testing.T) {
 	}
 }
 
+// TestLoginWithStaffToken covers a staff account, which the server lists
+// projects for only when given an owner.
+func TestLoginWithStaffToken(t *testing.T) {
+	c := newCLI(t)
+	token := env["SIMPLEOTA_DEV_STAFF_TOKEN"] + "\n"
+	if r := c.run(token, "login"); r.code != 2 || !strings.Contains(r.stderr, "staff account") || !strings.Contains(r.stderr, "--project <project-id>") {
+		t.Fatalf("no project: %+v", r)
+	}
+	if r := c.run(token, "login", "--project", env["SIMPLEOTA_DEV_PROJECT_SLUG"]); r.code != 2 || !strings.Contains(r.stderr, "by ID, not slug") {
+		t.Fatalf("slug: %+v", r)
+	}
+	r := c.run(token, "login", "--project", env["SIMPLEOTA_DEV_PROJECT_ID"], "--json")
+	if r.code != 0 {
+		t.Fatalf("project ID: %+v", r)
+	}
+	v := decode[struct {
+		TokenType string `json:"token_type"`
+		Project   struct{ ID, Slug string }
+	}](t, r.stdout)
+	if v.TokenType != "personal" || v.Project.ID != env["SIMPLEOTA_DEV_PROJECT_ID"] || v.Project.Slug != env["SIMPLEOTA_DEV_PROJECT_SLUG"] {
+		t.Fatalf("login output: %+v", v)
+	}
+	st := decode[struct {
+		Auth    struct{ State string }
+		Project struct{ ID string }
+	}](t, c.mustRun("status", "--json").stdout)
+	if st.Auth.State != "valid" || st.Project.ID != env["SIMPLEOTA_DEV_PROJECT_ID"] {
+		t.Fatalf("status: %+v", st)
+	}
+}
+
 func TestStatusReportsLogin(t *testing.T) {
 	c := newCLI(t)
 	if r := c.run("", "status"); r.code != 3 {

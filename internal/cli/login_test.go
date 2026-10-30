@@ -48,6 +48,51 @@ func TestLoginFromPrompt(t *testing.T) {
 	}
 }
 
+func TestLoginPromptExplainsTokens(t *testing.T) {
+	h := newHarness(t)
+	h.prompts = []string{fakeapi.PersonalToken}
+	r := h.run("login")
+	if r.code != 0 || !strings.Contains(r.stderr, h.fake.URL+"/tokens/") || !strings.Contains(r.stderr, "Issue token") {
+		t.Fatalf("%+v", r)
+	}
+	if strings.Contains(r.stdout, "/tokens/") {
+		t.Fatal("instructions belong on stderr")
+	}
+}
+
+func TestLoginStaffTokenAsksForProjectID(t *testing.T) {
+	h := newHarness(t)
+	h.prompts = []string{fakeapi.StaffToken, " " + fakeapi.ProjectID + "\n"}
+	r := h.run("login")
+	if r.code != 0 || !strings.Contains(r.stderr, "staff account") || !strings.Contains(r.stdout, "personal token for project fleet") {
+		t.Fatalf("%+v", r)
+	}
+	if cfg, _ := config.Load(h.configDir); cfg.ProjectID != fakeapi.ProjectID {
+		t.Fatalf("config = %+v", cfg)
+	}
+
+	h.prompts = []string{fakeapi.StaffToken, "fleet"}
+	if r := h.run("login"); r.code != ExitUsage || !strings.Contains(r.stderr, "not a project ID") {
+		t.Fatalf("slug at the prompt: %+v", r)
+	}
+}
+
+func TestLoginStaffTokenWithoutTerminal(t *testing.T) {
+	h := newHarness(t)
+	h.stdin = fakeapi.StaffToken
+	if r := h.run("login"); r.code != ExitUsage || !strings.Contains(r.stderr, "--project <project-id>") {
+		t.Fatalf("no project: %+v", r)
+	}
+	h.stdin = fakeapi.StaffToken
+	if r := h.run("login", "--project", "fleet"); r.code != ExitUsage || !strings.Contains(r.stderr, "by ID, not slug") {
+		t.Fatalf("slug: %+v", r)
+	}
+	h.stdin = fakeapi.StaffToken
+	if r := h.run("login", "--project", fakeapi.ProjectID); r.code != 0 {
+		t.Fatalf("project ID: %+v", r)
+	}
+}
+
 func TestLoginNeedsProjectWhenSeveralVisible(t *testing.T) {
 	h := newHarness(t)
 	h.fake.Projects = append(h.fake.Projects, api.Project{ID: fakeapi.OtherID, Slug: "lab"})

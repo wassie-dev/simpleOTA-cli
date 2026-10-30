@@ -26,6 +26,10 @@ func (a *App) loginCommand() *cobra.Command {
 pipe it on stdin. The token is checked against the API, kept in the OS
 keychain (or a 0600 file when there is none), and its project is remembered.
 
+The project is picked automatically when the token can see only one;
+otherwise pass --project. A staff account selects its project by ID: paste
+the Project ID from the project's page when asked, or pass --project <id>.
+
 SIMPLEOTA_TOKEN, when set, takes precedence over the stored token.`,
 		Example: `  simpleota login
   echo "$SIMPLEOTA_TOKEN" | simpleota login --project my-fleet`,
@@ -49,7 +53,7 @@ func (a *App) runLogin(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	token, err := a.readToken()
+	token, err := a.readToken(apiURL)
 	if err != nil {
 		return err
 	}
@@ -59,7 +63,7 @@ func (a *App) runLogin(ctx context.Context) error {
 	}
 
 	client := a.newAPI(apiURL, token)
-	project, err := a.loginProject(ctx, client, kind)
+	project, err := a.loginProject(ctx, client, kind, apiURL)
 	if err != nil {
 		var ae *api.Error
 		if errors.As(err, &ae) && ae.StatusCode == http.StatusUnauthorized {
@@ -104,12 +108,18 @@ func (a *App) runLogin(ctx context.Context) error {
 }
 
 // readToken prompts on a terminal, otherwise reads the first line of stdin.
-func (a *App) readToken() (string, error) {
+func (a *App) readToken(apiURL string) (string, error) {
 	var raw string
 	if a.StdinIsTerminal {
 		if a.Prompt == nil {
 			return "", usageErr("cannot prompt for the token; pipe it on stdin")
 		}
+		a.printer().Notice(`Log in with a token from the SimpleOTA dashboard:
+  - a personal token (soto_pat_...) for your own machine; make one under
+    API tokens at %s/tokens/
+  - a project token (soto_proj_...) with the API scope for CI; make one with
+    Issue token on the project's page
+The token is not shown as you paste it.`, apiURL)
 		t, err := a.Prompt("Paste your SimpleOTA token: ")
 		if err != nil {
 			return "", err
@@ -130,17 +140,15 @@ func (a *App) readToken() (string, error) {
 }
 
 // loginProject validates the token and picks its project.
-func (a *App) loginProject(ctx context.Context, client api.API, kind credentials.Kind) (api.Project, error) {
+func (a *App) loginProject(ctx context.Context, client api.API, kind credentials.Kind, apiURL string) (api.Project, error) {
 	if ref := a.flags.project; ref != "" {
 		return findProject(ctx, client, ref)
 	}
 	projects, err := client.ListProjects(ctx)
+	if isStaffListing(err) {
+		return a.staffProject(ctx, client, apiURL)
+	}
 	if err != nil {
-		var ae *api.Error
-		if errors.As(err, &ae) && ae.StatusCode == http.StatusBadRequest {
-			// Staff tokens must name a project to list one.
-			return api.Project{}, usageErr("this token cannot list projects; pass --project <project-id>")
-		}
 		return api.Project{}, err
 	}
 	switch {
@@ -153,6 +161,24 @@ func (a *App) loginProject(ctx context.Context, client api.API, kind credentials
 	default:
 		return api.Project{}, usageErr("this token can see %d projects; pick one with --project <slug> (%s)", len(projects), projectSlugs(projects))
 	}
+}
+
+// staffProject asks a staff account for its project ID, because the API
+// lists projects for staff only when given an owner.
+func (a *App) staffProject(ctx context.Context, client api.API, apiURL string) (api.Project, error) {
+	if !a.StdinIsTerminal || a.PromptLine == nil {
+		return api.Project{}, usageErr("this token belongs to a staff account, which the API does not list projects for; pass --project <project-id>, copying the Project ID from the project's page at %s", apiURL)
+	}
+	a.printer().Notice("This token belongs to a staff account, which the API does not list projects for.\nOpen the project at %s and copy the Project ID shown under its name.", apiURL)
+	ref, err := a.PromptLine("Project ID: ")
+	if err != nil {
+		return api.Project{}, err
+	}
+	ref = strings.TrimSpace(ref)
+	if !api.IsUUID(ref) {
+		return api.Project{}, usageErr("%q is not a project ID; copy the Project ID from the project's page, or pass --project <project-id>", ref)
+	}
+	return findProject(ctx, client, ref)
 }
 
 func (a *App) logoutCommand() *cobra.Command {

@@ -20,6 +20,9 @@ func findProject(ctx context.Context, a api.API, ref string) (api.Project, error
 		return p, err
 	}
 	projects, err := a.ListProjects(ctx)
+	if isStaffListing(err) {
+		return api.Project{}, usageErr("a staff account selects projects by ID, not slug; pass --project <project-id>, copying the Project ID from the project's page")
+	}
 	if err != nil {
 		return api.Project{}, err
 	}
@@ -40,4 +43,11 @@ func projectSlugs(ps []api.Project) string {
 		slugs[i] = p.Slug
 	}
 	return strings.Join(slugs, ", ")
+}
+
+// isStaffListing reports the 400 the API gives a staff token that lists
+// projects without naming an owner.
+func isStaffListing(err error) bool {
+	var ae *api.Error
+	return errors.As(err, &ae) && ae.StatusCode == http.StatusBadRequest
 }
