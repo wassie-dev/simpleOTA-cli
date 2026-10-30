@@ -69,9 +69,10 @@ if out="$(run 1.2.3)"; then fail "missing version accepted: $out"; fi
 grep -q "download failed" <<<"$out" || fail "missing version output: $out"
 echo "ok   unknown version refused"
 
-(cd "$ROOT" && go build -ldflags "-X github.com/wassie-dev/simpleOTA-cli/internal/version.Version=0.0.1" -o "$DIR/simpleota" ./cmd/simpleota)
+# 0.0.0-0 sorts below the 0.0.0-SNAPSHOT-<commit> snapshot, so this is an update.
+(cd "$ROOT" && go build -ldflags "-X github.com/wassie-dev/simpleOTA-cli/internal/version.Version=0.0.0-0" -o "$DIR/simpleota" ./cmd/simpleota)
 out="$("$DIR/simpleota" update --version "$VERSION" 2>&1)" || fail "self-update: $out"
-grep -q "Updated simpleota from 0.0.1 to $VERSION" <<<"$out" || fail "self-update output: $out"
+grep -q "Updated simpleota from 0.0.0-0 to $VERSION" <<<"$out" || fail "self-update output: $out"
 "$DIR/simpleota" --version | grep -q "simpleota version $VERSION" || fail "self-updated binary version"
 echo "ok   simpleota update replaces its own binary"
 
