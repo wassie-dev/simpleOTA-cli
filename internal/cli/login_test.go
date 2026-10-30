@@ -157,4 +157,3 @@ func TestLogout(t *testing.T) {
 		t.Fatalf("second logout --json: %+v", r)
 	}
 }
-

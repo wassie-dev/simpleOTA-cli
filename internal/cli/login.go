@@ -177,7 +177,7 @@ func (a *App) logoutCommand() *cobra.Command {
 		Short: "Remove the stored token and chosen project",
 		Long: `Remove the token stored for the current API URL and the project chosen
 with project use. SIMPLEOTA_TOKEN, when set, is not affected.`,
-		Args:  exactArgs(0),
+		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := a.configDir()
 			if err != nil {
