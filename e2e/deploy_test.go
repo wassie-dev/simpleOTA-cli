@@ -105,11 +105,11 @@ func TestRolloutLifecycle(t *testing.T) {
 	}
 }
 
-// waitAsync starts status --wait and returns a channel with its result.
+// waitAsync starts deployment wait and returns a channel with its result.
 func waitAsync(c *cli, id string, timeout string) <-chan result {
 	ch := make(chan result, 1)
 	go func() {
-		ch <- c.run("", "deployment", "status", id, "--wait", "--timeout", timeout, "--interval", "1s", "--json")
+		ch <- c.run("", "deployment", "wait", id, "--timeout", timeout, "--interval", "1s", "--json")
 	}()
 	return ch
 }
@@ -169,7 +169,7 @@ func TestStatusWaitFailsWhenRollbackAutoPauses(t *testing.T) {
 	if r.code != 4 || outcome(t, r) != "device_failed" {
 		t.Fatalf("%+v", r)
 	}
-	st := c.mustRun("deployment", "status", out.DeploymentID, "--json")
+	st := c.mustRun("deployment", "show", out.DeploymentID, "--json")
 	if !strings.Contains(st.stdout, `"state": "paused"`) {
 		t.Fatalf("deployment should be auto-paused: %s", st.stdout)
 	}
@@ -204,7 +204,7 @@ func TestDeploymentStatusAfterLogoutIsAuthError(t *testing.T) {
 		t.Fatalf("login: %+v", r)
 	}
 	c.mustRun("logout")
-	if r := c.run("", "deployment", "status"); r.code != 3 {
+	if r := c.run("", "deployment", "show"); r.code != 3 {
 		t.Fatalf("deployment status after logout: %+v", r)
 	}
 }

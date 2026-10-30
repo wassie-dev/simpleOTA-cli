@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io/fs"
 	"net/http"
 	"strings"
@@ -26,13 +25,15 @@ func (a *App) statusCommand() *cobra.Command {
 		Use:   "status",
 		Short: "Show the CLI's version, login, project and signing key",
 		Long: `Show this simpleota's version and whether a newer release exists, the API
-URL, whether you are logged in and the token still works, the selected
-project, and the key release would sign with.
+URL, whether you are logged in and the token still works (with the account
+it belongs to), the current project and where that choice came from, and
+the key release would sign with.
 
 Exit 0 when logged in with a working token, 3 when not logged in or the
-token is rejected, 2 when --project or the project saved at login cannot
-be found, and 1 when the API cannot be reached. For a deployment,
-use simpleota deployment status.`,
+token is rejected, 2 when --project, SIMPLEOTA_PROJECT or the project
+chosen with project use cannot be found, and 1 when the API cannot be
+reached. For a deployment,
+use simpleota deployment show.`,
 		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.runCLIStatus(cmd.Context())
@@ -62,7 +63,8 @@ func (a *App) runCLIStatus(ctx context.Context) error {
 	a.checkForUpdate(ctx, &v)
 	project, projectErr := a.checkAuth(ctx, cfg, dir, &v)
 	if project != nil {
-		v.Project = &output.ProjectView{ID: project.ID, Slug: project.Slug, Name: project.Name}
+		pv := output.NewProjectView(*project)
+		v.Project = &pv
 	}
 	if projectErr != nil {
 		v.ProjectError = message(projectErr)
@@ -128,61 +130,46 @@ func (a *App) checkAuth(ctx context.Context, cfg config.Config, dir string, v *o
 	ctx, cancel := context.WithTimeout(ctx, statusCheckTimeout)
 	defer cancel()
 	client := a.newAPI(v.APIURL, token)
-	projects, err := client.ListProjects(ctx)
+	me, err := checkToken(ctx, client)
 	var ae *api.Error
 	switch {
 	case err == nil:
 		v.Auth.State = output.AuthValid
+		if me != nil {
+			v.Auth.Account = output.NewAccountView(me.Account)
+		}
 	case errors.As(err, &ae) && ae.StatusCode == http.StatusUnauthorized:
 		v.Auth.State = output.AuthRejected
 		v.Auth.Error = "the server rejected the token (401)"
 		return nil, nil
 	case errors.As(err, &ae):
-		// Any other API answer means the token was accepted, such as the
-		// 400 staff tokens get without a filter.
+		// Any other API answer means the token was accepted.
 		v.Auth.State = output.AuthValid
 	default:
 		v.Auth.State = output.AuthUnreachable
 		v.Auth.Error = err.Error()
-	}
-	return a.statusProject(ctx, client, cfg, v, projects)
-}
-
-// statusProject finds the project commands would use: --project, then the
-// project saved at login, then the only project the token can see. A
-// project that was named but cannot be found is an error.
-func (a *App) statusProject(ctx context.Context, client api.API, cfg config.Config, v *output.StatusView, projects []api.Project) (*api.Project, error) {
-	ref := a.flags.project
-	saved := ref == "" && cfg.ProjectID != "" && cfg.APIURL == v.APIURL && a.Getenv("SIMPLEOTA_TOKEN") == ""
-	switch {
-	case saved:
-		ref = cfg.ProjectID
-	case ref == "":
-		if len(projects) == 1 {
-			return &projects[0], nil
-		}
-		return nil, nil
-	}
-	for _, p := range projects {
-		if p.ID == ref || p.Slug == ref {
-			return &p, nil
-		}
-	}
-	if v.Auth.State != output.AuthValid {
-		if saved {
+		if kind != credentials.KindProject && cfg.ProjectID != "" && cfg.APIURL == v.APIURL {
+			v.ProjectSource = projectFromConfig
 			return &api.Project{ID: cfg.ProjectID, Slug: cfg.ProjectSlug}, nil
 		}
 		return nil, nil
 	}
-	// Staff tokens list no projects, and a project token lists only its
-	// own, so look the project up directly.
-	p, err := findProject(ctx, client, ref)
-	if err != nil && saved {
-		return nil, fmt.Errorf("the project saved at login (%s): %w; run simpleota login to choose another", cfg.ProjectSlug, err)
-	}
-	if err != nil {
+
+	p, from, err := a.currentProject(ctx, client, kind, cfg, v.APIURL)
+	var none *noProjectError
+	switch {
+	case errors.As(err, &none):
+		return nil, nil
+	case err != nil:
 		return nil, err
+	case from == projectFromConfig:
+		full, err := client.GetProject(ctx, p.ID)
+		if err != nil {
+			return nil, savedProjectErr(err, p)
+		}
+		p = full
 	}
+	v.ProjectSource = from
 	return &p, nil
 }
 

@@ -1,0 +1,3 @@
+BUILD  VERSION  CHIP     SECURITY  STATE     CREATED
+2      1.0.1    esp32s3  signed    ready     2026-10-01 12:00
+1      1.0.0    esp32s3  basic     archived  2026-10-01 12:00

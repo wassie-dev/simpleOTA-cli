@@ -64,26 +64,34 @@ on macOS, `%APPDATA%\simpleota` on Windows).
 simpleota login
 simpleota status
 
-# 2. Create a signing key; the private key stays here, encrypted
-simpleota keys generate --key-id prod-2026
+# 2. Choose the project to work on (skip this if you have only one)
+simpleota project list
+simpleota project use my-fleet
 
-# 3. Pin the printed signing_keys snippet in your firmware, then release
+# 3. Create a signing key; the private key stays here, encrypted
+simpleota key generate --key-id prod-2026
+
+# 4. Pin the printed signing_keys snippet in your firmware, then release
 simpleota release build/app.bin --version-label 1.0.0 --percent 10
 
-# 4. Watch it, then widen it
-simpleota deployment status --wait --timeout 30m
+# 5. Watch devices take it, then widen it
+simpleota deployment wait --timeout 30m
 simpleota deployment ramp <deployment-id> --percent 100
 ```
 
-`login` picks the project when the token can see exactly one. Otherwise pass
-`--project <slug>`. A staff account sees its own projects, and opens any
-other project by ID with `--project <project-id>`. When the server cannot
-list a staff account's projects, `login` asks for the Project ID from the
-project's page.
+`login` stores the token and chooses no project. Resource commands act on
+the current project, chosen in this order:
 
-Run `simpleota keys generate` a second time for a backup key, keep that one
+1. `--project <slug|id>`
+2. `SIMPLEOTA_PROJECT`
+3. the project chosen with `simpleota project use` (personal tokens only)
+4. the only project the token can see; a project token sees just its own
+
+A staff account sees its own projects, and opens any other project by ID.
+
+Run `simpleota key generate` a second time for a backup key, keep that one
 offline, and pin both keys in your first signed firmware. Devices pin at most
-two keys and cannot change them over the air. Each `keys generate` prints a
+two keys and cannot change them over the air. Each `key generate` prints a
 snippet that pins the new key and the project's newest other active key, so
 the second run's snippet holds both.
 
@@ -118,39 +126,59 @@ there, so it cannot create a second build.
 
 ## Commands
 
-Commands about the CLI itself sit at the top level; commands about a
-SimpleOTA resource sit under its name.
+Commands follow the API's resources. Commands about your login and the CLI
+sit at the top level; everything in a project sits under the resource's
+name, with a plural alias (`simpleota devices list` works too). Every
+command has `--help` with examples.
+
+```
+simpleota
+├── login | logout | status | update [--check] [--version <v>]
+├── release <bin> --version-label <v>    sign, upload and deploy in one call
+├── project   list | show [slug|id] | use <slug|id>
+├── build     list | show <build-number>
+├── deployment
+│   ├── list | show [id] | wait [id] [--timeout]
+│   └── ramp <id> --percent <n> | pause | resume | complete | cancel <id>
+├── device    list [--channel] [--group] [--state] | show <device-id|uuid>
+├── channel   list
+└── key       list | generate --key-id <id> | export [--format encrypted|pem]
+```
 
 | Command | What it does |
 | --- | --- |
-| `status` | Show the CLI's version and available update, login, project and signing key |
 | `login` / `logout` | Store or remove a personal (`soto_pat_`) or project (`soto_proj_`) token |
-| `update [--check] [--version <v>]` | Replace this binary with the latest (or a given) release, after checking its SHA-256 |
-| `release <bin> --version-label <v>` | Sign, upload and deploy in one call. Stops if the project already has this binary (`--allow-duplicate` uploads it anyway); never retried |
-| `deployment status [id] [--wait]` | Show a deployment's device progress; `--wait` gates CI |
-| `deployment ramp <id> --percent <n>` | Offer the build to more devices |
-| `deployment pause\|resume\|complete\|cancel <id>` | Change a deployment's state |
-| `keys generate --key-id <id>` | Create a key locally and register its public key (personal token only) |
-| `keys export [--format encrypted\|pem]` | Print the private key for a CI secret |
+| `status` | Show the CLI's version and available update, the account, the current project and where it came from, and the signing key |
+| `update` | Replace this binary with the latest (or a given) release, after checking its SHA-256 |
+| `release` | Sign, upload and deploy in one call. Stops if the project already has this binary (`--allow-duplicate` uploads it anyway); never retried |
+| `project list\|show\|use` | List projects, show one, or choose the current project |
+| `build list\|show` | List the project's builds (the API calls them artifacts) or show one by build number |
+| `deployment list\|show` | List deployments, or show one's state and device progress |
+| `deployment wait` | Wait for a deployment to succeed or fail; gates CI |
+| `deployment ramp\|pause\|resume\|complete\|cancel` | Change a deployment's state |
+| `device list\|show` | List devices, filtered by channel, group or state, or show one |
+| `channel list` | List release channels |
+| `key list\|generate\|export` | List the project's public keys, create a key locally and register its public key (personal token only), or print a private key for a CI secret |
 
 Global flags: `--json` ([schema](docs/json.md)), `--api-url`, `--project`.
-`deployment status --wait` exits 0 once every device the current step reached
-has confirmed, and counts a device once it has checked in and been offered
-the build. A deployment completed before any device was offered the build
-exits 4, since no device updated.
+`deployment wait` exits 0 once every device the current step reached has
+confirmed, and counts a device once it has checked in and been offered the
+build. A deployment completed before any device was offered the build exits
+4, since no device updated.
 
 | Exit code | Meaning |
 | --- | --- |
 | 0 | OK |
 | 1 | Error (for `status`: the API could not be reached) |
-| 2 | Usage error (for `status`: `--project` or the project saved at login cannot be found) |
+| 2 | Usage error, including no current project when the token sees several (for `status`: the chosen project cannot be found) |
 | 3 | Not logged in, or the token was rejected (`status` too) |
 | 4 | A device failed or rolled back, the deployment is paused, cancelled or not started, or it was completed before any device was offered the build |
-| 5 | `deployment status --wait` timed out |
+| 5 | `deployment wait` timed out |
 
 | Variable | Use |
 | --- | --- |
 | `SIMPLEOTA_TOKEN` | API token; takes precedence over `login` |
+| `SIMPLEOTA_PROJECT` | Project slug or ID to act on; takes precedence over `project use` |
 | `SIMPLEOTA_SIGNING_KEY` | Exported key, encrypted or PEM |
 | `SIMPLEOTA_SIGNING_KEY_PASSPHRASE` | Passphrase for an encrypted key |
 | `SIMPLEOTA_API_URL` | API URL (default `https://simpleota.com`) |
@@ -162,7 +190,7 @@ exits 4, since no device updated.
 ## CI
 
 Make an `api`-scoped project token in the dashboard, and export the key once
-with `simpleota keys export`. Store both as secrets, and put `simpleota` on
+with `simpleota key export`. Store both as secrets, and put `simpleota` on
 the runner's PATH from the releases page.
 
 GitHub Actions:
@@ -175,7 +203,7 @@ GitHub Actions:
     SIMPLEOTA_SIGNING_KEY_PASSPHRASE: ${{ secrets.SIMPLEOTA_SIGNING_KEY_PASSPHRASE }}
   run: |
     ID=$(simpleota release build/app.bin --version-label "${GITHUB_REF_NAME}" --percent 10 --json | jq -r .deployment_id)
-    simpleota deployment status "$ID" --wait --timeout 30m
+    simpleota deployment wait "$ID" --timeout 30m
 ```
 
 GitLab CI:
@@ -184,7 +212,7 @@ GitLab CI:
 release:
   script:
     - ID=$(simpleota release build/app.bin --version-label "$CI_COMMIT_TAG" --percent 10 --json | jq -r .deployment_id)
-    - simpleota deployment status "$ID" --wait --timeout 30m
+    - simpleota deployment wait "$ID" --timeout 30m
 ```
 
 ## Development

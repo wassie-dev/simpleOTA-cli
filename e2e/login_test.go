@@ -28,6 +28,8 @@ func TestLoginWithBothTokenTypes(t *testing.T) {
 			if r.code != 0 {
 				t.Fatalf("login: %+v", r)
 			}
+			// The dev user has one project, and the project token reaches
+			// only that project, so both resolve it without project use.
 			v := decode[struct {
 				TokenType       string `json:"token_type"`
 				CredentialStore string `json:"credential_store"`
@@ -55,40 +57,41 @@ func TestLoginWithBothTokenTypes(t *testing.T) {
 // projects for only when given an owner.
 func TestLoginWithStaffToken(t *testing.T) {
 	c := newCLI(t)
-	token := env["SIMPLEOTA_DEV_STAFF_TOKEN"] + "\n"
-	unknownSlug := "by ID, not slug"
+	if r := c.run(env["SIMPLEOTA_DEV_STAFF_TOKEN"]+"\n", "login", "--json"); r.code != 0 {
+		t.Fatalf("login: %+v", r)
+	}
+	unknownSlug := "pass the project ID instead of a slug"
 	if serverHasMe(t) {
-		// The staff account's own project is listed; another account's
-		// project is found only by ID.
-		r := c.run(token, "login", "--json")
-		if r.code != 0 || !strings.Contains(r.stdout, `"slug": "`+env["SIMPLEOTA_DEV_STAFF_PROJECT_SLUG"]+`"`) {
-			t.Fatalf("own project: %+v", r)
+		// The staff account's own project is listed and current.
+		st := decode[struct {
+			Auth struct {
+				Account struct {
+					IsStaff bool `json:"is_staff"`
+				}
+			}
+			Project struct{ Slug string }
+		}](t, c.mustRun("status", "--json").stdout)
+		if !st.Auth.Account.IsStaff || st.Project.Slug != env["SIMPLEOTA_DEV_STAFF_PROJECT_SLUG"] {
+			t.Fatalf("status: %+v", st)
 		}
 		unknownSlug = "is visible to this token"
-	} else if r := c.run(token, "login"); r.code != 2 || !strings.Contains(r.stderr, "staff account") || !strings.Contains(r.stderr, "--project <project-id>") {
+	} else if r := c.run("", "deployment", "list"); r.code != 2 || !strings.Contains(r.stderr, "project use <project-id>") {
 		t.Fatalf("no project: %+v", r)
 	}
-	if r := c.run(token, "login", "--project", env["SIMPLEOTA_DEV_PROJECT_SLUG"]); r.code != 2 || !strings.Contains(r.stderr, unknownSlug) {
+	// Another account's project is reached by ID, not slug.
+	if r := c.run("", "project", "use", env["SIMPLEOTA_DEV_PROJECT_SLUG"]); r.code != 2 || !strings.Contains(r.stderr, unknownSlug) {
 		t.Fatalf("another account's slug: %+v", r)
 	}
-	r := c.run(token, "login", "--project", env["SIMPLEOTA_DEV_PROJECT_ID"], "--json")
-	if r.code != 0 {
-		t.Fatalf("project ID: %+v", r)
-	}
-	v := decode[struct {
-		TokenType string `json:"token_type"`
-		Project   struct{ ID, Slug string }
-	}](t, r.stdout)
-	if v.TokenType != "personal" || v.Project.ID != env["SIMPLEOTA_DEV_PROJECT_ID"] || v.Project.Slug != env["SIMPLEOTA_DEV_PROJECT_SLUG"] {
-		t.Fatalf("login output: %+v", v)
-	}
+	c.mustRun("project", "use", env["SIMPLEOTA_DEV_PROJECT_ID"])
 	st := decode[struct {
-		Auth    struct{ State string }
-		Project struct{ ID, Name string }
+		Auth          struct{ State string }
+		Project       struct{ ID, Name string }
+		ProjectSource string `json:"project_source"`
 	}](t, c.mustRun("status", "--json").stdout)
-	if st.Auth.State != "valid" || st.Project.ID != env["SIMPLEOTA_DEV_PROJECT_ID"] || st.Project.Name == "" {
+	if st.Auth.State != "valid" || st.Project.ID != env["SIMPLEOTA_DEV_PROJECT_ID"] || st.Project.Name == "" || st.ProjectSource != "project use" {
 		t.Fatalf("status: %+v", st)
 	}
+	c.mustRun("deployment", "list")
 	if r := c.run("", "--project", "does-not-exist-"+uid(), "status"); r.code != 2 || !strings.Contains(r.stdout, unknownSlug) {
 		t.Fatalf("status with an unknown project: %+v", r)
 	}

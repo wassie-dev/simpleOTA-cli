@@ -59,7 +59,7 @@ func (p Printer) Release(r ReleaseView) error {
 		}
 		fmt.Fprintf(p.Out, "Each device installs the highest build offered to it, so these still reach\nthe devices build %d does not. Stop one with: simpleota deployment complete <id>\n", r.BuildNumber)
 	}
-	fmt.Fprintf(p.Out, "Watch it with: simpleota deployment status %s --wait\n", r.DeploymentID)
+	fmt.Fprintf(p.Out, "Watch it with: simpleota deployment wait %s\n", r.DeploymentID)
 	return nil
 }
 

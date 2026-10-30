@@ -124,7 +124,7 @@ const (
 	OutcomeTimedOut     Outcome = "timed_out"
 )
 
-// Evaluate applies the --wait rule: success once every device the current
+// Evaluate applies the deployment wait rule: success once every device the current
 // step reached has confirmed; failure on any failed or rolled-back device,
 // when the deployment is no longer running, or when it was completed before
 // any device was offered the build.

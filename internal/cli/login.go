@@ -21,20 +21,28 @@ func (a *App) loginCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "login",
 		Short: "Store an API token from the dashboard",
-		Long: `Store a personal token (soto_pat_...) or an api-scoped project token
-(soto_proj_...) made in the SimpleOTA dashboard. Paste it at the prompt or
-pipe it on stdin. The token is checked against the API, kept in the OS
-keychain (or a 0600 file when there is none), and its project is remembered.
+		Long: `Check an API token against SimpleOTA and store it for later commands, in
+the OS keychain or, where there is none, a 0600 file in the config
+directory. Paste the token at the prompt, or pipe it on stdin.
 
-The project is picked automatically when the token can see only one;
-otherwise pass --project. A staff account sees its own projects, and opens
-any other project by ID with --project <id>. When the server cannot list a
-staff account's projects, login asks for the Project ID from the project's
-page.
+Two kinds of token work:
 
+  personal token (soto_pat_...)  for your own machine; it reaches every
+                                 project your account can open. Make one
+                                 under API tokens in the dashboard.
+  project token (soto_proj_...)  for CI; it reaches one project. Make one
+                                 with Issue token on the project's page,
+                                 with the API scope.
+
+login does not choose a project. A project token always acts on its own
+project. With a personal token, commands act on your only project, or on
+the one you choose with simpleota project use.
+
+Logging in again replaces the stored token and clears the chosen project.
 SIMPLEOTA_TOKEN, when set, takes precedence over the stored token.`,
 		Example: `  simpleota login
-  echo "$SIMPLEOTA_TOKEN" | simpleota login --project my-fleet`,
+  echo "$SIMPLEOTA_TOKEN" | simpleota login
+  simpleota --api-url http://127.0.0.1:8000 login`,
 		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.runLogin(cmd.Context())
@@ -65,7 +73,7 @@ func (a *App) runLogin(ctx context.Context) error {
 	}
 
 	client := a.newAPI(apiURL, token)
-	project, err := a.loginProject(ctx, client, kind, apiURL)
+	me, err := checkToken(ctx, client)
 	if err != nil {
 		var ae *api.Error
 		if errors.As(err, &ae) && ae.StatusCode == http.StatusUnauthorized {
@@ -84,29 +92,51 @@ func (a *App) runLogin(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("storing the token: %w", err)
 	}
-	cfg.APIURL = apiURL
-	cfg.ProjectID = project.ID
-	cfg.ProjectSlug = project.Slug
+	cfg.APIURL, cfg.ProjectID, cfg.ProjectSlug = apiURL, "", ""
 	if err := config.Save(dir, cfg); err != nil {
 		return err
+	}
+
+	view := output.LoginView{APIURL: apiURL, TokenType: string(kind), CredentialStore: where, ProjectCount: -1}
+	if me != nil {
+		view.Account = output.NewAccountView(me.Account)
+	}
+	projects, err := client.ListProjects(ctx)
+	switch {
+	case isStaffListing(err):
+	case err != nil:
+		return fmt.Errorf("the token is stored, but listing its projects failed: %w", err)
+	default:
+		view.ProjectCount = len(projects)
+		if len(projects) == 1 {
+			pv := output.NewProjectView(projects[0])
+			view.Project = &pv
+		}
 	}
 
 	p := a.printer()
 	if a.Getenv("SIMPLEOTA_TOKEN") != "" {
 		p.Notice("Note: SIMPLEOTA_TOKEN is set and takes precedence over the stored token.")
 	}
-	view := output.LoginView{
-		APIURL:          apiURL,
-		TokenType:       string(kind),
-		CredentialStore: where,
-		Project:         output.ProjectView{ID: project.ID, Slug: project.Slug, Name: project.Name},
+	return p.Login(view)
+}
+
+// checkToken asks /me/ who the token belongs to. On a server without /me/
+// it checks the token by listing projects instead and returns no Me; the
+// 400 a staff token gets there still means the token was accepted.
+func checkToken(ctx context.Context, client api.API) (*api.Me, error) {
+	me, err := client.Me(ctx)
+	if err == nil {
+		return &me, nil
 	}
-	if p.JSON {
-		return p.WriteJSON(view)
+	var ae *api.Error
+	if !errors.As(err, &ae) || ae.StatusCode != http.StatusNotFound {
+		return nil, err
 	}
-	fmt.Fprintf(a.Out, "Logged in to %s with a %s token for project %s.\n", apiURL, kind, project.Slug)
-	fmt.Fprintf(a.Out, "Token stored in %s.\n", where)
-	return nil
+	if _, err := client.ListProjects(ctx); err != nil && !isStaffListing(err) {
+		return nil, err
+	}
+	return nil, nil
 }
 
 // readToken prompts on a terminal, otherwise reads the first line of stdin.
@@ -141,53 +171,12 @@ The token is not shown as you paste it.`, apiURL)
 	return token, nil
 }
 
-// loginProject validates the token and picks its project.
-func (a *App) loginProject(ctx context.Context, client api.API, kind credentials.Kind, apiURL string) (api.Project, error) {
-	if ref := a.flags.project; ref != "" {
-		return findProject(ctx, client, ref)
-	}
-	projects, err := client.ListProjects(ctx)
-	if isStaffListing(err) {
-		return a.staffProject(ctx, client, apiURL)
-	}
-	if err != nil {
-		return api.Project{}, err
-	}
-	switch {
-	case len(projects) == 1:
-		return projects[0], nil
-	case len(projects) == 0 && kind == credentials.KindPersonal:
-		return api.Project{}, usageErr("this account has no projects yet; create one in the dashboard and log in again, or pass --project <project-id> for a project you can open")
-	case len(projects) == 0:
-		return api.Project{}, errors.New("this token cannot see any project")
-	default:
-		return api.Project{}, usageErr("this token can see %d projects; pick one with --project <slug> (%s)", len(projects), projectSlugs(projects))
-	}
-}
-
-// staffProject asks a staff account for its project ID, for a server that
-// lists projects for staff only when given an owner and has no /me/ to name
-// the account.
-func (a *App) staffProject(ctx context.Context, client api.API, apiURL string) (api.Project, error) {
-	if !a.StdinIsTerminal || a.PromptLine == nil {
-		return api.Project{}, usageErr("this token belongs to a staff account, which the API does not list projects for; pass --project <project-id>, copying the Project ID from the project's page at %s", apiURL)
-	}
-	a.printer().Notice("This token belongs to a staff account, which the API does not list projects for.\nOpen the project at %s and copy the Project ID shown under its name.", apiURL)
-	ref, err := a.PromptLine("Project ID: ")
-	if err != nil {
-		return api.Project{}, err
-	}
-	ref = strings.TrimSpace(ref)
-	if !api.IsUUID(ref) {
-		return api.Project{}, usageErr("%q is not a project ID; copy the Project ID from the project's page, or pass --project <project-id>", ref)
-	}
-	return findProject(ctx, client, ref)
-}
-
 func (a *App) logoutCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout",
-		Short: "Remove the stored token and project",
+		Short: "Remove the stored token and chosen project",
+		Long: `Remove the token stored for the current API URL and the project chosen
+with project use. SIMPLEOTA_TOKEN, when set, is not affected.`,
 		Args:  exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := a.configDir()

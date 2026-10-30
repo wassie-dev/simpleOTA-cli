@@ -3,7 +3,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -22,6 +21,13 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
 	"github.com/wassie-dev/simpleOTA-cli/internal/update"
 	"github.com/wassie-dev/simpleOTA-cli/internal/version"
+)
+
+// Help groups on the root command.
+const (
+	groupCLI       = "cli"
+	groupProject   = "project"
+	groupResources = "resources"
 )
 
 // Exit codes.
@@ -59,8 +65,6 @@ type App struct {
 	NewAPI func(baseURL, token string) api.API
 	// Prompt reads a secret from the terminal; nil disables prompting.
 	Prompt func(label string) (string, error)
-	// PromptLine reads a visible line from the terminal; nil disables it.
-	PromptLine func(label string) (string, error)
 	// StdinIsTerminal reports whether In is an interactive terminal.
 	StdinIsTerminal bool
 	// Color enables ANSI colour in human output.
@@ -100,21 +104,8 @@ func NewApp() *App {
 	}
 	if stdinTTY {
 		a.Prompt = terminalPrompt(os.Stdin, os.Stderr)
-		a.PromptLine = linePrompt(os.Stdin, os.Stderr)
 	}
 	return a
-}
-
-func linePrompt(in io.Reader, w io.Writer) func(string) (string, error) {
-	r := bufio.NewReader(io.LimitReader(in, 64<<10))
-	return func(label string) (string, error) {
-		fmt.Fprint(w, label)
-		line, err := r.ReadString('\n')
-		if err != nil && !errors.Is(err, io.EOF) {
-			return "", fmt.Errorf("reading input: %w", err)
-		}
-		return line, nil
-	}
 }
 
 func terminalPrompt(in *os.File, w io.Writer) func(string) (string, error) {
@@ -203,8 +194,27 @@ func exitCode(err error) int {
 
 func (a *App) rootCommand() *cobra.Command {
 	root := &cobra.Command{
-		Use:           "simpleota",
-		Short:         "Sign, release and roll out ESP32 firmware with SimpleOTA",
+		Use:   "simpleota",
+		Short: "Sign, release and roll out ESP32 firmware with SimpleOTA",
+		Long: `simpleota signs, uploads and rolls out ESP32 firmware through SimpleOTA.
+
+Commands follow the API's resources. login stores a token; a project holds
+your fleet; and builds, deployments, devices, channels and signing keys
+live in a project. Resource commands act on the current project:
+--project, then SIMPLEOTA_PROJECT, then the one chosen with
+simpleota project use, then the only project the token can see.
+
+Get started:
+  simpleota login                         paste a token from the dashboard
+  simpleota project list                  see your projects
+  simpleota project use my-fleet          choose the one to work on
+  simpleota key generate --key-id prod    make a signing key
+  simpleota release build/app.bin --version-label 1.0.0 --percent 10
+  simpleota deployment wait               watch devices take it
+
+Every command takes --json for a stable machine-readable result. Exit
+codes: 0 OK, 1 error, 2 usage, 3 not logged in or token rejected,
+4 deployment failed or stopped, 5 timed out.`,
 		Version:       version.Current(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -216,16 +226,24 @@ func (a *App) rootCommand() *cobra.Command {
 	pf := root.PersistentFlags()
 	pf.BoolVar(&a.flags.json, "json", false, "print machine-readable JSON (schema in docs/json.md)")
 	pf.StringVar(&a.flags.apiURL, "api-url", "", "SimpleOTA API URL (default "+config.DefaultAPIURL+", or SIMPLEOTA_API_URL)")
-	pf.StringVar(&a.flags.project, "project", "", "project ID or slug (default: the project chosen at login)")
+	pf.StringVar(&a.flags.project, "project", "", "project slug or ID to act on (default: the current project)")
 
-	root.AddCommand(
-		a.loginCommand(),
-		a.logoutCommand(),
-		a.keysCommand(),
-		a.releaseCommand(),
-		a.deploymentCommand(),
-		a.statusCommand(),
-		a.updateCommand(),
+	root.AddGroup(
+		&cobra.Group{ID: groupCLI, Title: "Account and CLI:"},
+		&cobra.Group{ID: groupProject, Title: "Projects:"},
+		&cobra.Group{ID: groupResources, Title: "In the current project:"},
 	)
+	root.SetHelpCommandGroupID(groupCLI)
+	for _, c := range []*cobra.Command{a.loginCommand(), a.logoutCommand(), a.statusCommand(), a.updateCommand()} {
+		c.GroupID = groupCLI
+		root.AddCommand(c)
+	}
+	project := a.projectCommand()
+	project.GroupID = groupProject
+	root.AddCommand(project)
+	for _, c := range []*cobra.Command{a.releaseCommand(), a.buildCommand(), a.deploymentCommand(), a.deviceCommand(), a.channelCommand(), a.keysCommand()} {
+		c.GroupID = groupResources
+		root.AddCommand(c)
+	}
 	return root
 }

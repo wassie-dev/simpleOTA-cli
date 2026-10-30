@@ -29,7 +29,7 @@ type RolloutView struct {
 	NextStep   string         `json:"next_step,omitempty"`
 }
 
-// DeploymentStatusView is the result of deployment status, with or without --wait.
+// DeploymentStatusView is the result of deployment show and deployment wait.
 type DeploymentStatusView struct {
 	Deployment DeploymentView   `json:"deployment"`
 	Devices    deploy.Counts    `json:"devices"`

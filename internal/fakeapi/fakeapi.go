@@ -14,6 +14,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -68,6 +70,8 @@ type Server struct {
 	SigningKeys []api.SigningKey
 	Artifacts   []api.Artifact
 	Devices     []api.Device
+	Channels    []api.Channel
+	Groups      []api.Group
 	Deployments []api.Deployment
 	States      map[string][]api.DeviceState
 	// Requests counts calls by "METHOD path".
@@ -94,8 +98,10 @@ type Server struct {
 func New(t *testing.T) *Server {
 	s := &Server{
 		Projects: []api.Project{
-			{ID: ProjectID, Name: "Fleet", Slug: "fleet", DefaultFramework: "esp_idf"},
+			{ID: ProjectID, Name: "Fleet", Slug: "fleet", DefaultFramework: "esp_idf", CreatedAt: Epoch},
 		},
+		Channels:      []api.Channel{{ID: StableChannelID, Name: "stable", IsDefault: true}},
+		Groups:        []api.Group{},
 		StaffProjects: []api.Project{},
 		States:        map[string][]api.DeviceState{},
 		Requests:      map[string]int{},
@@ -215,11 +221,19 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	case route == "artifacts" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, s.Artifacts)
 	case route == "devices" && r.Method == http.MethodGet:
-		devices := s.Devices
-		if devices == nil {
-			devices = []api.Device{}
+		writeJSON(w, http.StatusOK, s.devices(r.URL.Query()))
+	case len(parts) == 4 && parts[2] == "devices" && r.Method == http.MethodGet:
+		for _, d := range s.Devices {
+			if d.ID == parts[3] {
+				writeJSON(w, http.StatusOK, d)
+				return
+			}
 		}
-		writeJSON(w, http.StatusOK, devices)
+		detail(w, http.StatusNotFound, "Not Found")
+	case route == "channels" && r.Method == http.MethodGet:
+		writeJSON(w, http.StatusOK, s.Channels)
+	case route == "groups" && r.Method == http.MethodGet:
+		writeJSON(w, http.StatusOK, s.Groups)
 	case route == "release" && r.Method == http.MethodPost:
 		s.release(w, r)
 	case route == "deployments" && r.Method == http.MethodGet:
@@ -241,6 +255,24 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		detail(w, http.StatusNotFound, "Not Found")
 	}
+}
+
+// devices applies the channel_id, group_id and active filters.
+func (s *Server) devices(q url.Values) []api.Device {
+	out := []api.Device{}
+	for _, d := range s.Devices {
+		if c := q.Get("channel_id"); c != "" && (d.ChannelID == nil || *d.ChannelID != c) {
+			continue
+		}
+		if g := q.Get("group_id"); g != "" && !slices.Contains(d.GroupIDs, g) {
+			continue
+		}
+		if a := q.Get("active"); a != "" && strconv.FormatBool(d.Active) != a {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 func (s *Server) me(w http.ResponseWriter, token string) {
@@ -334,7 +366,7 @@ func (s *Server) release(w http.ResponseWriter, r *http.Request) {
 	}
 	s.LastManifest = m
 	build := len(s.Artifacts) + 1
-	a := api.Artifact{ID: fmt.Sprintf("art-%d", build), BuildNumber: build, VersionLabel: m.VersionLabel, ChecksumSHA256: checksum, FileSize: int64(len(binary)), SecurityMode: m.SecurityMode, ChipFamily: m.ChipFamily}
+	a := api.Artifact{ID: fmt.Sprintf("art-%d", build), BuildNumber: build, VersionLabel: m.VersionLabel, ChecksumSHA256: checksum, FileSize: int64(len(binary)), SecurityMode: m.SecurityMode, ChipFamily: m.ChipFamily, Framework: m.Framework, CreatedAt: s.next()}
 	s.Artifacts = append(s.Artifacts, a)
 	d := api.Deployment{
 		ID: fmt.Sprintf("00000000-0000-4000-8000-%012d", build), ProjectID: ProjectID, ArtifactID: a.ID,

@@ -84,10 +84,10 @@ func TestSignedReleaseAndTamperedSignature(t *testing.T) {
 	keyID := "e2e-" + uid()
 	gen := decode[struct {
 		PrivateKeyFile string `json:"private_key_file"`
-	}](t, admin.mustRun("keys", "generate", "--key-id", keyID, "--json").stdout)
+	}](t, admin.mustRun("key", "generate", "--key-id", keyID, "--json").stdout)
 
 	// CI: project token, exported encrypted key and passphrase in the environment.
-	exported := admin.mustRun("keys", "export", "--key-file", gen.PrivateKeyFile).stdout
+	exported := admin.mustRun("key", "export", "--key-file", gen.PrivateKeyFile).stdout
 	ci := ciCLI(t)
 	ci.extra["SIMPLEOTA_SIGNING_KEY"] = exported
 	ci.extra["SIMPLEOTA_SIGNING_KEY_PASSPHRASE"] = "e2e passphrase long"
@@ -97,7 +97,7 @@ func TestSignedReleaseAndTamperedSignature(t *testing.T) {
 	}
 
 	// Sign one binary, then change a byte: the server must reject it.
-	pemKey := admin.mustRun("keys", "export", "--format", "pem", "--key-file", gen.PrivateKeyFile).stdout
+	pemKey := admin.mustRun("key", "export", "--format", "pem", "--key-file", gen.PrivateKeyFile).stdout
 	priv, err := signing.ParsePrivateKey([]byte(pemKey), nil)
 	if err != nil {
 		t.Fatal(err)

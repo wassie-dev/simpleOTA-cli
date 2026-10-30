@@ -267,7 +267,7 @@ func (s Service) chooseChip(ctx context.Context, flag, image, path string) (stri
 	if err != nil || image == "" || chip == image {
 		return chip, err
 	}
-	devices, err := s.API.ListDevices(ctx, s.ProjectID)
+	devices, err := s.API.ListDevices(ctx, s.ProjectID, api.DeviceFilter{})
 	if err != nil {
 		return "", fmt.Errorf("%s was built for %s, not %s; checking whether a device reports %s failed: %w", path, image, chip, chip, err)
 	}
@@ -382,5 +382,5 @@ func (s Service) registeredKeyID(ctx context.Context, pub ed25519.PublicKey) (st
 		}
 		return k.KeyID, nil
 	}
-	return "", errors.New("this signing key is not registered on the project; register it with simpleota keys generate, or use the key file that command created")
+	return "", errors.New("this signing key is not registered on the project; register it with simpleota key generate, or use the key file that command created")
 }

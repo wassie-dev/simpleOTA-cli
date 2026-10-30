@@ -1,14 +1,14 @@
 # JSON output
 
-With `--json`, each command prints one JSON object to stdout. Notices and
-warnings go to stderr. Fields are added over time; existing fields keep
+With `--json`, each command prints one JSON value to stdout: an array for
+`list` commands, an object otherwise. Notices and warnings go to stderr. Fields are added over time; existing fields keep
 their names and types. Times are RFC 3339 in UTC.
 
 ## Errors
 
 A failed command prints this object to stdout and exits with the code it
-contains. `deployment status --wait` prints its status object first, then
-the error. `status` prints only its status object and sets the exit code.
+contains. `deployment wait` prints its status object first, then the
+error. `status` prints only its status object and sets the exit code.
 
 ```json
 { "error": "not logged in to https://simpleota.com; run simpleota login, or set SIMPLEOTA_TOKEN", "exit_code": 3 }
@@ -23,8 +23,14 @@ the error. `status` prints only its status object and sets the exit code.
   "update_available": true,
   "api_url": "https://simpleota.com",
   "config_dir": "/home/me/.config/simpleota",
-  "auth": { "state": "valid", "token_type": "personal", "source": "the OS keychain" },
-  "project": { "id": "…", "slug": "fleet", "name": "Fleet" },
+  "auth": {
+    "state": "valid",
+    "token_type": "personal",
+    "source": "the OS keychain",
+    "account": { "id": 7, "email": "me@example.com", "username": "me", "is_staff": false }
+  },
+  "project": { "id": "…", "slug": "fleet", "name": "Fleet", … },
+  "project_source": "project use",
   "signing_key": { "source": "file", "path": "/home/me/.config/simpleota/keys/prod-2026.key" }
 }
 ```
@@ -33,9 +39,13 @@ the error. `status` prints only its status object and sets the exit code.
 newer release fails. `auth.state` is `valid`, `not_logged_in`, `rejected` or
 `unreachable`, and `auth.error` gives the reason when there is one. `auth.source` is
 `SIMPLEOTA_TOKEN`, `the OS keychain` or the path of the token file.
-`project` is null when none is selected. `project_error` is set, `project`
-is null and the exit code is 2 when `--project` or the project saved at
-login cannot be found. `signing_key.source` is `file`,
+`auth.account` is present for a personal token on a server that reports
+it. `project` is the current project, as in `project show`, or null when
+none is selected. `project_source` says where it came from: `--project`,
+`SIMPLEOTA_PROJECT`, `project use`, `the project token` or
+`the only project`. `project_error` is set, `project` is null and the exit
+code is 2 when `--project`, `SIMPLEOTA_PROJECT` or the project chosen with
+`project use` cannot be found. `signing_key.source` is `file`,
 `env` (SIMPLEOTA_SIGNING_KEY) or `none`; `signing_key.error` is set when the
 file is missing or readable by other users.
 
@@ -53,14 +63,42 @@ version installed or checked: the newest release, or `--version`.
 ```json
 {
   "api_url": "https://simpleota.com",
-  "token_type": "project",
+  "token_type": "personal",
   "credential_store": "the OS keychain",
-  "project": { "id": "…", "slug": "fleet", "name": "Fleet" }
+  "account": { "id": 7, "email": "me@example.com", "username": "me", "is_staff": false },
+  "project": { "id": "…", "slug": "fleet", "name": "Fleet", … },
+  "project_count": 1
 }
 ```
 
 `token_type` is `personal` or `project`. `credential_store` is `the OS
-keychain` or the path of the token file.
+keychain` or the path of the token file. `account` is null for a project
+token, and on a server that does not report it. `project` is the project
+commands now act on: a project token's own project, or a personal token's
+only project; otherwise null. `project_count` is how many projects the
+token can see, or -1 when the server would not list them.
+
+## project list
+
+```json
+[ { "id": "…", "slug": "fleet", "name": "Fleet", "default_framework": "esp_idf", "build_counter": 42, "created_at": "…", "current": true } ]
+```
+
+`current` is present, and true, on the current project.
+
+## project show
+
+```json
+{ "id": "…", "slug": "fleet", "name": "Fleet", "description": "…", "default_framework": "esp_idf", "build_counter": 42, "created_at": "…" }
+```
+
+`build_counter` is the last build number the project allocated.
+
+## project use
+
+```json
+{ "api_url": "https://simpleota.com", "project": { "id": "…", "slug": "fleet", "name": "Fleet", … } }
+```
 
 ## logout
 
@@ -70,7 +108,7 @@ keychain` or the path of the token file.
 
 `logged_out` is false when there was no stored token or project to remove.
 
-## keys generate
+## key generate
 
 ```json
 {
@@ -87,13 +125,21 @@ keychain` or the path of the token file.
 `pinned_key_ids` names the keys `firmware_snippet` pins: the new key, then
 the project's newest other active key.
 
-## keys export
+## key export
 
 ```json
 { "format": "encrypted", "private_key": "-----BEGIN AGE ENCRYPTED FILE-----\n…" }
 ```
 
 `format` is `encrypted` or `pem`.
+
+## key list
+
+```json
+[ { "key_id": "prod-2026", "algorithm": "ed25519", "public_key_pem": "-----BEGIN PUBLIC KEY-----\n…", "revoked_at": null, "created_at": "…" } ]
+```
+
+Newest first, revoked keys included.
 
 ## release
 
@@ -121,6 +167,73 @@ an array.
 `sha256` is the SHA-256 of the local file. It was sent in the manifest, and
 the server accepts an upload only when the bytes it received hash the same,
 so it is also the checksum the server stored.
+
+## build list, build show
+
+`build list` prints an array of build objects, newest first; `build show`
+prints one.
+
+```json
+{
+  "build_number": 42,
+  "id": "…",
+  "version_label": "1.4.0",
+  "framework": "esp_idf",
+  "chip": "esp32s3",
+  "board_id": "",
+  "partition_profile": "",
+  "nvs_schema_version": null,
+  "security_mode": "signed",
+  "sha256": "…",
+  "size": 1048576,
+  "archived": false,
+  "created_at": "…",
+  "warnings": []
+}
+```
+
+`id` is the API's artifact ID. `warnings` is always an array.
+
+## device list, device show
+
+`device list` prints an array of device objects; `device show` prints one.
+
+```json
+{
+  "id": "…",
+  "device_id": "lamp-kitchen",
+  "name": "Kitchen lamp",
+  "framework": "esp_idf",
+  "chip": "esp32s3",
+  "board_id": "",
+  "hardware_revision": "",
+  "partition_profile": "",
+  "nvs_schema_version": null,
+  "security_mode": "signed",
+  "current_build_number": 41,
+  "current_version_label": "1.3.0",
+  "last_ota_status": "confirmed",
+  "active": true,
+  "check_state": "…",
+  "last_check_status": "…",
+  "last_check_at": "…",
+  "last_seen": "…",
+  "channel_id": "…",
+  "channel": "stable",
+  "group_ids": []
+}
+```
+
+`id` is the device's SimpleOTA UUID and `device_id` the ID its firmware
+reports. `channel` is the channel's name. `current_build_number`,
+`nvs_schema_version`, `last_check_at`, `last_seen` and `channel_id` are null
+until the device reports them.
+
+## channel list
+
+```json
+[ { "id": "…", "name": "stable", "description": "", "is_default": true } ]
+```
 
 ## Deployment object
 
@@ -150,7 +263,11 @@ The `deployment` commands embed this object.
 
 `next_step` is present when the deployment is paused or cancelled.
 
-## deployment status
+## deployment list
+
+An array of [deployment objects](#deployment-object), newest first.
+
+## deployment show, deployment wait
 
 ```json
 {
@@ -167,10 +284,10 @@ the device's SimpleOTA UUID. `failures` is always an array.
 
 `outcome` is one of:
 
-| Outcome | Meaning | `--wait` exit code |
+| Outcome | Meaning | `wait` exit code |
 | --- | --- | --- |
 | `succeeded` | Every offered device confirmed, or the deployment is completed after at least one device was offered the build | 0 |
-| `in_progress` | Still rolling out (only without `--wait`) | |
+| `in_progress` | Still rolling out (only from `show`) | |
 | `device_failed` | A device reported `failed` or `rolled_back` | 4 |
 | `stopped` | The deployment is paused, cancelled or draft | 4 |
 | `no_devices` | The deployment was completed before any device was offered the build | 4 |

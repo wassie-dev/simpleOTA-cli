@@ -6,8 +6,25 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+The commands are laid out by API resource, and `login` no longer chooses a
+project. Commands that changed name or behaviour are listed under Changed.
+
 ### Added
 
+- `project list`, `project show` and `project use`: list projects, show one,
+  and choose the current project that resource commands act on. The current
+  project is `--project`, then `SIMPLEOTA_PROJECT`, then the one chosen with
+  `project use`, then the only project the token can see.
+- `build list` and `build show <build-number>`.
+- `deployment list`.
+- `device list` (filter with `--channel`, `--group` or `--state`) and
+  `device show <device-id|uuid>`.
+- `channel list`.
+- `key list`.
+- `status` shows the account a personal token belongs to and where the
+  current project came from (`project_source` in JSON).
+- Help with examples on every command and group, and grouped commands in
+  `simpleota --help`.
 - `release` reads the chip family from the image header, so `--chip` is
   optional. A `--chip` that differs from the header is refused unless a
   device in the project reports that chip.
@@ -20,16 +37,13 @@ All notable changes to simpleota are documented here. The format follows
 - `login` with a staff account's personal token failed with "this token
   cannot list projects". The CLI now asks the API's `/me/` endpoint for the
   account and lists its own projects; another account's project is opened
-  with `--project <project-id>`. On a server without `/me/`, `login` asks
-  for the Project ID on a terminal, and otherwise explains that
-  `--project <project-id>` is needed.
-- `deployment status --wait` exited 0 for a deployment completed before any
-  device was offered the build. It now exits 4 with outcome `no_devices`.
+  by ID.
+- `deployment wait` exited 0 for a deployment completed before any device
+  was offered the build. It now exits 4 with outcome `no_devices`.
 - `status --project <ref>` exited 0 without saying the project was not
-  found. It now reports it in `project_error` and exits 2, as it does for a
-  project saved at login that is gone.
+  found. It now reports it in `project_error` and exits 2.
 - `status` showed an empty project name for a staff account.
-- `keys generate` for a backup key printed a snippet with only the new key.
+- `key generate` for a backup key printed a snippet with only the new key.
   The snippet now pins the new key and the project's newest other active
   key (`pinned_key_ids` in JSON).
 - `logout` said "Logged out" when nothing was stored; it now says so, and
@@ -39,6 +53,14 @@ All notable changes to simpleota are documented here. The format follows
 
 ### Changed
 
+- `login` only checks and stores the token, using the API's `/me/` endpoint
+  to report the account. It no longer chooses or remembers a project, and
+  logging in again clears the project chosen with `project use`. Its JSON
+  has `account` and `project_count`, and `project` is null unless the token
+  sees exactly one project.
+- `deployment status` is split into `deployment show` and
+  `deployment wait`, which replaces `deployment status --wait`.
+- `keys` is renamed `key`; `keys` still works as an alias.
 - `login` explains which tokens it accepts and where to make them in the
   dashboard before asking for one.
 - `install.sh`: after adding the install directory to PATH, it also prints

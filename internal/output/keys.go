@@ -1,6 +1,6 @@
 package output
 
-// KeyView is the result of keys generate.
+// KeyView is the result of key generate.
 type KeyView struct {
 	KeyID             string   `json:"key_id"`
 	ProjectID         string   `json:"project_id"`
@@ -11,7 +11,7 @@ type KeyView struct {
 	PinnedKeyIDs      []string `json:"pinned_key_ids"`
 }
 
-// ExportView is the result of keys export.
+// ExportView is the result of key export.
 type ExportView struct {
 	Format     string `json:"format"`
 	PrivateKey string `json:"private_key"`

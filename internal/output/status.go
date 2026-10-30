@@ -20,16 +20,18 @@ type StatusView struct {
 	ConfigDir       string          `json:"config_dir"`
 	Auth            AuthView        `json:"auth"`
 	Project         *ProjectView    `json:"project"`
+	ProjectSource   string          `json:"project_source,omitempty"`
 	ProjectError    string          `json:"project_error,omitempty"`
 	SigningKey      SigningKeyState `json:"signing_key"`
 }
 
 // AuthView describes the token the CLI would use.
 type AuthView struct {
-	State     string `json:"state"`
-	TokenType string `json:"token_type,omitempty"`
-	Source    string `json:"source,omitempty"`
-	Error     string `json:"error,omitempty"`
+	State     string       `json:"state"`
+	TokenType string       `json:"token_type,omitempty"`
+	Source    string       `json:"source,omitempty"`
+	Account   *AccountView `json:"account,omitempty"`
+	Error     string       `json:"error,omitempty"`
 }
 
 // SigningKeyState describes the key release would sign with.
@@ -56,7 +58,14 @@ func (p Printer) Status(v StatusView) error {
 
 	switch v.Auth.State {
 	case AuthValid:
-		fmt.Fprintf(p.Out, "  logged in    %s, %s token from %s\n", p.green("yes"), v.Auth.TokenType, v.Auth.Source)
+		who := ""
+		if a := v.Auth.Account; a != nil {
+			who = " for " + a.Email
+			if a.IsStaff {
+				who += " (staff)"
+			}
+		}
+		fmt.Fprintf(p.Out, "  logged in    %s, %s token%s from %s\n", p.green("yes"), v.Auth.TokenType, who, v.Auth.Source)
 	case AuthNotLoggedIn:
 		fmt.Fprintf(p.Out, "  logged in    %s; run simpleota login, or set SIMPLEOTA_TOKEN\n", p.red("no"))
 	case AuthRejected:
@@ -69,7 +78,13 @@ func (p Printer) Status(v StatusView) error {
 	case v.ProjectError != "":
 		fmt.Fprintf(p.Out, "  project      %s\n", p.red(v.ProjectError))
 	case v.Project != nil:
-		fmt.Fprintf(p.Out, "  project      %s (%s)\n", v.Project.Slug, v.Project.ID)
+		from := ""
+		if v.ProjectSource != "" {
+			from = ", from " + v.ProjectSource
+		}
+		fmt.Fprintf(p.Out, "  project      %s (%s)%s\n", v.Project.Slug, v.Project.ID, from)
+	case v.Auth.State == AuthValid:
+		fmt.Fprintln(p.Out, "  project      none selected; choose one with simpleota project use <slug>")
 	default:
 		fmt.Fprintln(p.Out, "  project      none selected")
 	}

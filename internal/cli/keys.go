@@ -29,14 +29,55 @@ Keep a second key offline and pin it in your firmware as the backup.`
 
 func (a *App) keysCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "keys",
-		Aliases: []string{"key"},
-		Short:   "Create and export firmware signing keys",
-		Args:    cobra.ArbitraryArgs,
-		RunE:    groupRun,
+		Use:     "key",
+		Aliases: []string{"keys"},
+		Short:   "Create, list and export firmware signing keys",
+		Long: `Signed releases carry an Ed25519 signature that devices check against the
+public keys pinned in their firmware. The private key is made and kept on
+your machine, encrypted with a passphrase; only the public key is
+registered with the current project, and SimpleOTA never holds a private
+key.
+
+Devices pin at most two keys and cannot change them over the air, so make
+a second, offline backup key before your first signed release and pin
+both.`,
+		Example: `  simpleota key generate --key-id prod-2026
+  simpleota key generate --key-id backup-2026 --out /Volumes/offline/backup-2026.key
+  simpleota key list
+  simpleota key export | gh secret set SIMPLEOTA_SIGNING_KEY`,
+		Args: cobra.ArbitraryArgs,
+		RunE: groupRun,
 	}
-	cmd.AddCommand(a.keysGenerateCommand(), a.keysExportCommand())
+	cmd.AddCommand(a.keyListCommand(), a.keysGenerateCommand(), a.keysExportCommand())
 	return cmd
+}
+
+func (a *App) keyListCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List the public signing keys registered on the project",
+		Long: `List the public signing keys registered on the current project, active
+and revoked, newest first. --json includes each public key's PEM.`,
+		Example: `  simpleota key list
+  simpleota key list --json | jq -r '.[] | select(.revoked_at == null) | .key_id'`,
+		Args: exactArgs(0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			s, projectID, err := a.projectSession(cmd.Context())
+			if err != nil {
+				return err
+			}
+			keys, err := s.api.ListSigningKeys(cmd.Context(), projectID)
+			if err != nil {
+				return err
+			}
+			sort.SliceStable(keys, func(i, j int) bool { return keys[i].CreatedAt.After(keys[j].CreatedAt) })
+			views := make([]output.SigningKeyView, len(keys))
+			for i, k := range keys {
+				views[i] = output.SigningKeyView{KeyID: k.KeyID, Algorithm: k.Algorithm, PublicKeyPEM: k.PublicKeyPEM, RevokedAt: k.RevokedAt, CreatedAt: k.CreatedAt}
+			}
+			return a.printer().KeyList(views)
+		},
+	}
 }
 
 // requirePersonal refuses project tokens for commands that change who can
@@ -53,15 +94,18 @@ func (a *App) keysGenerateCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "generate --key-id <id>",
 		Short: "Create an Ed25519 signing key on this machine and register its public key",
-		Long: `Create an Ed25519 keypair locally, save the private key encrypted with a
-passphrase (0600), and register only the public key with the project.
+		Long: `Create an Ed25519 keypair on this machine, save the private key encrypted
+with a passphrase (0600, in <config dir>/keys by default), and register
+only the public key with the current project. The first key you generate
+becomes the default that release signs with.
+
 Prints the signing_keys snippet for the 1.0 Arduino and ESP-IDF clients,
 which pin two keys: the new key and the project's newest other active key.
 
-Needs a personal token. The passphrase is prompted for, or read from
-SIMPLEOTA_SIGNING_KEY_PASSPHRASE.`,
-		Example: `  simpleota keys generate --key-id prod-2026
-  simpleota keys generate --key-id backup-2026 --out /Volumes/offline/backup-2026.key`,
+Needs a personal token, so a leaked CI token cannot add signing keys. The
+passphrase is prompted for, or read from SIMPLEOTA_SIGNING_KEY_PASSPHRASE.`,
+		Example: `  simpleota key generate --key-id prod-2026
+  simpleota key generate --key-id backup-2026 --out /Volumes/offline/backup-2026.key`,
 		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.runKeysGenerate(cmd.Context(), keyID, out)
@@ -83,7 +127,7 @@ func (a *App) runKeysGenerate(ctx context.Context, keyID, out string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.requirePersonal("keys generate"); err != nil {
+	if err := s.requirePersonal("key generate"); err != nil {
 		return err
 	}
 	projectID, err := s.projectID(ctx)
@@ -174,7 +218,7 @@ func (a *App) runKeysGenerate(ctx context.Context, keyID, out string) error {
 	fmt.Fprintf(a.Out, "\nPublic key:\n%s\n", publicPEM)
 	if len(pinned) == 1 {
 		fmt.Fprintf(a.Out, "Pin it in your firmware (1.0 clients):\n\n%s", view.FirmwareSnippet)
-		fmt.Fprintln(a.Out, "\nNext: run keys generate again for an offline backup key, and pin both keys before your first signed release.")
+		fmt.Fprintln(a.Out, "\nNext: run key generate again for an offline backup key, and pin both keys before your first signed release.")
 		return nil
 	}
 	fmt.Fprintf(a.Out, "Pin %s in your firmware (1.0 clients):\n\n%s", strings.Join(view.PinnedKeyIDs, " and "), view.FirmwareSnippet)
@@ -258,18 +302,21 @@ func (a *App) keysExportCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "export",
 		Short: "Print the private signing key, encrypted or as PEM for a CI secret",
-		Long: `Print the private key to stdout. --format encrypted (the default) prints
-the passphrase-protected key file; pair it with
+		Long: `Print a private signing key to stdout, to store as a CI secret. It reads
+the key file on this machine and calls no API.
+
+--format encrypted (the default) prints the passphrase-protected key file;
+set it as SIMPLEOTA_SIGNING_KEY and the passphrase as
 SIMPLEOTA_SIGNING_KEY_PASSPHRASE in CI. --format pem prints the
-unencrypted PKCS#8 PEM.`,
-		Example: `  simpleota keys export | gh secret set SIMPLEOTA_SIGNING_KEY
-  simpleota keys export --format pem --key-file ~/keys/prod-2026.key`,
+unencrypted PKCS#8 PEM, for a secret store that encrypts on its own.`,
+		Example: `  simpleota key export | gh secret set SIMPLEOTA_SIGNING_KEY
+  simpleota key export --format pem --key-file ~/keys/prod-2026.key`,
 		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.runKeysExport(keyFile, format)
 		},
 	}
-	cmd.Flags().StringVar(&keyFile, "key-file", "", "key file to export (default: the key keys generate set as default)")
+	cmd.Flags().StringVar(&keyFile, "key-file", "", "key file to export (default: the key key generate set as default)")
 	cmd.Flags().StringVar(&format, "format", "encrypted", "encrypted or pem")
 	return cmd
 }

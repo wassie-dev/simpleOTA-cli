@@ -1,10 +1,17 @@
 {
   "api_url": "https://simpleota.com",
-  "token_type": "project",
+  "token_type": "personal",
   "credential_store": "the OS keychain",
+  "account": {
+    "id": 7,
+    "email": "me@example.com",
+    "username": "me",
+    "is_staff": false
+  },
   "project": {
     "id": "p",
     "slug": "fleet",
     "name": "Fleet"
-  }
+  },
+  "project_count": 1
 }

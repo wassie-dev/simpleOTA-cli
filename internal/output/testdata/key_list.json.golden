@@ -1,0 +1,9 @@
+[
+  {
+    "key_id": "prod-2026",
+    "algorithm": "ed25519",
+    "public_key_pem": "PEM",
+    "revoked_at": null,
+    "created_at": "2026-10-01T12:00:00Z"
+  }
+]

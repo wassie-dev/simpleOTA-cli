@@ -1,0 +1,13 @@
+[
+  {
+    "id": "5f0c2b1e-1d2c-4b7a-9a3e-0123456789ab",
+    "project_id": "",
+    "build_number": 2,
+    "state": "active",
+    "rollout_strategy": "immediate",
+    "rollout_percentage": 25,
+    "created_at": "2026-10-01T12:00:00Z",
+    "started_at": null,
+    "completed_at": null
+  }
+]

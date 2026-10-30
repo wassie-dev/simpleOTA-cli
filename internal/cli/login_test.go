@@ -12,7 +12,7 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/fakeapi"
 )
 
-func TestLoginPersonalTokenAutoSelectsOnlyProject(t *testing.T) {
+func TestLoginPersonalToken(t *testing.T) {
 	h := newHarness(t)
 	h.stdin = fakeapi.PersonalToken + "\n"
 	r := h.run("login", "--json")
@@ -20,22 +20,29 @@ func TestLoginPersonalTokenAutoSelectsOnlyProject(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	var v struct {
-		TokenType string `json:"token_type"`
-		Project   struct{ Slug string }
+		TokenType    string `json:"token_type"`
+		Account      struct{ Email string }
+		Project      struct{ Slug string }
+		ProjectCount int `json:"project_count"`
 	}
-	if err := json.Unmarshal([]byte(r.stdout), &v); err != nil || v.TokenType != "personal" || v.Project.Slug != "fleet" {
+	if err := json.Unmarshal([]byte(r.stdout), &v); err != nil || v.TokenType != "personal" || v.Account.Email != "me@example.invalid" || v.Project.Slug != "fleet" || v.ProjectCount != 1 {
 		t.Fatalf("out=%s err=%v", r.stdout, err)
 	}
 	if strings.Contains(r.stdout+r.stderr, fakeapi.PersonalToken) {
 		t.Fatal("token was printed")
 	}
 	cfg, _ := config.Load(h.configDir)
-	if cfg.ProjectID != fakeapi.ProjectID || cfg.APIURL != h.fake.URL {
-		t.Fatalf("config = %+v", cfg)
+	if cfg.ProjectID != "" || cfg.APIURL != h.fake.URL {
+		t.Fatalf("login must store the API URL and choose no project: %+v", cfg)
 	}
 	raw, _ := os.ReadFile(filepath.Join(h.configDir, "config.json"))
 	if strings.Contains(string(raw), "soto_") {
 		t.Fatal("token must not be written to config.json")
+	}
+	h.stdin = fakeapi.PersonalToken
+	r = h.run("login")
+	if r.code != 0 || !strings.Contains(r.stdout, "as me@example.invalid (personal token)") || !strings.Contains(r.stdout, "Commands act on fleet, the only project") {
+		t.Fatalf("human output: %+v", r)
 	}
 }
 
@@ -43,8 +50,52 @@ func TestLoginFromPrompt(t *testing.T) {
 	h := newHarness(t)
 	h.prompts = []string{fakeapi.ProjectToken}
 	r := h.run("login")
-	if r.code != 0 || !strings.Contains(r.stdout, "project token for project fleet") {
+	if r.code != 0 || !strings.Contains(r.stdout, "with a project token for fleet") {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestLoginClearsChosenProject(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.PersonalToken)
+	cfg, _ := config.Load(h.configDir)
+	cfg.ProjectID, cfg.ProjectSlug = fakeapi.ProjectID, "fleet"
+	if err := config.Save(h.configDir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	h.login(fakeapi.PersonalToken)
+	if cfg, _ := config.Load(h.configDir); cfg.ProjectID != "" {
+		t.Fatalf("config = %+v", cfg)
+	}
+}
+
+func TestLoginWithSeveralProjects(t *testing.T) {
+	h := newHarness(t)
+	h.fake.Projects = append(h.fake.Projects, api.Project{ID: fakeapi.OtherID, Slug: "lab"})
+	h.stdin = fakeapi.PersonalToken
+	r := h.run("login")
+	if r.code != 0 || !strings.Contains(r.stdout, "has 2 projects") || !strings.Contains(r.stdout, "simpleota project use <slug>") {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestLoginStaffToken(t *testing.T) {
+	h := newHarness(t)
+	h.stdin = fakeapi.StaffToken
+	r := h.run("login", "--json")
+	if r.code != 0 || !strings.Contains(r.stdout, `"is_staff": true`) || !strings.Contains(r.stdout, `"project_count": 0`) {
+		t.Fatalf("staff account without projects: %+v", r)
+	}
+	h.fake.StaffProjects = []api.Project{h.fake.Projects[0]}
+	h.stdin = fakeapi.StaffToken
+	if r := h.run("login"); r.code != 0 || !strings.Contains(r.stdout, "Commands act on fleet") {
+		t.Fatalf("staff account with one project: %+v", r)
+	}
+	// A server without /me/ answers a staff listing with 400.
+	h.fake.NoMe = true
+	h.stdin = fakeapi.StaffToken
+	if r := h.run("login"); r.code != 0 || !strings.Contains(r.stdout, "simpleota project use <project-id>") {
+		t.Fatalf("staff token without /me/: %+v", r)
 	}
 }
 
@@ -57,79 +108,6 @@ func TestLoginPromptExplainsTokens(t *testing.T) {
 	}
 	if strings.Contains(r.stdout, "/tokens/") {
 		t.Fatal("instructions belong on stderr")
-	}
-}
-
-func TestLoginStaffTokenListsOwnProjects(t *testing.T) {
-	h := newHarness(t)
-	h.stdin = fakeapi.StaffToken
-	r := h.run("login")
-	if r.code != ExitUsage || !strings.Contains(r.stderr, "no projects yet") || !strings.Contains(r.stderr, "--project <project-id>") {
-		t.Fatalf("staff account without projects: %+v", r)
-	}
-	h.stdin = fakeapi.StaffToken
-	if r := h.run("login", "--project", fakeapi.ProjectID); r.code != 0 {
-		t.Fatalf("another account's project by ID: %+v", r)
-	}
-
-	h.fake.StaffProjects = []api.Project{h.fake.Projects[0]}
-	h.stdin = fakeapi.StaffToken
-	if r := h.run("login"); r.code != 0 || !strings.Contains(r.stdout, "personal token for project fleet") {
-		t.Fatalf("staff account with one project: %+v", r)
-	}
-	h.stdin = fakeapi.StaffToken
-	if r := h.run("login", "--project", "fleet"); r.code != 0 {
-		t.Fatalf("own project by slug: %+v", r)
-	}
-}
-
-// A server without /me/ cannot name a staff token's account, so login asks
-// for the project ID.
-func TestLoginStaffTokenAsksForProjectID(t *testing.T) {
-	h := newHarness(t)
-	h.fake.NoMe = true
-	h.prompts = []string{fakeapi.StaffToken, " " + fakeapi.ProjectID + "\n"}
-	r := h.run("login")
-	if r.code != 0 || !strings.Contains(r.stderr, "staff account") || !strings.Contains(r.stdout, "personal token for project fleet") {
-		t.Fatalf("%+v", r)
-	}
-	if cfg, _ := config.Load(h.configDir); cfg.ProjectID != fakeapi.ProjectID {
-		t.Fatalf("config = %+v", cfg)
-	}
-
-	h.prompts = []string{fakeapi.StaffToken, "fleet"}
-	if r := h.run("login"); r.code != ExitUsage || !strings.Contains(r.stderr, "not a project ID") {
-		t.Fatalf("slug at the prompt: %+v", r)
-	}
-}
-
-func TestLoginStaffTokenWithoutTerminal(t *testing.T) {
-	h := newHarness(t)
-	h.fake.NoMe = true
-	h.stdin = fakeapi.StaffToken
-	if r := h.run("login"); r.code != ExitUsage || !strings.Contains(r.stderr, "--project <project-id>") {
-		t.Fatalf("no project: %+v", r)
-	}
-	h.stdin = fakeapi.StaffToken
-	if r := h.run("login", "--project", "fleet"); r.code != ExitUsage || !strings.Contains(r.stderr, "by ID, not slug") {
-		t.Fatalf("slug: %+v", r)
-	}
-	h.stdin = fakeapi.StaffToken
-	if r := h.run("login", "--project", fakeapi.ProjectID); r.code != 0 {
-		t.Fatalf("project ID: %+v", r)
-	}
-}
-
-func TestLoginNeedsProjectWhenSeveralVisible(t *testing.T) {
-	h := newHarness(t)
-	h.fake.Projects = append(h.fake.Projects, api.Project{ID: fakeapi.OtherID, Slug: "lab"})
-	h.stdin = fakeapi.PersonalToken
-	if r := h.run("login"); r.code != ExitUsage || !strings.Contains(r.stderr, "--project") {
-		t.Fatalf("%+v", r)
-	}
-	h.stdin = fakeapi.PersonalToken
-	if r := h.run("login", "--project", "fleet"); r.code != 0 {
-		t.Fatalf("%+v", r)
 	}
 }
 
@@ -180,11 +158,3 @@ func TestLogout(t *testing.T) {
 	}
 }
 
-func TestLoginUnknownProjectID(t *testing.T) {
-	h := newHarness(t)
-	h.stdin = fakeapi.PersonalToken
-	r := h.run("login", "--project", fakeapi.OtherID)
-	if r.code != ExitUsage || !strings.Contains(r.stderr, "does not exist or this token cannot see it") {
-		t.Fatalf("%+v", r)
-	}
-}

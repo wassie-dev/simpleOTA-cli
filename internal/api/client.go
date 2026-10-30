@@ -21,13 +21,17 @@ import (
 
 // API is the subset of the developer API the CLI uses.
 type API interface {
+	Me(ctx context.Context) (Me, error)
 	ListProjects(ctx context.Context) ([]Project, error)
 	GetProject(ctx context.Context, projectID string) (Project, error)
 	ListSigningKeys(ctx context.Context, projectID string) ([]SigningKey, error)
 	RegisterSigningKey(ctx context.Context, projectID, keyID, publicKeyPEM string) (SigningKey, error)
 	Release(ctx context.Context, projectID string, req ReleaseRequest) (ReleaseResult, error)
 	ListArtifacts(ctx context.Context, projectID string) ([]Artifact, error)
-	ListDevices(ctx context.Context, projectID string) ([]Device, error)
+	ListDevices(ctx context.Context, projectID string, f DeviceFilter) ([]Device, error)
+	GetDevice(ctx context.Context, projectID, deviceID string) (Device, error)
+	ListChannels(ctx context.Context, projectID string) ([]Channel, error)
+	ListGroups(ctx context.Context, projectID string) ([]Group, error)
 	ListDeployments(ctx context.Context, projectID string) ([]Deployment, error)
 	GetDeployment(ctx context.Context, projectID, deploymentID string) (Deployment, error)
 	TransitionDeployment(ctx context.Context, projectID, deploymentID string, t Transition) (Deployment, error)
@@ -131,6 +135,13 @@ func projectPath(projectID string, rest ...string) string {
 	return p
 }
 
+// Me reports who the token belongs to: the account for a personal token, the
+// project for a project token.
+func (c *Client) Me(ctx context.Context) (Me, error) {
+	var out Me
+	return out, c.get(ctx, "/api/v1/me/", &out)
+}
+
 // ListProjects lists the projects the token can see. The API lists projects
 // for a staff account only when given an owner, so for a staff token it asks
 // /me/ for the account and lists that account's own projects. A server
@@ -142,8 +153,8 @@ func (c *Client) ListProjects(ctx context.Context) ([]Project, error) {
 	if !errors.As(err, &ae) || ae.StatusCode != http.StatusBadRequest {
 		return out, err
 	}
-	var me Me
-	if c.get(ctx, "/api/v1/me/", &me) != nil || me.Account == nil || !me.Account.IsStaff {
+	me, meErr := c.Me(ctx)
+	if meErr != nil || me.Account == nil || !me.Account.IsStaff {
 		return nil, err
 	}
 	out = nil
@@ -176,9 +187,38 @@ func (c *Client) ListArtifacts(ctx context.Context, projectID string) ([]Artifac
 	return out, c.get(ctx, projectPath(projectID, "artifacts"), &out)
 }
 
-func (c *Client) ListDevices(ctx context.Context, projectID string) ([]Device, error) {
+func (c *Client) ListDevices(ctx context.Context, projectID string, f DeviceFilter) ([]Device, error) {
+	q := url.Values{}
+	if f.ChannelID != "" {
+		q.Set("channel_id", f.ChannelID)
+	}
+	if f.GroupID != "" {
+		q.Set("group_id", f.GroupID)
+	}
+	if f.Active != nil {
+		q.Set("active", strconv.FormatBool(*f.Active))
+	}
+	path := projectPath(projectID, "devices")
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
 	var out []Device
-	return out, c.get(ctx, projectPath(projectID, "devices"), &out)
+	return out, c.get(ctx, path, &out)
+}
+
+func (c *Client) GetDevice(ctx context.Context, projectID, deviceID string) (Device, error) {
+	var out Device
+	return out, c.get(ctx, projectPath(projectID, "devices", deviceID), &out)
+}
+
+func (c *Client) ListChannels(ctx context.Context, projectID string) ([]Channel, error) {
+	var out []Channel
+	return out, c.get(ctx, projectPath(projectID, "channels"), &out)
+}
+
+func (c *Client) ListGroups(ctx context.Context, projectID string) ([]Group, error) {
+	var out []Group
+	return out, c.get(ctx, projectPath(projectID, "groups"), &out)
 }
 
 func (c *Client) ListDeployments(ctx context.Context, projectID string) ([]Deployment, error) {

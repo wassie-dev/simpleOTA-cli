@@ -26,7 +26,7 @@ func ciCLI(t *testing.T) *cli {
 func TestKeysGenerateNeedsPersonalToken(t *testing.T) {
 	c := ciCLI(t)
 	c.extra["SIMPLEOTA_SIGNING_KEY_PASSPHRASE"] = "e2e passphrase long"
-	if r := c.run("", "keys", "generate", "--key-id", "e2e-"+uid()); r.code != 3 {
+	if r := c.run("", "key", "generate", "--key-id", "e2e-"+uid()); r.code != 3 {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -40,17 +40,17 @@ func TestKeysGenerateAndExport(t *testing.T) {
 		KeyID          string `json:"key_id"`
 		PrivateKeyFile string `json:"private_key_file"`
 		PublicKeyPEM   string `json:"public_key_pem"`
-	}](t, admin.mustRun("keys", "generate", "--key-id", keyID, "--json").stdout)
+	}](t, admin.mustRun("key", "generate", "--key-id", keyID, "--json").stdout)
 	if gen.KeyID != keyID || !strings.HasPrefix(gen.PublicKeyPEM, "-----BEGIN PUBLIC KEY-----") {
 		t.Fatalf("generate: %+v", gen)
 	}
-	if r := admin.run("", "keys", "generate", "--key-id", keyID); r.code != 2 {
+	if r := admin.run("", "key", "generate", "--key-id", keyID); r.code != 2 {
 		t.Fatalf("duplicate key id: %+v", r)
 	}
-	if out := admin.mustRun("keys", "export", "--key-file", gen.PrivateKeyFile).stdout; !strings.Contains(out, "BEGIN AGE ENCRYPTED FILE") {
+	if out := admin.mustRun("key", "export", "--key-file", gen.PrivateKeyFile).stdout; !strings.Contains(out, "BEGIN AGE ENCRYPTED FILE") {
 		t.Fatalf("encrypted export: %q", out)
 	}
-	if out := admin.mustRun("keys", "export", "--format", "pem", "--key-file", gen.PrivateKeyFile).stdout; !strings.Contains(out, "BEGIN PRIVATE KEY") {
+	if out := admin.mustRun("key", "export", "--format", "pem", "--key-file", gen.PrivateKeyFile).stdout; !strings.Contains(out, "BEGIN PRIVATE KEY") {
 		t.Fatal("pem export missing the key")
 	}
 }

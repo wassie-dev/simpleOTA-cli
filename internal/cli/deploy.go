@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,17 +20,30 @@ func (a *App) deploymentCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "deployment",
 		Aliases: []string{"deployments"},
-		Short:   "Show and change deployments",
-		Long: `A deployment offers one build to a project's devices. release creates one;
-these commands show its progress and change its state.
+		Short:   "List, watch and change deployments",
+		Long: `A deployment offers one build to devices in the current project: those on
+the channels it targets, in its rollout percentage, that can run the
+build. simpleota release creates one and starts it.
 
-There is no rollback: SimpleOTA never offers a build at or below what a
+A deployment is active, paused, completed or cancelled. Ramp it to reach
+more devices, pause it to stop offering the build, complete it once it is
+done, or cancel it for good. Several deployments can be active at once;
+each device installs the highest build offered to it.
+
+There is no rollback: SimpleOTA never offers a build at or below the one a
 device runs, so to go back you release the previous source again as a
-new, higher build.`,
+new, higher build.
+
+Commands that take a deployment ID print it, as do release and
+deployment list. show and wait default to the newest deployment.`,
+		Example: `  simpleota deployment list
+  simpleota deployment show
+  simpleota deployment wait 5f0c2b1e-... --timeout 30m
+  simpleota deployment ramp 5f0c2b1e-... --percent 50`,
 		Args: cobra.ArbitraryArgs,
 		RunE: groupRun,
 	}
-	cmd.AddCommand(a.deploymentStatusCommand())
+	cmd.AddCommand(a.deploymentListCommand(), a.deploymentShowCommand(), a.deploymentWaitCommand())
 	for _, action := range deploy.Actions {
 		cmd.AddCommand(a.deploymentActionCommand(action))
 	}
@@ -44,11 +58,29 @@ var actionHelp = map[string]string{
 	deploy.ActionCancel:   "Stop the deployment for good",
 }
 
+var actionLong = map[string]string{
+	deploy.ActionRamp: `Raise the share of the targeted devices that are offered the build. Each
+device falls in a fixed bucket, so a device in at 10% stays in at 50%. The
+percentage cannot go down, since devices that already took the build
+would be decided again; to shrink a rollout, cancel the deployment and
+create a new one.`,
+	deploy.ActionPause: `Stop offering the build. Devices that already installed it keep it.
+Rollbacks also pause a deployment, once they reach its rollback threshold.
+Resume it to offer the build again.`,
+	deploy.ActionResume: `Offer the build again after a pause, at the same percentage.`,
+	deploy.ActionComplete: `Mark an active or paused deployment finished. It stops offering the build,
+and stays in the history as completed. This cannot be undone.`,
+	deploy.ActionCancel: `Stop a deployment for good. It stops offering the build, and devices that
+already installed it keep it. This cannot be undone; to go back, release
+the previous source again as a new, higher build.`,
+}
+
 func (a *App) deploymentActionCommand(action string) *cobra.Command {
 	var percent int
 	cmd := &cobra.Command{
 		Use:     action + " <deployment-id>",
 		Short:   actionHelp[action],
+		Long:    actionLong[action],
 		Example: "  simpleota deployment " + action + " 5f0c2b1e-...",
 		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -73,7 +105,7 @@ func (a *App) runRollout(ctx context.Context, action, deploymentID string, perce
 		return usageErr("%v", err)
 	}
 	if !api.IsUUID(deploymentID) {
-		return usageErr("%q is not a deployment ID; release and deployment status print it", deploymentID)
+		return usageErr("%q is not a deployment ID; release and deployment list print it", deploymentID)
 	}
 	s, err := a.openSession()
 	if err != nil {
@@ -94,37 +126,88 @@ func (a *App) runRollout(ctx context.Context, action, deploymentID string, perce
 	})
 }
 
-func (a *App) deploymentStatusCommand() *cobra.Command {
-	var wait bool
-	var timeout, interval time.Duration
-	cmd := &cobra.Command{
-		Use:   "status [deployment-id]",
-		Short: "Show a deployment's state and device progress",
-		Long: `Show a deployment (the latest one by default) and how many devices have
-been offered it, confirmed, failed or rolled back.
+func (a *App) deploymentListCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List the project's deployments, newest first",
+		Long: `List the current project's deployments, newest first, with the build each
+one offers, its state and its rollout percentage.`,
+		Example: `  simpleota deployment list
+  simpleota deployment list --json | jq -r '.[] | select(.state == "active") | .id'`,
+		Args: exactArgs(0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			s, projectID, err := a.projectSession(cmd.Context())
+			if err != nil {
+				return err
+			}
+			deps, err := s.api.ListDeployments(cmd.Context(), projectID)
+			if err != nil {
+				return err
+			}
+			sort.SliceStable(deps, func(i, j int) bool { return deps[i].CreatedAt.After(deps[j].CreatedAt) })
+			views := make([]output.DeploymentView, len(deps))
+			for i, d := range deps {
+				views[i] = output.NewDeploymentView(d)
+			}
+			return a.printer().DeploymentList(views)
+		},
+	}
+}
 
-With --wait, poll until every device the current rollout step has reached
-has confirmed (exit 0). Exit 4 if a device fails or rolls back, if the
-deployment is paused, cancelled or not started, or if it was completed
-before any device was offered the build, and 5 on timeout. Devices
-count once they have checked in and been offered the build. Network and
-gateway errors while polling are retried until the timeout.`,
-		Example: `  simpleota deployment status
-  simpleota deployment status 5f0c2b1e-... --wait --timeout 30m`,
+func (a *App) deploymentShowCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "show [deployment-id]",
+		Short: "Show a deployment's state and device progress",
+		Long: `Show a deployment (the newest by default): its build, state and rollout
+percentage, and how many devices have been offered the build, confirmed
+it, are still installing, failed or rolled back, with the reason each
+failure gave. A device counts once it has checked in and been offered the
+build.`,
+		Example: `  simpleota deployment show
+  simpleota deployment show 5f0c2b1e-... --json`,
 		Args: maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id := ""
-			if len(args) == 1 {
-				id = args[0]
-			}
-			return a.runDeploymentStatus(cmd.Context(), id, wait, timeout, interval)
+			return a.runDeploymentStatus(cmd.Context(), firstArg(args), false, 0, 0)
+		},
+	}
+}
+
+func (a *App) deploymentWaitCommand() *cobra.Command {
+	var timeout, interval time.Duration
+	cmd := &cobra.Command{
+		Use:   "wait [deployment-id]",
+		Short: "Wait for a deployment to succeed or fail, for CI",
+		Long: `Poll a deployment (the newest by default) until it succeeds or fails, and
+exit with a code a CI job can gate on:
+
+  0  every device the current rollout step reached has confirmed
+  4  a device failed or rolled back; the deployment is paused, cancelled or
+     not started; or it was completed before any device was offered it
+  5  --timeout passed first
+
+A device counts once it has checked in and been offered the build, so a
+wait finishes only after devices check in. Network and gateway errors
+while polling are retried until the timeout. Progress goes to stderr, and
+the final state to stdout.`,
+		Example: `  simpleota deployment wait
+  ID=$(simpleota release build/app.bin --version-label 1.4.0 --percent 10 --json | jq -r .deployment_id)
+  simpleota deployment wait "$ID" --timeout 30m`,
+		Args: maxArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runDeploymentStatus(cmd.Context(), firstArg(args), true, timeout, interval)
 		},
 	}
 	fl := cmd.Flags()
-	fl.BoolVar(&wait, "wait", false, "wait for the rollout to succeed or fail")
-	fl.DurationVar(&timeout, "timeout", 30*time.Minute, "how long --wait waits")
-	fl.DurationVar(&interval, "interval", 10*time.Second, "how often --wait polls")
+	fl.DurationVar(&timeout, "timeout", 30*time.Minute, "how long to wait")
+	fl.DurationVar(&interval, "interval", 10*time.Second, "how often to poll")
 	return cmd
+}
+
+func firstArg(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	return args[0]
 }
 
 func (a *App) runDeploymentStatus(ctx context.Context, deploymentID string, wait bool, timeout, interval time.Duration) error {
@@ -137,11 +220,7 @@ func (a *App) runDeploymentStatus(ctx context.Context, deploymentID string, wait
 	if wait && interval < time.Second {
 		return usageErr("--interval must be at least 1s")
 	}
-	s, err := a.openSession()
-	if err != nil {
-		return err
-	}
-	projectID, err := s.projectID(ctx)
+	s, projectID, err := a.projectSession(ctx)
 	if err != nil {
 		return err
 	}

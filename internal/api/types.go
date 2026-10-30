@@ -10,12 +10,16 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]
 // IsUUID reports whether s is a UUID, the form of every SimpleOTA object ID.
 func IsUUID(s string) bool { return uuidPattern.MatchString(s) }
 
-// Project mirrors the server's ProjectOut.
+// Project mirrors the server's ProjectOut. A project token's /me/ answer
+// carries only the ID and name.
 type Project struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	Slug             string `json:"slug"`
-	DefaultFramework string `json:"default_framework"`
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	Slug             string    `json:"slug"`
+	Description      string    `json:"description"`
+	DefaultFramework string    `json:"default_framework"`
+	BuildCounter     int       `json:"build_counter"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 // Me mirrors PersonalMeOut and ProjectMeOut: Account is set for a personal
@@ -46,22 +50,68 @@ type SigningKey struct {
 	CreatedAt    time.Time  `json:"created_at"`
 }
 
-// Artifact mirrors the fields of ArtifactOut the CLI uses.
+// Artifact mirrors ArtifactOut, the server's name for a build.
 type Artifact struct {
-	ID             string `json:"id"`
-	BuildNumber    int    `json:"build_number"`
-	VersionLabel   string `json:"version_label"`
-	ChecksumSHA256 string `json:"checksum_sha256"`
-	FileSize       int64  `json:"file_size"`
-	SecurityMode   string `json:"security_mode"`
-	ChipFamily     string `json:"chip_family"`
+	ID               string    `json:"id"`
+	BuildNumber      int       `json:"build_number"`
+	VersionLabel     string    `json:"version_label"`
+	Framework        string    `json:"framework"`
+	ChipFamily       string    `json:"chip_family"`
+	BoardID          string    `json:"board_id"`
+	PartitionProfile string    `json:"partition_profile"`
+	NVSSchemaVersion *int      `json:"nvs_schema_version"`
+	ChecksumSHA256   string    `json:"checksum_sha256"`
+	FileSize         int64     `json:"file_size"`
+	SecurityMode     string    `json:"security_mode"`
+	Archived         bool      `json:"archived"`
+	CreatedAt        time.Time `json:"created_at"`
+	Warnings         []string  `json:"warnings"`
 }
 
-// Device mirrors the fields of DeviceOut the CLI uses.
+// Device mirrors DeviceOut.
 type Device struct {
-	ID         string `json:"id"`
-	DeviceID   string `json:"device_id"`
-	ChipFamily string `json:"chip_family"`
+	ID                  string     `json:"id"`
+	DeviceID            string     `json:"device_id"`
+	Name                string     `json:"name"`
+	Framework           string     `json:"framework"`
+	ChipFamily          string     `json:"chip_family"`
+	BoardID             string     `json:"board_id"`
+	HardwareRevision    string     `json:"hardware_revision"`
+	PartitionProfile    string     `json:"partition_profile"`
+	NVSSchemaVersion    *int       `json:"nvs_schema_version"`
+	SecurityMode        string     `json:"security_mode"`
+	CurrentBuildNumber  *int       `json:"current_build_number"`
+	CurrentVersionLabel string     `json:"current_version_label"`
+	LastOTAStatus       string     `json:"last_ota_status"`
+	Active              bool       `json:"active"`
+	LastSeen            *time.Time `json:"last_seen"`
+	LastCheckAt         *time.Time `json:"last_check_at"`
+	LastCheckStatus     string     `json:"last_check_status"`
+	CheckState          string     `json:"check_state"`
+	ChannelID           *string    `json:"channel_id"`
+	GroupIDs            []string   `json:"group_ids"`
+}
+
+// DeviceFilter narrows a device listing; empty fields do not filter.
+type DeviceFilter struct {
+	ChannelID string
+	GroupID   string
+	Active    *bool
+}
+
+// Channel mirrors ChannelOut.
+type Channel struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	IsDefault   bool   `json:"is_default"`
+}
+
+// Group mirrors DeviceGroupOut.
+type Group struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 // Deployment mirrors DeploymentOut.

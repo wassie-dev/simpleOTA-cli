@@ -22,14 +22,19 @@ type statusJSON struct {
 		State     string `json:"state"`
 		TokenType string `json:"token_type"`
 		Source    string `json:"source"`
+		Account   *struct {
+			Email   string `json:"email"`
+			IsStaff bool   `json:"is_staff"`
+		} `json:"account"`
 	} `json:"auth"`
 	Project *struct {
 		ID   string `json:"id"`
 		Slug string `json:"slug"`
 		Name string `json:"name"`
 	} `json:"project"`
-	ProjectError string `json:"project_error"`
-	SigningKey   struct {
+	ProjectSource string `json:"project_source"`
+	ProjectError  string `json:"project_error"`
+	SigningKey    struct {
 		Source string `json:"source"`
 		Path   string `json:"path"`
 		Error  string `json:"error"`
@@ -171,14 +176,21 @@ func TestStatusUnknownProject(t *testing.T) {
 	}
 }
 
-func TestStatusStaffProjectHasName(t *testing.T) {
+func TestStatusStaffProject(t *testing.T) {
 	h := newHarness(t)
-	h.stdin = fakeapi.StaffToken + "\n"
-	if r := h.run("login", "--project", fakeapi.ProjectID); r.code != 0 {
-		t.Fatalf("login: %+v", r)
-	}
+	h.login(fakeapi.StaffToken)
 	r, v := cliStatus(t, h)
-	if r.code != 0 || v.Project == nil || v.Project.Name != "Fleet" || v.Project.Slug != "fleet" {
+	if r.code != 0 || v.Project != nil || v.Auth.Account == nil || !v.Auth.Account.IsStaff {
+		t.Fatalf("staff account without projects: %+v %+v", r, v)
+	}
+	if r := h.run("status"); !strings.Contains(r.stdout, "for staff@example.invalid (staff)") || !strings.Contains(r.stdout, "none selected; choose one with simpleota project use") {
+		t.Fatalf("human output: %+v", r)
+	}
+	if r := h.run("project", "use", fakeapi.ProjectID); r.code != 0 {
+		t.Fatalf("project use by ID: %+v", r)
+	}
+	r, v = cliStatus(t, h)
+	if r.code != 0 || v.Project == nil || v.Project.Name != "Fleet" || v.Project.Slug != "fleet" || v.ProjectSource != "project use" {
 		t.Fatalf("%+v %+v", r, v)
 	}
 	r = h.run("--project", "fleet", "status")
@@ -187,12 +199,12 @@ func TestStatusStaffProjectHasName(t *testing.T) {
 	}
 	h.fake.NoMe = true
 	r = h.run("--project", "fleet", "status")
-	if r.code != ExitUsage || !strings.Contains(r.stdout, "by ID, not slug") {
+	if r.code != ExitUsage || !strings.Contains(r.stdout, "pass the project ID instead of a slug") {
 		t.Fatalf("staff --project slug without /me/: %+v", r)
 	}
 }
 
-func TestStatusSavedProjectGone(t *testing.T) {
+func TestStatusChosenProjectGone(t *testing.T) {
 	h := newHarness(t)
 	h.login(fakeapi.PersonalToken)
 	cfg, _ := config.Load(h.configDir)
@@ -201,7 +213,7 @@ func TestStatusSavedProjectGone(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, v := cliStatus(t, h)
-	if r.code != ExitUsage || !strings.Contains(v.ProjectError, "saved at login (gone)") {
+	if r.code != ExitUsage || !strings.Contains(v.ProjectError, "chosen with project use (gone)") {
 		t.Fatalf("%+v %+v", r, v)
 	}
 }

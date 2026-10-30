@@ -7,13 +7,20 @@
   "auth": {
     "state": "valid",
     "token_type": "personal",
-    "source": "the OS keychain"
+    "source": "the OS keychain",
+    "account": {
+      "id": 7,
+      "email": "me@example.com",
+      "username": "me",
+      "is_staff": false
+    }
   },
   "project": {
     "id": "11111111-1111-4111-8111-111111111111",
     "slug": "fleet",
     "name": "Fleet"
   },
+  "project_source": "project use",
   "signing_key": {
     "source": "file",
     "path": "/home/me/.config/simpleota/keys/prod-2026.key"

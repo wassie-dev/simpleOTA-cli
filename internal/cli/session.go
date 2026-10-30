@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
@@ -63,28 +64,27 @@ func (a *App) openSession() (*session, error) {
 	}, nil
 }
 
-// projectID resolves --project, then the project saved at login for this
-// API URL, then the single project a project token can see.
+// projectID resolves the current project; see currentProject.
 func (s *session) projectID(ctx context.Context) (string, error) {
-	if ref := s.app.flags.project; ref != "" {
-		p, err := findProject(ctx, s.api, ref)
-		if err != nil {
-			return "", err
-		}
-		return p.ID, nil
+	p, _, err := s.app.currentProject(ctx, s.api, s.kind, s.cfg, s.apiURL)
+	return p.ID, err
+}
+
+// project resolves the current project and fetches it in full.
+func (s *session) project(ctx context.Context) (api.Project, error) {
+	p, source, err := s.app.currentProject(ctx, s.api, s.kind, s.cfg, s.apiURL)
+	if err != nil || source != projectFromConfig {
+		return p, err
 	}
-	if s.cfg.ProjectID != "" && s.cfg.APIURL == s.apiURL && s.app.Getenv("SIMPLEOTA_TOKEN") == "" {
-		return s.cfg.ProjectID, nil
+	full, err := s.api.GetProject(ctx, p.ID)
+	return full, savedProjectErr(err, p)
+}
+
+// savedProjectErr explains a 404 for the project chosen with project use.
+func savedProjectErr(err error, p api.Project) error {
+	var ae *api.Error
+	if errors.As(err, &ae) && ae.StatusCode == http.StatusNotFound {
+		return usageErr("the project chosen with project use (%s) does not exist or this token cannot see it; choose another with simpleota project use <slug>", p.Slug)
 	}
-	projects, err := s.api.ListProjects(ctx)
-	if err != nil {
-		return "", err
-	}
-	if len(projects) == 1 {
-		return projects[0].ID, nil
-	}
-	if len(projects) == 0 {
-		return "", errors.New("this token cannot see any projects; create one in the dashboard")
-	}
-	return "", usageErr("this token can see %d projects; pick one with --project <slug> (%s)", len(projects), projectSlugs(projects))
+	return err
 }

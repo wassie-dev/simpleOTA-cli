@@ -46,7 +46,7 @@ the older deployment goes on reaching the devices this release does not.
 
 The release is signed when a key is available: --key-file, then
 SIMPLEOTA_SIGNING_KEY (an exported key; set SIMPLEOTA_SIGNING_KEY_PASSPHRASE
-for an encrypted one), then the default key from keys generate.
+for an encrypted one), then the default key from key generate.
 
 The manifest carries the binary's SHA-256, and the server rejects the upload
 if the bytes it received differ. The upload is sent once and never retried:

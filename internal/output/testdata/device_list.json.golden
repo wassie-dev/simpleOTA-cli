@@ -1,0 +1,25 @@
+[
+  {
+    "id": "",
+    "device_id": "lamp-1",
+    "name": "Kitchen",
+    "framework": "",
+    "chip": "esp32",
+    "board_id": "",
+    "hardware_revision": "",
+    "partition_profile": "",
+    "nvs_schema_version": null,
+    "security_mode": "",
+    "current_build_number": 7,
+    "current_version_label": "1.0.0",
+    "last_ota_status": "",
+    "active": true,
+    "check_state": "checking_in",
+    "last_check_status": "",
+    "last_check_at": null,
+    "last_seen": "2026-10-01T12:00:00Z",
+    "channel_id": "33333333-3333-4333-8333-333333333333",
+    "channel": "stable",
+    "group_ids": []
+  }
+]

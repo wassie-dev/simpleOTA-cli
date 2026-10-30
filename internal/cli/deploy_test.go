@@ -68,7 +68,7 @@ func TestStatusWaitExitCodes(t *testing.T) {
 			if tt.status != "" {
 				h.fake.SetStates(depA, api.DeviceState{DeviceID: "d1", FinalStatus: tt.status, AssignedToRollout: true})
 			}
-			r := h.run("deployment", "status", depA, "--wait", "--timeout", "30s", "--json")
+			r := h.run("deployment", "wait", depA, "--timeout", "30s", "--json")
 			if r.code != tt.want {
 				t.Fatalf("exit = %d, want %d: %+v", r.code, tt.want, r)
 			}
@@ -88,7 +88,7 @@ func TestStatusDefaultsToLatestDeployment(t *testing.T) {
 	h.login(fakeapi.ProjectToken)
 	h.fake.AddDeployment("bbbbbbbb-bbbb-4bbb-8bbb-000000000001", api.StateCompleted, 1, 100)
 	h.fake.AddDeployment("bbbbbbbb-bbbb-4bbb-8bbb-000000000002", api.StateActive, 2, 100)
-	r := h.run("deployment", "status")
+	r := h.run("deployment", "show")
 	if r.code != 0 || !strings.Contains(r.stdout, "000000000002") {
 		t.Fatalf("%+v", r)
 	}
@@ -96,7 +96,7 @@ func TestStatusDefaultsToLatestDeployment(t *testing.T) {
 
 func TestJSONErrorOutput(t *testing.T) {
 	h := newHarness(t)
-	r := h.run("deployment", "status", "--json")
+	r := h.run("deployment", "show", "--json")
 	var v struct {
 		Error    string `json:"error"`
 		ExitCode int    `json:"exit_code"`
@@ -110,14 +110,14 @@ func TestProjectSlugFlag(t *testing.T) {
 	h := newHarness(t)
 	h.env["SIMPLEOTA_TOKEN"] = fakeapi.PersonalToken
 	h.fake.Projects = append(h.fake.Projects, api.Project{ID: fakeapi.OtherID, Slug: "lab"})
-	if r := h.run("deployment", "status"); r.code != ExitUsage {
+	if r := h.run("deployment", "show"); r.code != ExitUsage {
 		t.Fatalf("ambiguous project: %+v", r)
 	}
-	if r := h.run("deployment", "status", "--project", "nope"); r.code != ExitUsage {
+	if r := h.run("deployment", "show", "--project", "nope"); r.code != ExitUsage {
 		t.Fatalf("unknown slug: %+v", r)
 	}
 	h.fake.AddDeployment(depA, api.StateActive, 1, 100)
-	if r := h.run("deployment", "status", "--project", "fleet"); r.code != 0 {
+	if r := h.run("deployment", "show", "--project", "fleet"); r.code != 0 {
 		t.Fatalf("slug: %+v", r)
 	}
 }
@@ -126,7 +126,7 @@ func TestStatusNeedsLogin(t *testing.T) {
 	h := newHarness(t)
 	h.login(fakeapi.PersonalToken)
 	h.run("logout")
-	if r := h.run("deployment", "status"); r.code != ExitAuth || !strings.Contains(r.stderr, "not logged in") {
+	if r := h.run("deployment", "show"); r.code != ExitAuth || !strings.Contains(r.stderr, "not logged in") {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -134,7 +134,7 @@ func TestStatusNeedsLogin(t *testing.T) {
 func TestUnknownDeploymentIsExplained(t *testing.T) {
 	h := newHarness(t)
 	h.login(fakeapi.ProjectToken)
-	for _, args := range [][]string{{"deployment", "status", depA}, {"deployment", "pause", depA}, {"deployment", "status", depA, "--wait"}} {
+	for _, args := range [][]string{{"deployment", "show", depA}, {"deployment", "pause", depA}, {"deployment", "wait", depA}} {
 		r := h.run(args...)
 		if r.code != ExitError || !strings.Contains(r.stderr, "was not found in this project") {
 			t.Errorf("%v: %+v", args, r)
@@ -145,7 +145,7 @@ func TestUnknownDeploymentIsExplained(t *testing.T) {
 func TestRejectedTokenIsExplained(t *testing.T) {
 	h := newHarness(t)
 	h.env["SIMPLEOTA_TOKEN"] = "soto_proj_unknownunknownunknown"
-	r := h.run("deployment", "status")
+	r := h.run("deployment", "show")
 	if r.code != ExitAuth || !strings.Contains(r.stderr, "rejected the token (401)") {
 		t.Fatalf("%+v", r)
 	}
