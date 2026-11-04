@@ -17,13 +17,21 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
 )
 
+const pasteLabel = "Paste your SimpleOTA token: "
+
 func (a *App) loginCommand() *cobra.Command {
-	return &cobra.Command{
+	var noBrowser bool
+	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Store an API token from the dashboard",
 		Long: `Check an API token against SimpleOTA and store it for later commands, in
 the OS keychain or, where there is none, a 0600 file in the config
 directory. Paste the token at the prompt, or pipe it on stdin.
+
+On a terminal, pressing Enter at the prompt opens the API tokens page in
+your browser, so you can make a personal token and paste it back. Nothing
+opens unless you press Enter, and --no-browser removes the offer. Over SSH
+or without a graphical session, login prints the page's address instead.
 
 Two kinds of token work:
 
@@ -42,21 +50,24 @@ Logging in again replaces the stored token and clears the chosen project.
 SIMPLEOTA_TOKEN, when set, takes precedence over the stored token.`,
 		Example: `  simpleota login
   echo "$SIMPLEOTA_TOKEN" | simpleota login
+  simpleota login --no-browser
   simpleota --api-url http://127.0.0.1:8000 login`,
 		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return a.runLogin(cmd.Context())
+			return a.runLogin(cmd.Context(), noBrowser)
 		},
 	}
+	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "do not offer to open the API tokens page")
+	return cmd
 }
 
-func (a *App) runLogin(ctx context.Context) error {
+func (a *App) runLogin(ctx context.Context, noBrowser bool) error {
 	st, err := a.loadSettings()
 	if err != nil {
 		return err
 	}
 	apiURL, cfg := st.apiURL, st.cfg
-	token, err := a.readToken(apiURL)
+	token, err := a.readToken(apiURL, noBrowser)
 	if err != nil {
 		return err
 	}
@@ -133,35 +144,50 @@ func checkToken(ctx context.Context, client api.API) (*api.Me, error) {
 }
 
 // readToken prompts on a terminal, otherwise reads the first line of stdin.
-func (a *App) readToken(apiURL string) (string, error) {
-	var raw string
-	if a.StdinIsTerminal {
-		if a.Prompt == nil {
-			return "", usageErr("cannot prompt for the token; pipe it on stdin")
-		}
-		a.printer().Notice(`Log in with a token from the SimpleOTA dashboard:
-  - a personal token (soto_pat_...) for your own machine; make one under
-    API tokens at %s/tokens/
-  - a project token (soto_proj_...) with the API scope for CI; make one with
-    Issue token on the project's page
-The token is not shown as you paste it.`, apiURL)
-		t, err := a.Prompt("Paste your SimpleOTA token: ")
-		if err != nil {
-			return "", err
-		}
-		raw = t
-	} else {
-		line, err := bufio.NewReader(io.LimitReader(a.In, 4096)).ReadString('\n')
-		if err != nil && !errors.Is(err, io.EOF) {
-			return "", fmt.Errorf("reading the token from stdin: %w", err)
-		}
-		raw = line
+func (a *App) readToken(apiURL string, noBrowser bool) (string, error) {
+	raw, err := a.readRawToken(apiURL, noBrowser)
+	if err != nil {
+		return "", err
 	}
 	token := strings.TrimSpace(raw)
 	if token == "" {
 		return "", usageErr("no token given; paste it at the prompt or pipe it on stdin")
 	}
 	return token, nil
+}
+
+func (a *App) readRawToken(apiURL string, noBrowser bool) (string, error) {
+	if !a.StdinIsTerminal {
+		line, err := bufio.NewReader(io.LimitReader(a.In, 4096)).ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return "", fmt.Errorf("reading the token from stdin: %w", err)
+		}
+		return line, nil
+	}
+	if a.Prompt == nil {
+		return "", usageErr("cannot prompt for the token; pipe it on stdin")
+	}
+	tokensURL := apiURL + "/tokens/"
+	p := a.printer()
+	p.Notice(`Log in with a token from the SimpleOTA dashboard:
+  - a personal token (soto_pat_...) for your own machine; make one under
+    API tokens at %s
+  - a project token (soto_proj_...) with the API scope for CI; make one with
+    Issue token on the project's page
+The token is not shown as you paste it.`, tokensURL)
+	if noBrowser || a.OpenBrowser == nil {
+		return a.Prompt(pasteLabel)
+	}
+	raw, err := a.Prompt("Paste your SimpleOTA token, or press Enter to open API tokens in your browser: ")
+	if err != nil || strings.TrimSpace(raw) != "" {
+		return raw, err
+	}
+	if err := a.OpenBrowser(tokensURL); err != nil {
+		p.Notice("Could not open a browser (%v). Open %s yourself, make a token, and paste it here.", err, tokensURL)
+	} else {
+		p.Notice("Opened %s. Sign in if asked, make a token, and paste it here.", tokensURL)
+	}
+	return a.Prompt(pasteLabel)
 }
 
 func (a *App) logoutCommand() *cobra.Command {

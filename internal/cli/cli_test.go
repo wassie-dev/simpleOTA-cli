@@ -22,6 +22,10 @@ type harness struct {
 	env       map[string]string
 	stdin     string
 	prompts   []string
+	// openBrowser is App.OpenBrowser; nil means no browser can be shown.
+	openBrowser func(url string) error
+	// promptLabels records the labels of the prompts shown.
+	promptLabels []string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -66,12 +70,14 @@ func (h *harness) run(args ...string) result {
 	}
 	if prompts != nil {
 		a.StdinIsTerminal = true
-		a.Prompt = func(string) (string, error) {
+		a.Prompt = func(label string) (string, error) {
+			h.promptLabels = append(h.promptLabels, label)
 			p := prompts[0]
 			prompts = prompts[1:]
 			return p, nil
 		}
 	}
+	a.OpenBrowser = h.openBrowser
 	h.env["SIMPLEOTA_CONFIG_DIR"] = h.configDir
 	code := a.Run(context.Background(), args)
 	return result{code: code, stdout: out.String(), stderr: errBuf.String()}

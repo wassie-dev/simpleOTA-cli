@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
+	"github.com/wassie-dev/simpleOTA-cli/internal/browser"
 	"github.com/wassie-dev/simpleOTA-cli/internal/config"
 	"github.com/wassie-dev/simpleOTA-cli/internal/credentials"
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
@@ -65,6 +67,9 @@ type App struct {
 	NewAPI func(baseURL, token string) api.API
 	// Prompt reads a secret from the terminal; nil disables prompting.
 	Prompt func(label string) (string, error)
+	// OpenBrowser opens a URL in the user's browser; nil means this session
+	// cannot show one.
+	OpenBrowser func(url string) error
 	// StdinIsTerminal reports whether In is an interactive terminal.
 	StdinIsTerminal bool
 	// Color enables ANSI colour in human output.
@@ -104,6 +109,9 @@ func NewApp() *App {
 	}
 	if stdinTTY {
 		a.Prompt = terminalPrompt(os.Stdin, os.Stderr)
+		if browser.Available(runtime.GOOS, os.Getenv) {
+			a.OpenBrowser = browser.Open
+		}
 	}
 	return a
 }

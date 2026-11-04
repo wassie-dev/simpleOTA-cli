@@ -79,6 +79,11 @@ simpleota deployment wait --timeout 30m
 simpleota deployment ramp <deployment-id> --percent 100
 ```
 
+On a terminal, pressing Enter at `login`'s prompt opens the API tokens page in
+your browser, so you can make a token and paste it back. Nothing opens unless
+you press Enter, and `--no-browser` removes the offer. Over SSH or without a
+graphical session, `login` prints the page's address instead.
+
 `login` stores the token and chooses no project. Resource commands act on
 the current project, chosen in this order:
 

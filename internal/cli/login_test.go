@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,6 +110,88 @@ func TestLoginPromptExplainsTokens(t *testing.T) {
 	if strings.Contains(r.stdout, "/tokens/") {
 		t.Fatal("instructions belong on stderr")
 	}
+}
+
+func TestLoginOpensTokensPageOnEnter(t *testing.T) {
+	h := newHarness(t)
+	var opened []string
+	h.openBrowser = func(url string) error {
+		opened = append(opened, url)
+		return nil
+	}
+	h.prompts = []string{"\n", fakeapi.PersonalToken}
+	r := h.run("login")
+	if r.code != 0 || !strings.Contains(r.stderr, "Opened "+h.fake.URL+"/tokens/") || !strings.Contains(r.stdout, "Logged in") {
+		t.Fatalf("%+v", r)
+	}
+	if len(opened) != 1 || opened[0] != h.fake.URL+"/tokens/" {
+		t.Fatalf("opened %v", opened)
+	}
+	if !strings.Contains(h.promptLabels[0], "press Enter to open") || strings.Contains(h.promptLabels[1], "press Enter") {
+		t.Fatalf("labels %q", h.promptLabels)
+	}
+	if strings.Contains(r.stdout+r.stderr, fakeapi.PersonalToken) {
+		t.Fatal("token was printed")
+	}
+}
+
+func TestLoginBrowserOffer(t *testing.T) {
+	opener := func(opened *int, err error) func(string) error {
+		return func(string) error {
+			*opened++
+			return err
+		}
+	}
+	t.Run("pasting opens nothing", func(t *testing.T) {
+		h, opened := newHarness(t), 0
+		h.openBrowser = opener(&opened, nil)
+		h.prompts = []string{fakeapi.PersonalToken}
+		if r := h.run("login"); r.code != 0 || opened != 0 {
+			t.Fatalf("opened %d: %+v", opened, r)
+		}
+	})
+	t.Run("a failed open still logs in", func(t *testing.T) {
+		h, opened := newHarness(t), 0
+		h.openBrowser = opener(&opened, errors.New("no xdg-open"))
+		h.prompts = []string{"", fakeapi.PersonalToken}
+		r := h.run("login")
+		if r.code != 0 || !strings.Contains(r.stderr, "Could not open a browser (no xdg-open)") || !strings.Contains(r.stderr, "Open "+h.fake.URL+"/tokens/ yourself") {
+			t.Fatalf("%+v", r)
+		}
+	})
+	t.Run("Enter twice is no token", func(t *testing.T) {
+		h, opened := newHarness(t), 0
+		h.openBrowser = opener(&opened, nil)
+		h.prompts = []string{"", ""}
+		if r := h.run("login"); r.code != ExitUsage || opened != 1 || !strings.Contains(r.stderr, "no token given") {
+			t.Fatalf("opened %d: %+v", opened, r)
+		}
+	})
+	t.Run("--no-browser removes the offer", func(t *testing.T) {
+		h, opened := newHarness(t), 0
+		h.openBrowser = opener(&opened, nil)
+		h.prompts = []string{""}
+		r := h.run("login", "--no-browser")
+		if r.code != ExitUsage || opened != 0 || h.promptLabels[0] != pasteLabel || !strings.Contains(r.stderr, h.fake.URL+"/tokens/") {
+			t.Fatalf("opened %d, labels %q: %+v", opened, h.promptLabels, r)
+		}
+	})
+	t.Run("no browser available prints the address", func(t *testing.T) {
+		h := newHarness(t)
+		h.prompts = []string{""}
+		r := h.run("login")
+		if r.code != ExitUsage || h.promptLabels[0] != pasteLabel || !strings.Contains(r.stderr, h.fake.URL+"/tokens/") {
+			t.Fatalf("labels %q: %+v", h.promptLabels, r)
+		}
+	})
+	t.Run("piped stdin opens nothing", func(t *testing.T) {
+		h, opened := newHarness(t), 0
+		h.openBrowser = opener(&opened, nil)
+		h.stdin = "\n"
+		if r := h.run("login"); r.code != ExitUsage || opened != 0 {
+			t.Fatalf("opened %d: %+v", opened, r)
+		}
+	})
 }
 
 func TestLoginRejectsBadTokens(t *testing.T) {

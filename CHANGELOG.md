@@ -6,6 +6,12 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `login` offers to open the API tokens page in your browser: press Enter at
+  the prompt. `--no-browser` removes the offer, and it is not made over SSH or
+  without a graphical session.
+
 ## [0.1.2] - 2026-10-30
 
 The commands are laid out by API resource, and `login` no longer chooses a
