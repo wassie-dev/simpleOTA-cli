@@ -1,7 +1,8 @@
 # JSON output
 
 With `--json`, each command prints one JSON value to stdout: an array for
-`list` commands, an object otherwise. Notices and warnings go to stderr. Fields are added over time; existing fields keep
+`list` commands, with every row unless you pass `--limit`, and an object
+otherwise. Notices and warnings go to stderr. Fields are added over time; existing fields keep
 their names and types. Times are RFC 3339 in UTC.
 
 ## Errors
@@ -205,8 +206,8 @@ so it is also the checksum the server stored.
 
 ## device list, device show, device update
 
-`device list` and `group member list` print an array of device objects;
-`device show` and `device update` print one.
+`device list` and `group member list` print an array of device objects, most
+recently seen first; `device show` and `device update` print one.
 
 ```json
 {

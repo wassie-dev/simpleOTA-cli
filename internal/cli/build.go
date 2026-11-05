@@ -28,7 +28,7 @@ service.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: groupRun,
 	}
-	cmd.AddCommand(&cobra.Command{
+	cmd.AddCommand(withLimit(&cobra.Command{
 		Use:   "list",
 		Short: "List the project's builds, newest first",
 		Long: `List the current project's builds, newest first, with their version, chip,
@@ -47,9 +47,9 @@ security mode and state.`,
 			}
 			sort.SliceStable(artifacts, func(i, j int) bool { return artifacts[i].BuildNumber > artifacts[j].BuildNumber })
 			views := viewsOf(artifacts, output.NewBuildView)
-			return a.printer().BuildList(views)
+			return printList(a, cmd, views, a.printer().BuildList)
 		},
-	}, &cobra.Command{
+	}), &cobra.Command{
 		Use:   "show <build-number>",
 		Short: "Show one build",
 		Long: `Show one build: its version, compatibility (framework, chip, board,

@@ -8,6 +8,11 @@ All notable changes to simpleota are documented here. The format follows
 
 ### Changed
 
+- `list` commands show 20 rows as text and say when there are more. `--limit <n>`
+  changes that, and `--limit 0` shows all. JSON stays complete unless you pass
+  `--limit`.
+- `device list` and `group member list` sort by most recently seen, with devices
+  never seen last.
 - Clearer text throughout. Help starts with what a command does, uses short
   lists, and fits 80 columns, with commands in workflow order and examples
   last. Flags name what they take (`--channel name`, not `--channel string`).

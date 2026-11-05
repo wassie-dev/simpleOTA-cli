@@ -162,7 +162,7 @@ Most commands act on the current project, the first of these that applies:
 }
 
 func (a *App) projectListCommand() *cobra.Command {
-	return &cobra.Command{
+	return withLimit(&cobra.Command{
 		Use:   "list",
 		Short: "List the projects this token can see",
 		Long: `List the projects this token can see. A * marks the current project.
@@ -191,9 +191,9 @@ ID with --project <id>.`,
 				views[i] = output.NewProjectView(p)
 				views[i].Current = p.ID == current.ID
 			}
-			return a.printer().ProjectList(views)
+			return printList(a, cmd, views, a.printer().ProjectList)
 		},
-	}
+	})
 }
 
 func (a *App) projectShowCommand() *cobra.Command {

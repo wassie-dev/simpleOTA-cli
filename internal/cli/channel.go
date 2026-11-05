@@ -56,7 +56,7 @@ To use it:
 	}
 	create.Flags().StringVar(&description, "description", "", "short `text` saying what the channel is for")
 	create.Flags().BoolVar(&isDefault, "default", false, "make it the default channel, which new devices join")
-	cmd.AddCommand(&cobra.Command{
+	cmd.AddCommand(withLimit(&cobra.Command{
 		Use:     "list",
 		Short:   "List the project's release channels",
 		Long:    `List the current project's release channels, and mark the default one.`,
@@ -72,9 +72,9 @@ To use it:
 				return err
 			}
 			views := viewsOf(channels, output.NewChannelView)
-			return a.printer().ChannelList(views)
+			return printList(a, cmd, views, a.printer().ChannelList)
 		},
-	}, create)
+	}), create)
 	return cmd
 }
 

@@ -48,7 +48,7 @@ ID its firmware reports, or its SimpleOTA UUID.`,
 }
 
 func (a *App) groupListCommand() *cobra.Command {
-	return &cobra.Command{
+	return withLimit(&cobra.Command{
 		Use:     "list",
 		Short:   "List the project's device groups",
 		Long:    `List the current project's device groups.`,
@@ -64,9 +64,9 @@ func (a *App) groupListCommand() *cobra.Command {
 				return err
 			}
 			views := viewsOf(groups, output.NewGroupView)
-			return a.printer().GroupList(views)
+			return printList(a, cmd, views, a.printer().GroupList)
 		},
-	}
+	})
 }
 
 func (a *App) groupCreateCommand() *cobra.Command {
@@ -101,10 +101,11 @@ Add devices with:
 }
 
 func (a *App) groupMemberListCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:     "list <group>",
-		Short:   "List a group's devices",
-		Long:    `List the devices in a group, in the same form as 'simpleota device list'.`,
+	return withLimit(&cobra.Command{
+		Use:   "list <group>",
+		Short: "List a group's devices",
+		Long: `List the devices in a group, most recently seen first, in the same form as
+'simpleota device list'.`,
 		Example: `  simpleota group member list kitchen`,
 		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -125,11 +126,9 @@ func (a *App) groupMemberListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			names := channelNames(channels)
-			views := viewsOf(devices, func(d api.Device) output.DeviceView { return output.NewDeviceView(d, names) })
-			return a.printer().DeviceList(views)
+			return a.printDevices(cmd, devices, channels)
 		},
-	}
+	})
 }
 
 func (a *App) groupMemberAddCommand() *cobra.Command {

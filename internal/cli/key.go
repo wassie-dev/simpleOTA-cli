@@ -51,7 +51,7 @@ first signed release, make a second, offline backup key and pin both.`,
 }
 
 func (a *App) keyListCommand() *cobra.Command {
-	return &cobra.Command{
+	return withLimit(&cobra.Command{
 		Use:   "list",
 		Short: "List the project's public signing keys",
 		Long: `List the public signing keys registered on the current project, active and
@@ -70,9 +70,9 @@ revoked, newest first. With --json, each key includes its PEM.`,
 			}
 			sort.SliceStable(keys, func(i, j int) bool { return keys[i].CreatedAt.After(keys[j].CreatedAt) })
 			views := viewsOf(keys, output.NewSigningKeyView)
-			return a.printer().KeyList(views)
+			return printList(a, cmd, views, a.printer().KeyList)
 		},
-	}
+	})
 }
 
 func (a *App) keyGenerateCommand() *cobra.Command {

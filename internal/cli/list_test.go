@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -140,5 +141,96 @@ func TestHelpAtEveryLevel(t *testing.T) {
 		if r.code != 0 || !strings.Contains(r.stdout, "Usage:") || len(r.stdout) < 400 {
 			t.Errorf("%v: %+v", args, r)
 		}
+	}
+}
+
+// rowCount counts the rows of a table, leaving out its header.
+func rowCount(stdout string) int {
+	return strings.Count(strings.TrimSpace(stdout), "\n")
+}
+
+func TestListLimit(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.ProjectToken)
+	for i := 1; i <= 25; i++ {
+		h.fake.Artifacts = append(h.fake.Artifacts, api.Artifact{ID: fmt.Sprintf("a%d", i), BuildNumber: i, VersionLabel: fmt.Sprintf("v%d", i)})
+	}
+	const note = "Use --limit <n> for more, or --limit 0 for all."
+
+	r := h.run("build", "list")
+	if r.code != 0 || rowCount(r.stdout) != 20 || !strings.Contains(r.stderr, "Showing 20 of 25. "+note) || strings.Contains(r.stdout, "Showing") {
+		t.Fatalf("default: %+v", r)
+	}
+	if !strings.Contains(r.stdout, "v25") || strings.Contains(r.stdout, "v5 ") {
+		t.Fatalf("the newest builds should be the ones shown: %s", r.stdout)
+	}
+	r = h.run("build", "list", "--limit", "5")
+	if r.code != 0 || rowCount(r.stdout) != 5 || !strings.Contains(r.stderr, "Showing 5 of 25.") {
+		t.Fatalf("--limit 5: %+v", r)
+	}
+	for _, n := range []string{"0", "25", "30"} {
+		r = h.run("build", "list", "--limit", n)
+		if r.code != 0 || rowCount(r.stdout) != 25 || r.stderr != "" {
+			t.Fatalf("--limit %s: %+v", n, r)
+		}
+	}
+	if r := h.run("build", "list", "--limit", "-1"); r.code != ExitUsage || !strings.Contains(r.stderr, "--limit must be 0 or more") {
+		t.Fatalf("--limit -1: %+v", r)
+	}
+
+	builds := func(r result) []struct {
+		BuildNumber int `json:"build_number"`
+	} {
+		t.Helper()
+		var v []struct {
+			BuildNumber int `json:"build_number"`
+		}
+		if err := json.Unmarshal([]byte(r.stdout), &v); err != nil || r.code != 0 || r.stderr != "" {
+			t.Fatalf("%+v: %v", r, err)
+		}
+		return v
+	}
+	if got := builds(h.run("build", "list", "--json")); len(got) != 25 {
+		t.Fatalf("JSON should be complete by default, got %d rows", len(got))
+	}
+	if got := builds(h.run("build", "list", "--json", "--limit", "5")); len(got) != 5 || got[0].BuildNumber != 25 {
+		t.Fatalf("JSON with --limit: %+v", got)
+	}
+}
+
+func TestDeviceOrderAndLimit(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.ProjectToken)
+	h.fake.Groups = []api.Group{{ID: "g1", Name: "kitchen"}}
+	older, newer := fakeapi.Epoch, fakeapi.Epoch.Add(time.Hour)
+	inGroup := []string{"g1"}
+	// Never-seen devices first, as a server that sorts nulls first would.
+	h.fake.Devices = []api.Device{
+		{ID: "d1", DeviceID: "never-b", GroupIDs: inGroup},
+		{ID: "d2", DeviceID: "never-a", GroupIDs: inGroup},
+		{ID: "d3", DeviceID: "older", LastSeen: &older, GroupIDs: inGroup},
+		{ID: "d4", DeviceID: "tie-b", LastSeen: &newer, GroupIDs: inGroup},
+		{ID: "d5", DeviceID: "tie-a", LastSeen: &newer, GroupIDs: inGroup},
+	}
+	want := []string{"tie-a", "tie-b", "older", "never-a", "never-b"}
+	r := h.run("device", "list", "--json")
+	var devices []struct {
+		DeviceID string `json:"device_id"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &devices); err != nil || len(devices) != len(want) {
+		t.Fatalf("%+v: %v", r, err)
+	}
+	for i, d := range devices {
+		if d.DeviceID != want[i] {
+			t.Fatalf("order: got %+v, want %v", devices, want)
+		}
+	}
+	r = h.run("device", "list", "--limit", "2")
+	if rowCount(r.stdout) != 2 || !strings.Contains(r.stdout, "tie-a") || strings.Contains(r.stdout, "older") || !strings.Contains(r.stderr, "Showing 2 of 5.") {
+		t.Fatalf("device list --limit 2: %+v", r)
+	}
+	r = h.run("group", "member", "list", "kitchen", "--limit", "1")
+	if rowCount(r.stdout) != 1 || !strings.Contains(r.stdout, "tie-a") || !strings.Contains(r.stderr, "Showing 1 of 5.") {
+		t.Fatalf("group member list --limit 1: %+v", r)
 	}
 }

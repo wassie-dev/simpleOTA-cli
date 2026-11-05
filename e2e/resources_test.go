@@ -46,8 +46,21 @@ func TestResourceCommands(t *testing.T) {
 		t.Fatalf("deployment list: newest is %+v, want %s", deps, out.DeploymentID)
 	}
 
+	// The newest row survives a limit; JSON is cut only when asked.
+	newer := release(t, ciCLI(t))
+	r := c.mustRun("deployment", "list", "--limit", "1")
+	if !strings.Contains(r.stdout, newer.DeploymentID) || strings.Contains(r.stdout, out.DeploymentID) || !strings.Contains(r.stderr, "Showing 1 of ") {
+		t.Fatalf("deployment list --limit 1: %+v", r)
+	}
+	if got := decode[[]struct{ ID string }](t, c.mustRun("deployment", "list", "--json", "--limit", "1").stdout); len(got) != 1 {
+		t.Fatalf("deployment list --json --limit 1: %+v", got)
+	}
+	if got := decode[[]struct{ ID string }](t, c.mustRun("deployment", "list", "--json").stdout); len(got) < 2 {
+		t.Fatalf("deployment list --json: %+v", got)
+	}
+
 	d := newDevice(t)
-	d.check(out.BuildNumber)
+	d.check(newer.BuildNumber)
 	if s := c.mustRun("device", "list", "--channel", "stable").stdout; !strings.Contains(s, d.id) {
 		t.Fatalf("device list: %s", s)
 	}

@@ -179,6 +179,9 @@ simpleota
 | `audit` | Show the project's audit log |
 
 Global flags: `--json` ([schema](docs/json.md)), `--api-url`, `--project`.
+`list` commands show 20 rows as text and say when there are more: `--limit <n>`
+changes that, and `--limit 0` shows all. With `--json` they return every row
+unless you pass `--limit`.
 `deployment wait` exits 0 once every device the current step reached has
 confirmed, and counts a device once it has checked in and been offered the
 build. A deployment completed before any device was offered the build exits

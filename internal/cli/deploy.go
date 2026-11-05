@@ -45,7 +45,7 @@ build.`,
 }
 
 func (a *App) deploymentListCommand() *cobra.Command {
-	return &cobra.Command{
+	return withLimit(&cobra.Command{
 		Use:   "list",
 		Short: "List the project's deployments, newest first",
 		Long: `List the current project's deployments, newest first, with each one's build,
@@ -64,9 +64,9 @@ state and rollout percentage.`,
 			}
 			sort.SliceStable(deps, func(i, j int) bool { return deps[i].CreatedAt.After(deps[j].CreatedAt) })
 			views := viewsOf(deps, output.NewDeploymentView)
-			return a.printer().DeploymentList(views)
+			return printList(a, cmd, views, a.printer().DeploymentList)
 		},
-	}
+	})
 }
 
 func (a *App) deploymentShowCommand() *cobra.Command {

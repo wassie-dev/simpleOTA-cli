@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 
 	"github.com/spf13/cobra"
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
@@ -29,11 +30,11 @@ or by its SimpleOTA UUID.`,
 		RunE: groupRun,
 	}
 	var channel, group, state string
-	list := &cobra.Command{
+	list := withLimit(&cobra.Command{
 		Use:   "list",
-		Short: "List the project's devices",
-		Long: `List the current project's devices with their build, channel and state, and
-when they were last seen.`,
+		Short: "List the project's devices, most recently seen first",
+		Long: `List the current project's devices, most recently seen first, with their
+build, channel and state, and when they were last seen.`,
 		Example: `  simpleota device list
   simpleota device list --channel beta --state active
   simpleota device list --json | jq -r '.[].device_id'`,
@@ -71,11 +72,9 @@ when they were last seen.`,
 			if err != nil {
 				return err
 			}
-			names := channelNames(channels)
-			views := viewsOf(devices, func(d api.Device) output.DeviceView { return output.NewDeviceView(d, names) })
-			return a.printer().DeviceList(views)
+			return a.printDevices(cmd, devices, channels)
 		},
-	}
+	})
 	list.Flags().StringVar(&channel, "channel", "", "only devices on the channel with this `name`")
 	list.Flags().StringVar(&group, "group", "", "only devices in the group with this `name`")
 	list.Flags().StringVar(&state, "state", "", "only devices in this `state`: active or inactive")
@@ -217,6 +216,29 @@ plan is full.`,
 	cmd.Flags().StringVar(&channel, "channel", "", "move the device to the channel with this `name`")
 	cmd.Flags().StringVar(&state, "state", "", "new `state`: active or inactive")
 	return cmd
+}
+
+// printDevices lists devices most recently seen first, then by device ID,
+// with devices never seen last. The server leaves where never-seen devices
+// sort to its database, and a limit must not hide the devices seen lately.
+func (a *App) printDevices(cmd *cobra.Command, devices []api.Device, channels []api.Channel) error {
+	sort.SliceStable(devices, func(i, j int) bool {
+		x, y := devices[i], devices[j]
+		switch {
+		case x.LastSeen == nil && y.LastSeen == nil:
+			return x.DeviceID < y.DeviceID
+		case x.LastSeen == nil:
+			return false
+		case y.LastSeen == nil:
+			return true
+		case x.LastSeen.Equal(*y.LastSeen):
+			return x.DeviceID < y.DeviceID
+		}
+		return x.LastSeen.After(*y.LastSeen)
+	})
+	names := channelNames(channels)
+	views := viewsOf(devices, func(d api.Device) output.DeviceView { return output.NewDeviceView(d, names) })
+	return printList(a, cmd, views, a.printer().DeviceList)
 }
 
 // findDevice accepts a device's SimpleOTA UUID or the device ID its

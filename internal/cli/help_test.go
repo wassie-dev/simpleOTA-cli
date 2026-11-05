@@ -47,6 +47,9 @@ func TestHelpStyle(t *testing.T) {
 				t.Errorf("%s: a command in running text needs single quotes: %q", path, line)
 			}
 		}
+		if c.Name() == "list" && c.Flags().Lookup("limit") == nil {
+			t.Errorf("%s: a list command needs --limit; wrap it in withLimit", path)
+		}
 		if c != root && c.Example == "" {
 			t.Errorf("%s: no Example", path)
 		}
