@@ -47,7 +47,7 @@ func ReadBinary(path string) ([]byte, error) {
 	lower := strings.ToLower(filepath.Base(path))
 	for _, s := range nonAppSuffixes {
 		if strings.HasSuffix(lower, s) {
-			return nil, fmt.Errorf("%s is a %s file, not an OTA app image; pass the application .bin (Arduino: build/<sketch>.ino.bin, ESP-IDF: build/<project>.bin)", path, s)
+			return nil, fmt.Errorf("%s is a %s file, not an OTA app image\nPass the application .bin:\n  Arduino: build/<sketch>.ino.bin\n  ESP-IDF: build/<project>.bin", path, s)
 		}
 	}
 	f, err := os.Open(path) // #nosec G304 -- the user names the firmware to upload
@@ -76,7 +76,7 @@ func ReadBinary(path string) ([]byte, error) {
 		return nil, fmt.Errorf("%s grew past the %d MiB limit while reading", path, MaxBinarySize>>20)
 	}
 	if data[0] != espImageMagic {
-		return nil, fmt.Errorf("%s does not look like an ESP32 app image (first byte 0x%02x, expected 0xe9); pass the .bin, not the .elf", path, data[0])
+		return nil, fmt.Errorf("%s does not look like an ESP32 app image\nIts first byte is 0x%02x, not 0xe9. Pass the .bin, not the .elf.", path, data[0])
 	}
 	return data, nil
 }

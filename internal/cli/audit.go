@@ -12,13 +12,18 @@ func (a *App) auditCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "audit",
 		Short: "Show the project's audit log",
-		Long: `Show the current project's audit log, newest first: who uploaded builds,
-changed deployments, devices and signing keys, and when. An event made by
-the server itself, such as an automatic pause, shows as system.
+		Long: `Show the current project's audit log, newest first: who uploaded builds and
+changed deployments, devices and signing keys, and when. Events the server
+made itself, such as an automatic pause, show as 'system'.
 
-Filter with --type, for example artifact.uploaded, deployment.created,
-deployment.ramp, deployment.auto_paused, device.first_check_in,
-signing_key.created or signing_key.revoked.`,
+Common --type values:
+  artifact.uploaded
+  deployment.created
+  deployment.ramp
+  deployment.auto_paused
+  device.first_check_in
+  signing_key.created
+  signing_key.revoked`,
 		Example: `  simpleota audit
   simpleota audit --type signing_key.revoked --json`,
 		Args: exactArgs(0),
@@ -38,7 +43,7 @@ signing_key.created or signing_key.revoked.`,
 			return a.printer().AuditList(views)
 		},
 	}
-	cmd.Flags().StringVar(&eventType, "type", "", "only events of this type")
-	cmd.Flags().IntVar(&limit, "limit", 50, "how many events to show, at most 200")
+	cmd.Flags().StringVar(&eventType, "type", "", "only events of this `type`")
+	cmd.Flags().IntVar(&limit, "limit", 50, "show at most `n` events, up to 200")
 	return cmd
 }

@@ -136,7 +136,7 @@ func TestUnknownDeploymentIsExplained(t *testing.T) {
 	h.login(fakeapi.ProjectToken)
 	for _, args := range [][]string{{"deployment", "show", depA}, {"deployment", "pause", depA}, {"deployment", "wait", depA}} {
 		r := h.run(args...)
-		if r.code != ExitError || !strings.Contains(r.stderr, "was not found in this project") {
+		if r.code != ExitError || !strings.Contains(r.stderr, "no deployment aaaaaaaa") {
 			t.Errorf("%v: %+v", args, r)
 		}
 	}
@@ -158,7 +158,7 @@ func TestGroupsRejectUnknownSubcommands(t *testing.T) {
 			t.Errorf("%v: %+v", args, r)
 		}
 	}
-	if r := h.run("deployment"); r.code != 0 || !strings.Contains(r.stdout, "Available Commands") {
+	if r := h.run("deployment"); r.code != 0 || !strings.Contains(r.stdout, "Commands:") {
 		t.Errorf("bare group should print help: %+v", r)
 	}
 }

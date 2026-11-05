@@ -13,10 +13,12 @@ func (a *App) channelCommand() *cobra.Command {
 		Use:     "channel",
 		Aliases: []string{"channels"},
 		Short:   "List and create release channels",
-		Long: `A release channel, such as stable or beta, is a named audience of
-devices in the current project. Each device is on one channel, and a
-deployment is offered to the devices on the channels it targets. Every
-project starts with a stable channel; new devices join the default one.`,
+		Long: `A release channel, such as stable or beta, is a named audience of devices in
+the current project. Each device is on one channel, and a deployment is
+offered to the devices on the channels it targets.
+
+Every project starts with a stable channel. New devices join the default
+channel.`,
 		Example: `  simpleota channel list
   simpleota channel create beta`,
 		Args: cobra.ArbitraryArgs,
@@ -27,11 +29,12 @@ project starts with a stable channel; new devices join the default one.`,
 	create := &cobra.Command{
 		Use:   "create <name>",
 		Short: "Create a release channel",
-		Long: `Create a release channel in the current project. Move devices onto it with
-simpleota device update --channel, and target it with
-simpleota release --channel or simpleota deployment create --channel.
---default makes it the channel new devices join, in place of the current
-default.`,
+		Long: `Create a release channel in the current project.
+
+To use it:
+  simpleota device update <device> --channel <name>
+  simpleota release <bin> --version-label <label> --channel <name>
+  simpleota deployment create --build <n> --channel <name>`,
 		Example: `  simpleota channel create beta
   simpleota channel create canary --description "Office devices" --default`,
 		Args: exactArgs(1),
@@ -51,12 +54,12 @@ default.`,
 			return a.printer().ChannelShow(output.NewChannelView(c))
 		},
 	}
-	create.Flags().StringVar(&description, "description", "", "what the channel is for")
-	create.Flags().BoolVar(&isDefault, "default", false, "make it the channel new devices join")
-	cmd.AddCommand(create, &cobra.Command{
+	create.Flags().StringVar(&description, "description", "", "short `text` saying what the channel is for")
+	create.Flags().BoolVar(&isDefault, "default", false, "make it the default channel, which new devices join")
+	cmd.AddCommand(&cobra.Command{
 		Use:     "list",
 		Short:   "List the project's release channels",
-		Long:    `List the current project's release channels, marking the default one.`,
+		Long:    `List the current project's release channels, and mark the default one.`,
 		Example: `  simpleota channel list`,
 		Args:    exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -71,7 +74,7 @@ default.`,
 			views := viewsOf(channels, output.NewChannelView)
 			return a.printer().ChannelList(views)
 		},
-	})
+	}, create)
 	return cmd
 }
 
@@ -95,5 +98,5 @@ func matchChannelID(channels []api.Channel, name string) (string, error) {
 	for i, c := range channels {
 		names[i] = c.Name
 	}
-	return "", usageErr("no channel %q in this project (channels: %s)", name, strings.Join(names, ", "))
+	return "", usageErr("no channel %q in this project\nChannels: %s", name, strings.Join(names, ", "))
 }

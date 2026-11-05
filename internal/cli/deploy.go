@@ -20,21 +20,16 @@ func (a *App) deploymentCommand() *cobra.Command {
 		Use:     "deployment",
 		Aliases: []string{"deployments"},
 		Short:   "Create, list, watch and change deployments",
-		Long: `A deployment offers one build to devices in the current project: those on
-the channels it targets, in its rollout percentage, that can run the
-build. simpleota release creates one and starts it.
+		Long: `A deployment offers one build to devices in the current project. A device
+is offered the build if it is on a targeted channel, inside the rollout
+percentage, and able to run the build.
 
-A deployment is active, paused, completed or cancelled. Ramp it to reach
-more devices, pause it to stop offering the build, complete it once it is
-done, or cancel it for good. Several deployments can be active at once;
-each device installs the highest build offered to it.
+A deployment is active, paused, completed or cancelled. Several can be
+active at once; each device installs the highest build offered to it.
 
-There is no rollback: SimpleOTA never offers a build at or below the one a
-device runs, so to go back you release the previous source again as a
-new, higher build.
-
-Commands that take a deployment ID print it, as do release and
-deployment list. show and wait default to the newest deployment.`,
+There is no rollback: devices are never offered a build at or below the one
+they run. To go back, release the previous source again as a new, higher
+build.`,
 		Example: `  simpleota deployment list
   simpleota deployment show
   simpleota deployment wait 5f0c2b1e-... --timeout 30m
@@ -53,10 +48,10 @@ func (a *App) deploymentListCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List the project's deployments, newest first",
-		Long: `List the current project's deployments, newest first, with the build each
-one offers, its state and its rollout percentage.`,
+		Long: `List the current project's deployments, newest first, with each one's build,
+state and rollout percentage.`,
 		Example: `  simpleota deployment list
-  simpleota deployment list --json | jq -r '.[] | select(.state == "active") | .id'`,
+  simpleota deployment list --json | jq -r '.[0].id'`,
 		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			s, projectID, err := a.projectSession(cmd.Context())
@@ -78,11 +73,12 @@ func (a *App) deploymentShowCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show [deployment-id]",
 		Short: "Show a deployment's state and device progress",
-		Long: `Show a deployment (the newest by default): its build, state and rollout
-percentage, and how many devices have been offered the build, confirmed
-it, are still installing, failed or rolled back, with the reason each
-failure gave. A device counts once it has checked in and been offered the
-build.`,
+		Long: `Show a deployment's build, state and rollout percentage, and how many devices
+have been offered the build, confirmed it, are installing it, failed or
+rolled back. Failures list the reason each device gave.
+
+Without an ID, show the newest deployment. A device counts once it has
+checked in and been offered the build.`,
 		Example: `  simpleota deployment show
   simpleota deployment show 5f0c2b1e-... --json`,
 		Args: maxArgs(1),
@@ -97,20 +93,25 @@ func (a *App) deploymentWaitCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "wait [deployment-id]",
 		Short: "Wait for a deployment to succeed or fail, for CI",
-		Long: `Poll a deployment (the newest by default) until it succeeds or fails, and
-exit with a code a CI job can gate on:
+		Long: `Wait until a deployment succeeds or fails, and exit with a code a CI job can
+check. Without an ID, wait on the newest deployment.
 
+Exit codes:
   0  every device the current rollout step reached has confirmed
   4  a device failed or rolled back; the deployment is paused, cancelled or
-     not started; or it was completed before any device was offered it
+     not started; or it was completed before any device was offered the build
   5  --timeout passed first
 
-A device counts once it has checked in and been offered the build, so a
-wait finishes only after devices check in. Network and gateway errors
-while polling are retried until the timeout. Progress goes to stderr, and
-the final state to stdout.`,
+A device counts once it has checked in and been offered the build, so the
+wait cannot finish until devices check in. Network and gateway errors are
+retried until the timeout. Progress goes to stderr, and the final state to
+stdout.`,
 		Example: `  simpleota deployment wait
-  ID=$(simpleota release build/app.bin --version-label 1.4.0 --percent 10 --json | jq -r .deployment_id)
+  simpleota deployment wait 5f0c2b1e-... --timeout 30m
+
+  # In CI: release, then fail the job if the rollout fails
+  ID=$(simpleota release build/app.bin --version-label 1.4.0 --json \
+    | jq -r .deployment_id)
   simpleota deployment wait "$ID" --timeout 30m`,
 		Args: maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -127,7 +128,7 @@ the final state to stdout.`,
 // current project, and defaults the ID to the newest deployment.
 func (a *App) deploymentTarget(ctx context.Context, ref string) (*session, string, string, error) {
 	if ref != "" && !api.IsUUID(ref) {
-		return nil, "", "", usageErr("%q is not a deployment ID; deployment list prints them", ref)
+		return nil, "", "", notDeploymentID(ref)
 	}
 	s, projectID, err := a.projectSession(ctx)
 	if err != nil {
@@ -198,25 +199,30 @@ func waitErr(sum deploy.Summary, outcome deploy.Outcome, timeout time.Duration) 
 	case deploy.OutcomeStopped:
 		msg := fmt.Sprintf("deployment %s is %s", d.ID, d.State)
 		if next := output.NextStep(d); next != "" {
-			msg += ". " + next
+			msg += "\n" + next
 		}
 		return &exitError{code: ExitDeployment, err: errors.New(msg)}
 	case deploy.OutcomeNoDevices:
-		return &exitError{code: ExitDeployment, err: fmt.Errorf("deployment %s was completed before any device was offered build %d, so no device updated", d.ID, d.ArtifactBuildNumber)}
+		return &exitError{code: ExitDeployment, err: fmt.Errorf("deployment %s was completed too early\nNo device was offered build %d, so none updated.", d.ID, d.ArtifactBuildNumber)}
 	case deploy.OutcomeTimedOut:
 		if sum.Counts.Offered == 0 {
-			return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s: no device has been offered build %d yet; a device is offered it when it checks in, if it is on the channel, in the rollout and compatible", timeout, d.ArtifactBuildNumber)}
+			return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s: no device has been offered build %d yet\nA device is offered it when it checks in, if it is targeted, inside the\nrollout and compatible. To see why one was not:\n  simpleota device events <device>", timeout, d.ArtifactBuildNumber)}
 		}
 		return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s: %d of %d offered devices confirmed", timeout, sum.Counts.Confirmed, sum.Counts.Offered)}
 	}
 	return nil
 }
 
+// notDeploymentID refuses something that cannot be a deployment ID.
+func notDeploymentID(ref string) error {
+	return usageErr("%q is not a deployment ID\nList deployments with:\n  simpleota deployment list", ref)
+}
+
 // deploymentErr turns a 404 into a message naming the likely cause.
 func deploymentErr(err error, id string) error {
 	var ae *api.Error
 	if errors.As(err, &ae) && ae.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("deployment %s was not found in this project; check the ID and --project", id)
+		return fmt.Errorf("no deployment %s in this project\nCheck the ID and the current project.", id)
 	}
 	return err
 }

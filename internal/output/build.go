@@ -47,7 +47,7 @@ func (p Printer) BuildList(builds []BuildView) error {
 		return p.WriteJSON(builds)
 	}
 	if len(builds) == 0 {
-		fmt.Fprintln(p.Out, "No builds yet. Upload one with: simpleota release <bin> --version-label <label>")
+		fmt.Fprintln(p.Out, "No builds yet. Upload one with:\n  simpleota release <bin> --version-label <label>")
 		return nil
 	}
 	rows := make([][]string, len(builds))
@@ -113,8 +113,8 @@ func (p Printer) Upload(r UploadView) error {
 		return p.WriteJSON(r)
 	}
 	fmt.Fprintf(p.Out, "%s build %d for %s (%s)\n", p.green("Uploaded"), r.BuildNumber, r.Chip, securityText(r.SecurityMode, r.KeyID))
-	fmt.Fprintf(p.Out, "  sha256      %s (%d bytes, checked by the server)\n", r.SHA256, r.Size)
-	fmt.Fprintf(p.Out, "Deploy it with: simpleota deployment create --build %d\n", r.BuildNumber)
+	fmt.Fprintf(p.Out, "  sha256      %s\n  size        %d bytes\n", r.SHA256, r.Size)
+	p.nextStep("Deploy it", fmt.Sprintf("simpleota deployment create --build %d", r.BuildNumber))
 	return nil
 }
 

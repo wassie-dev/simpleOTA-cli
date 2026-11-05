@@ -47,8 +47,8 @@ func (p Printer) Release(r ReleaseView) error {
 	}
 	fmt.Fprintf(p.Out, "%s build %d for %s (%s)\n", p.green("Released"), r.BuildNumber, r.Chip, securityText(r.SecurityMode, r.KeyID))
 	fmt.Fprintf(p.Out, "  deployment  %s (%s, channel %s)\n", r.DeploymentID, r.State, r.Channel)
-	fmt.Fprintf(p.Out, "  sha256      %s (%d bytes, checked by the server)\n", r.SHA256, r.Size)
+	fmt.Fprintf(p.Out, "  sha256      %s\n  size        %d bytes\n", r.SHA256, r.Size)
 	p.alsoActive(r.AlsoActive, r.BuildNumber)
-	fmt.Fprintf(p.Out, "Watch it with: simpleota deployment wait %s\n", r.DeploymentID)
+	p.nextStep("Watch it", "simpleota deployment wait "+r.DeploymentID)
 	return nil
 }

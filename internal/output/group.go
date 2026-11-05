@@ -24,7 +24,7 @@ func (p Printer) GroupList(groups []GroupView) error {
 		return p.WriteJSON(groups)
 	}
 	if len(groups) == 0 {
-		fmt.Fprintln(p.Out, "No device groups. Create one with: simpleota group create <name>")
+		fmt.Fprintln(p.Out, "No device groups. Create one with:\n  simpleota group create <name>")
 		return nil
 	}
 	rows := make([][]string, len(groups))

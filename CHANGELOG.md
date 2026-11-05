@@ -6,6 +6,22 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Clearer text throughout. Help starts with what a command does, uses short
+  lists, and fits 80 columns, with commands in workflow order and examples
+  last. Flags name what they take (`--channel name`, not `--channel string`).
+  Commands you should run sit on their own lines, and commands mentioned in a
+  sentence are in single quotes. Errors say what is wrong on the first line and
+  what to do on the lines after it, so `error` in `--json` output can contain
+  newlines, as can `next_step`.
+
+### Fixed
+
+- An error about the number of arguments to a nested command pointed at the
+  wrong help page. It now shows the command's usage.
+- An invalid stored token was reported as "the OS keychain is invalid".
+
 ### Added
 
 - `login` offers to open the API tokens page in your browser: press Enter at

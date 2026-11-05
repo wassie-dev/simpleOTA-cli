@@ -23,11 +23,27 @@ func authErr(format string, args ...any) error {
 	return &exitError{code: ExitAuth, err: fmt.Errorf(format, args...)}
 }
 
+// argCountErr says how many arguments a command takes and shows its usage.
+func argCountErr(cmd *cobra.Command, want string, got int) error {
+	return usageErr("'%s' takes %s, but got %d\nUsage:\n  %s", cmd.CommandPath(), want, got, cmd.UseLine())
+}
+
+// argCount renders a number of arguments.
+func argCount(n int) string {
+	switch n {
+	case 0:
+		return "no arguments"
+	case 1:
+		return "1 argument"
+	}
+	return fmt.Sprintf("%d arguments", n)
+}
+
 // exactArgs is cobra.ExactArgs with the usage exit code.
 func exactArgs(n int) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
 		if len(args) != n {
-			return usageErr("%s takes %d argument(s), got %d; see simpleota %s --help", cmd.Name(), n, len(args), cmd.Name())
+			return argCountErr(cmd, argCount(n), len(args))
 		}
 		return nil
 	}
@@ -36,7 +52,7 @@ func exactArgs(n int) cobra.PositionalArgs {
 func maxArgs(n int) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
 		if len(args) > n {
-			return usageErr("%s takes at most %d argument(s), got %d; see simpleota %s --help", cmd.Name(), n, len(args), cmd.Name())
+			return argCountErr(cmd, "at most "+argCount(n), len(args))
 		}
 		return nil
 	}
@@ -46,7 +62,7 @@ func maxArgs(n int) cobra.PositionalArgs {
 func minArgs(n int) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
 		if len(args) < n {
-			return usageErr("%s takes at least %d argument(s), got %d; see %s --help", cmd.Name(), n, len(args), cmd.CommandPath())
+			return argCountErr(cmd, "at least "+argCount(n), len(args))
 		}
 		return nil
 	}
@@ -63,7 +79,12 @@ func firstArg(args []string) string {
 // reject an unknown subcommand with the usage exit code.
 func groupRun(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
-		return usageErr("unknown command %q for %q; see %s --help", args[0], cmd.CommandPath(), cmd.CommandPath())
+		hint := ""
+		cmd.SuggestionsMinimumDistance = 2
+		if s := cmd.SuggestionsFor(args[0]); len(s) > 0 {
+			hint = fmt.Sprintf("\nDid you mean '%s %s'?", cmd.CommandPath(), s[0])
+		}
+		return usageErr("unknown command %q for '%s'%s\nSee '%s --help'.", args[0], cmd.CommandPath(), hint, cmd.CommandPath())
 	}
 	return cmd.Help()
 }

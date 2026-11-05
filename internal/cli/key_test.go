@@ -138,7 +138,7 @@ func TestKeysGenerateSnippetPinsBackupKey(t *testing.T) {
 		t.Fatalf("more keys than slots: %+v %+v", r, kv)
 	}
 	r = h.run("keys", "generate", "--key-id", "fifth")
-	if r.code != 0 || !strings.Contains(r.stdout, "Pin fifth and fourth in your firmware") || strings.Contains(r.stdout, "Next: run keys generate again") {
+	if r.code != 0 || !strings.Contains(r.stdout, "Pin fifth and fourth in your firmware") || strings.Contains(r.stdout, "offline backup key") {
 		t.Fatalf("human output: %+v", r)
 	}
 }

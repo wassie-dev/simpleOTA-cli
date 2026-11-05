@@ -24,15 +24,23 @@ func (a *App) statusCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show the CLI's version, login, project and signing key",
-		Long: `Show this simpleota's version and whether a newer release exists, the API
-URL, whether you are logged in and the token still works (with the account
-it belongs to), the current project and where that choice came from, and
-the key release would sign with.
+		Long: `Show the state of the CLI:
 
-Exit 0 when logged in with a working token, 3 when not logged in or the
-token is rejected, 2 when --project, SIMPLEOTA_PROJECT or the project
-chosen with project use cannot be found, and 1 when the API cannot be
-reached. For a deployment, use simpleota deployment show.`,
+  - this version, and whether a newer release exists
+  - the API URL
+  - whether you are logged in, and as whom
+  - the current project, and how it was chosen
+  - the key new builds would be signed with
+
+To see a deployment, use 'simpleota deployment show'.
+
+Exit codes:
+  0  logged in with a working token
+  1  the API cannot be reached
+  2  the requested project cannot be found
+  3  not logged in, or the token was rejected`,
+		Example: `  simpleota status
+  simpleota status --json`,
 		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.runCLIStatus(cmd.Context())

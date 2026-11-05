@@ -66,6 +66,18 @@ func (p Printer) field(label, value string) {
 	fmt.Fprintf(p.Out, "  %-12s %s\n", label, value)
 }
 
+// nextStep prints a suggested command after a blank line, on its own line so
+// it can be copied whole.
+func (p Printer) nextStep(lead, command string) {
+	fmt.Fprintf(p.Out, "\n%s:\n  %s\n", lead, command)
+}
+
+// indentRest indents every line after the first, so a message of several
+// lines stays aligned under a field's value.
+func indentRest(s string, columns int) string {
+	return strings.ReplaceAll(s, "\n", "\n"+strings.Repeat(" ", columns))
+}
+
 // when formats a time for a table, in UTC so output does not depend on the
 // machine's zone.
 func when(t time.Time) string {

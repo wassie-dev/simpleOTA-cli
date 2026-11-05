@@ -7,11 +7,12 @@ their names and types. Times are RFC 3339 in UTC.
 ## Errors
 
 A failed command prints this object to stdout and exits with the code it
-contains. `deployment wait` prints its status object first, then the
+contains. `error` can run over several lines: the first says what is wrong,
+and the rest say what to do. `deployment wait` prints its status object first, then the
 error. `status` prints only its status object and sets the exit code.
 
 ```json
-{ "error": "not logged in to https://simpleota.com; run simpleota login, or set SIMPLEOTA_TOKEN", "exit_code": 3 }
+{ "error": "not logged in to https://simpleota.com\nLog in with:\n  simpleota login\nOr set SIMPLEOTA_TOKEN.", "exit_code": 3 }
 ```
 
 ## status

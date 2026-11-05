@@ -60,7 +60,7 @@ func TestLoginWithStaffToken(t *testing.T) {
 	if r := c.run(env["SIMPLEOTA_DEV_STAFF_TOKEN"]+"\n", "login", "--json"); r.code != 0 {
 		t.Fatalf("login: %+v", r)
 	}
-	unknownSlug := "pass the project ID instead of a slug"
+	unknownSlug := "not a slug"
 	if serverHasMe(t) {
 		// The staff account's own project is listed and current.
 		st := decode[struct {

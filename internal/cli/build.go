@@ -15,14 +15,12 @@ func (a *App) buildCommand() *cobra.Command {
 		Use:     "build",
 		Aliases: []string{"builds"},
 		Short:   "List, upload and archive firmware builds",
-		Long: `A build is one uploaded firmware image in the current project, numbered
-by the server in upload order. Devices are offered only builds higher than
-the one they run. The API calls builds artifacts.
+		Long: `A build is one uploaded firmware image. The server numbers builds in upload
+order, and devices are offered only builds higher than the one they run.
+The API calls builds artifacts.
 
-simpleota release uploads a build and deploys it in one step; build upload
-only uploads it, for simpleota deployment create to deploy later. Builds
-are never edited or deleted. Archiving takes one out of service: it is no
-longer offered, and cannot be deployed until it is unarchived.`,
+Builds are never edited or deleted. Archive a build to take it out of
+service.`,
 		Example: `  simpleota build list
   simpleota build show 42
   simpleota build upload build/app.bin --version-label 1.4.0
@@ -33,8 +31,8 @@ longer offered, and cannot be deployed until it is unarchived.`,
 	cmd.AddCommand(&cobra.Command{
 		Use:   "list",
 		Short: "List the project's builds, newest first",
-		Long: `List the current project's builds, newest first, with their version
-label, chip, security mode and whether they are archived.`,
+		Long: `List the current project's builds, newest first, with their version, chip,
+security mode and state.`,
 		Example: `  simpleota build list
   simpleota build list --json | jq '.[0].build_number'`,
 		Args: exactArgs(0),
@@ -54,9 +52,9 @@ label, chip, security mode and whether they are archived.`,
 	}, &cobra.Command{
 		Use:   "show <build-number>",
 		Short: "Show one build",
-		Long: `Show a build's version label, compatibility (framework, chip, board,
-partition profile, NVS schema), security mode, SHA-256, size and any
-warnings the server recorded at upload.`,
+		Long: `Show one build: its version, compatibility (framework, chip, board,
+partition profile, NVS schema), security mode, SHA-256, size, and any
+warnings from the upload.`,
 		Example: `  simpleota build show 42`,
 		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -79,13 +77,12 @@ func (a *App) buildUploadCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "upload <bin> --version-label <label>",
 		Short: "Sign and upload a build without deploying it",
-		Long: `Upload an application binary to the current project as a new build,
-without deploying it. Deploy it later with simpleota deployment create.
+		Long: `Upload a firmware binary to the current project as a new build, without
+deploying it. To deploy it later, use 'simpleota deployment create'.
 
 ` + uploadHelp,
-		Example: `  simpleota build upload build/app.bin --version-label 1.4.0
-  simpleota deployment create --build 42 --percent 10`,
-		Args: exactArgs(1),
+		Example: `  simpleota build upload build/app.bin --version-label 1.4.0`,
+		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			job, err := a.prepareBuild(cmd.Context(), args[0], f)
 			if err != nil {
@@ -105,12 +102,14 @@ without deploying it. Deploy it later with simpleota deployment create.
 }
 
 func (a *App) buildArchiveCommand(archive bool) *cobra.Command {
-	use, short, long := "archive", "Take a build out of service", `Archive a build: devices are no longer offered it, and it cannot be
-deployed. The record of which devices ran it is kept, and builds are
-never deleted. The server refuses while a draft, active or paused
-deployment still offers the build; complete or cancel it first.`
+	use, short, long := "archive", "Take a build out of service", `Take a build out of service: devices are no longer offered it, and it
+cannot be deployed. The record of which devices ran it is kept.
+
+The server refuses while a draft, active or paused deployment still offers
+the build. Complete or cancel that deployment first.`
 	if !archive {
-		use, short, long = "unarchive", "Return an archived build to service", `Unarchive a build, so it can be offered and deployed again.`
+		use, short, long = "unarchive", "Return an archived build to service", `Return an archived build to service, so it can be offered and deployed
+again.`
 	}
 	return &cobra.Command{
 		Use:     use + " <build-number>",
@@ -141,7 +140,7 @@ deployment still offers the build; complete or cancel it first.`
 func findBuild(ctx context.Context, client api.API, projectID, ref string) (api.Artifact, error) {
 	number, err := strconv.Atoi(ref)
 	if err != nil || number < 1 {
-		return api.Artifact{}, usageErr("%q is not a build number; simpleota build list prints them", ref)
+		return api.Artifact{}, usageErr("%q is not a build number\nList builds with:\n  simpleota build list", ref)
 	}
 	artifacts, err := client.ListArtifacts(ctx, projectID)
 	if err != nil {
@@ -152,5 +151,5 @@ func findBuild(ctx context.Context, client api.API, projectID, ref string) (api.
 			return art, nil
 		}
 	}
-	return api.Artifact{}, usageErr("this project has no build %d; simpleota build list prints them", number)
+	return api.Artifact{}, usageErr("this project has no build %d\nList builds with:\n  simpleota build list", number)
 }

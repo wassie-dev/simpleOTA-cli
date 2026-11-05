@@ -44,7 +44,7 @@ func (p Printer) DeploymentList(deps []DeploymentView) error {
 		return p.WriteJSON(deps)
 	}
 	if len(deps) == 0 {
-		fmt.Fprintln(p.Out, "No deployments yet. Create one with: simpleota release <bin> --version-label <label>")
+		fmt.Fprintln(p.Out, "No deployments yet. Create one with:\n  simpleota release <bin> --version-label <label>")
 		return nil
 	}
 	rows := make([][]string, len(deps))
@@ -76,7 +76,7 @@ func (p Printer) Created(v CreatedView) error {
 	fmt.Fprintf(p.Out, "%s deployment %s\n", p.green("Started"), d.ID)
 	fmt.Fprintf(p.Out, "  build    %d, offered to %d%% of %s\n", d.BuildNumber, d.RolloutPercentage, audience)
 	p.alsoActive(v.AlsoActive, d.BuildNumber)
-	fmt.Fprintf(p.Out, "Watch it with: simpleota deployment wait %s\n", d.ID)
+	p.nextStep("Watch it", "simpleota deployment wait "+d.ID)
 	return nil
 }
 
@@ -86,11 +86,12 @@ func (p Printer) alsoActive(others []DeploymentView, build int) {
 	if len(others) == 0 {
 		return
 	}
+	fmt.Fprintln(p.Out)
 	fmt.Fprintln(p.Out, p.yellow("Also active for the same devices:"))
 	for _, d := range others {
 		fmt.Fprintf(p.Out, "  deployment  %s (build %d, %d%%)\n", d.ID, d.BuildNumber, d.RolloutPercentage)
 	}
-	fmt.Fprintf(p.Out, "Each device installs the highest build offered to it, so these still reach\nthe devices build %d does not. Stop one with: simpleota deployment complete <id>\n", build)
+	fmt.Fprintf(p.Out, "Each device installs the highest build offered to it, so these keep reaching\nthe devices build %d does not. To stop one:\n  simpleota deployment complete <id>\n", build)
 }
 
 // RolloutView is the result of rollout.
@@ -108,7 +109,7 @@ func (p Printer) Rollout(v RolloutView) error {
 	d := v.Deployment
 	fmt.Fprintf(p.Out, "Deployment %s (build %d) is %s at %d%%\n", d.ID, d.BuildNumber, p.state(d.State), d.RolloutPercentage)
 	if v.NextStep != "" {
-		fmt.Fprintln(p.Out, v.NextStep)
+		fmt.Fprintf(p.Out, "\n%s\n", v.NextStep)
 	}
 	return nil
 }
@@ -118,7 +119,7 @@ func (p Printer) Rollout(v RolloutView) error {
 func NextStep(d api.Deployment) string {
 	switch d.State {
 	case api.StatePaused, api.StateCancelled:
-		return "To ship a fix or go back, release the fixed or previous source again as a new build: simpleota release <bin> --version-label <label>"
+		return "To ship a fix or go back, release the fixed or previous source as a new build:\n  simpleota release <bin> --version-label <label>"
 	}
 	return ""
 }
@@ -155,7 +156,7 @@ func (p Printer) DeploymentStatus(v DeploymentStatusView) error {
 		if reason == "" {
 			reason = "no reason given"
 		}
-		fmt.Fprintf(p.Out, "  %s  device %s: %s\n", p.red(f.Status), f.DeviceID, reason)
+		fmt.Fprintf(p.Out, "  %s  device %s %s: %s\n", p.red("failure"), f.DeviceID, strings.ReplaceAll(f.Status, "_", " "), reason)
 	}
 	switch v.Outcome {
 	case deploy.OutcomeSucceeded:

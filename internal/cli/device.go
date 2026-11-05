@@ -16,11 +16,11 @@ func (a *App) deviceCommand() *cobra.Command {
 		Aliases: []string{"devices"},
 		Short:   "List, inspect and update devices",
 		Long: `A device is one board in the current project's fleet. Devices register
-themselves the first time their firmware checks in, and report the build
-they run, their chip and their compatibility on every check.
+themselves the first time their firmware checks in, and report their build,
+chip and compatibility on every check.
 
-A device is named by its device ID (the ID its firmware reports, such as
-a MAC address) or by its SimpleOTA UUID.`,
+Name a device by the device ID its firmware reports, such as a MAC address,
+or by its SimpleOTA UUID.`,
 		Example: `  simpleota device list --channel beta
   simpleota device show lamp-kitchen
   simpleota device events lamp-kitchen
@@ -32,12 +32,11 @@ a MAC address) or by its SimpleOTA UUID.`,
 	list := &cobra.Command{
 		Use:   "list",
 		Short: "List the project's devices",
-		Long: `List the current project's devices with the build they run, their
-release channel, whether they are checking in, and when they were last
-seen. Filter by channel name, group name, or active state.`,
+		Long: `List the current project's devices with their build, channel and state, and
+when they were last seen.`,
 		Example: `  simpleota device list
   simpleota device list --channel beta --state active
-  simpleota device list --json | jq -r '.[] | select(.current_build_number < 42) | .device_id'`,
+  simpleota device list --json | jq -r '.[].device_id'`,
 		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
@@ -77,16 +76,16 @@ seen. Filter by channel name, group name, or active state.`,
 			return a.printer().DeviceList(views)
 		},
 	}
-	list.Flags().StringVar(&channel, "channel", "", "only devices on this release channel")
-	list.Flags().StringVar(&group, "group", "", "only devices in this group")
-	list.Flags().StringVar(&state, "state", "", "only active or inactive devices")
+	list.Flags().StringVar(&channel, "channel", "", "only devices on the channel with this `name`")
+	list.Flags().StringVar(&group, "group", "", "only devices in the group with this `name`")
+	list.Flags().StringVar(&state, "state", "", "only devices in this `state`: active or inactive")
 
 	show := &cobra.Command{
 		Use:   "show <device-id|uuid>",
 		Short: "Show one device",
-		Long: `Show a device's build, channel, last check-in and OTA result, and the
-compatibility it reports (framework, chip, board, hardware revision,
-partition profile, NVS schema, security mode), which decide the builds it
+		Long: `Show one device: its build, channel, last check-in and last OTA result, and
+the compatibility it reports (framework, chip, board, hardware revision,
+partition profile, NVS schema, security mode), which decides the builds it
 is offered.`,
 		Example: `  simpleota device show lamp-kitchen
   simpleota device show 9b2f61d0-4c1e-4d5a-8f3e-2a6b7c8d9e0f --json`,
@@ -117,10 +116,17 @@ func (a *App) deviceEventsCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "events <device-id|uuid>",
 		Short: "Show a device's recent update checks",
-		Long: `Show a device's most recent OTA checks, newest first: the build it ran,
-the build it was offered if any, and why it was not offered one (up to
-date, not in the rollout, no compatible build, no active deployment,
-inactive, or over the plan's device limit). The API returns at most 20.`,
+		Long: `Show a device's most recent update checks, newest first: the build it was
+running, any build it was offered, and the result. The API returns at most 20.
+
+Results:
+  offered               a build was offered
+  up_to_date            already on the latest compatible build
+  not_in_rollout        not yet inside the deployment's rollout percentage
+  no_compatible_build   no build in an active deployment fits this device
+  no_active_deployment  no active deployment targets this device
+  device_inactive       updates are disabled for this device
+  over_limit            the project is over its device limit`,
 		Example: `  simpleota device events lamp-kitchen
   simpleota device events lamp-kitchen --limit 5 --json`,
 		Args: exactArgs(1),
@@ -145,7 +151,7 @@ inactive, or over the plan's device limit). The API returns at most 20.`,
 			return a.printer().CheckEventList(views)
 		},
 	}
-	cmd.Flags().IntVar(&limit, "limit", 20, "how many checks to show, at most 20")
+	cmd.Flags().IntVar(&limit, "limit", 20, "show at most `n` checks, up to 20")
 	return cmd
 }
 
@@ -153,12 +159,12 @@ func (a *App) deviceUpdateCommand() *cobra.Command {
 	var name, channel, state string
 	cmd := &cobra.Command{
 		Use:   "update <device-id|uuid>",
-		Short: "Rename a device, move it to a channel, or (de)activate it",
-		Long: `Change a device's name, release channel, or state. Only the flags you
-pass are changed.
+		Short: "Rename, move or (de)activate a device",
+		Long: `Change a device's name, release channel or state. Only the flags you pass are
+changed.
 
 An inactive device is never offered builds and does not count toward the
-plan's device limit. Activating one counts again, and is refused when the
+plan's device limit. Activating one counts it again, and is refused when the
 plan is full.`,
 		Example: `  simpleota device update lamp-kitchen --channel beta
   simpleota device update lamp-kitchen --name "Kitchen lamp"
@@ -167,7 +173,7 @@ plan is full.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fl := cmd.Flags()
 			if !fl.Changed("name") && !fl.Changed("channel") && !fl.Changed("state") {
-				return usageErr("nothing to change; pass --name, --channel or --state")
+				return usageErr("nothing to change\nPass --name, --channel or --state.")
 			}
 			var in api.DeviceUpdate
 			if fl.Changed("name") {
@@ -207,9 +213,9 @@ plan is full.`,
 			return a.printer().DeviceShow(output.NewDeviceView(d, channelNames(channels)))
 		},
 	}
-	cmd.Flags().StringVar(&name, "name", "", "new display name")
-	cmd.Flags().StringVar(&channel, "channel", "", "release channel to move the device to")
-	cmd.Flags().StringVar(&state, "state", "", "active or inactive")
+	cmd.Flags().StringVar(&name, "name", "", "new display `name`")
+	cmd.Flags().StringVar(&channel, "channel", "", "move the device to the channel with this `name`")
+	cmd.Flags().StringVar(&state, "state", "", "new `state`: active or inactive")
 	return cmd
 }
 
@@ -237,5 +243,5 @@ func matchDevice(devices []api.Device, ref string) (api.Device, error) {
 			return d, nil
 		}
 	}
-	return api.Device{}, usageErr("no device %q in this project; simpleota device list prints them", ref)
+	return api.Device{}, usageErr("no device %q in this project\nList devices with:\n  simpleota device list", ref)
 }

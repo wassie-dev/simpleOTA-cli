@@ -38,7 +38,7 @@ var tokenPattern = regexp.MustCompile(`^(soto_pat_|soto_proj_)[A-Za-z0-9_-]{16,2
 // Classify validates the token's shape and reports its kind.
 func Classify(token string) (Kind, error) {
 	if !tokenPattern.MatchString(token) {
-		return "", errors.New("that is not a SimpleOTA API token: expected a personal token (soto_pat_...) or a project token (soto_proj_...) from the dashboard")
+		return "", errors.New("not a SimpleOTA API token\nDashboard tokens start with soto_pat_ (personal) or soto_proj_ (project).")
 	}
 	if token[:len(personalPrefix)] == personalPrefix {
 		return KindPersonal, nil
@@ -103,7 +103,7 @@ func (f File) load() (map[string]string, error) {
 		return nil, fmt.Errorf("reading %s: %w", f.Path, err)
 	}
 	if err := json.Unmarshal(data, &tokens); err != nil {
-		return nil, fmt.Errorf("token file %s is corrupt; delete it and run simpleota login again", f.Path)
+		return nil, fmt.Errorf("token file %s is corrupt\nDelete it, then log in again with:\n  simpleota login", f.Path)
 	}
 	return tokens, nil
 }

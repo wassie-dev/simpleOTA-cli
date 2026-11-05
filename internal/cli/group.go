@@ -14,13 +14,15 @@ func (a *App) groupCommand() *cobra.Command {
 		Use:     "group",
 		Aliases: []string{"groups"},
 		Short:   "List and manage device groups",
-		Long: `A device group is a named set of devices in the current project, such as
-the boards in one building. Unlike a channel, a device can be in any
-number of groups. Target groups with
-simpleota deployment create --group to roll a build out to them.
+		Long: `A device group is a named set of devices in the current project, such as the
+boards in one building. A device is on one channel, but can be in any number
+of groups.
 
-Groups and devices are named by name or UUID; devices also by the device
-ID their firmware reports.`,
+To roll a build out to a group:
+  simpleota deployment create --build <n> --group <name>
+
+Name a group by its name or UUID. Name a device by the device ID its firmware
+reports, or its SimpleOTA UUID.`,
 		Example: `  simpleota group create kitchen
   simpleota group member add kitchen lamp-1 lamp-2
   simpleota group member list kitchen
@@ -32,7 +34,8 @@ ID their firmware reports.`,
 		Use:     "member",
 		Aliases: []string{"members"},
 		Short:   "List, add and remove a group's devices",
-		Long:    `List a group's devices, or add or remove devices.`,
+		Long: `List a group's devices, or add and remove them. Name a device by the device
+ID its firmware reports, or its SimpleOTA UUID.`,
 		Example: `  simpleota group member list kitchen
   simpleota group member add kitchen lamp-1 lamp-2
   simpleota group member remove kitchen lamp-2`,
@@ -69,9 +72,12 @@ func (a *App) groupListCommand() *cobra.Command {
 func (a *App) groupCreateCommand() *cobra.Command {
 	var description string
 	cmd := &cobra.Command{
-		Use:     "create <name>",
-		Short:   "Create a device group",
-		Long:    `Create an empty device group in the current project. Add devices with simpleota group member add.`,
+		Use:   "create <name>",
+		Short: "Create a device group",
+		Long: `Create an empty device group in the current project.
+
+Add devices with:
+  simpleota group member add <group> <device>...`,
 		Example: `  simpleota group create kitchen --description "Kitchen lights"`,
 		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -90,7 +96,7 @@ func (a *App) groupCreateCommand() *cobra.Command {
 			return a.printer().GroupShow(output.NewGroupView(g))
 		},
 	}
-	cmd.Flags().StringVar(&description, "description", "", "what the group is for")
+	cmd.Flags().StringVar(&description, "description", "", "short `text` saying what the group is for")
 	return cmd
 }
 
@@ -98,7 +104,7 @@ func (a *App) groupMemberListCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "list <group>",
 		Short:   "List a group's devices",
-		Long:    `List the devices in a group, as simpleota device list does.`,
+		Long:    `List the devices in a group, in the same form as 'simpleota device list'.`,
 		Example: `  simpleota group member list kitchen`,
 		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -130,8 +136,8 @@ func (a *App) groupMemberAddCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "add <group> <device>...",
 		Short: "Add devices to a group",
-		Long: `Add one or more devices to a group. Every device is looked up first, so
-an unknown device adds none.`,
+		Long: `Add one or more devices to a group. Every device is looked up first, so if
+one is unknown, none are added.`,
 		Example: `  simpleota group member add kitchen lamp-1 lamp-2`,
 		Args:    minArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -144,8 +150,8 @@ func (a *App) groupMemberRemoveCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "remove <group> <device>...",
 		Short: "Remove devices from a group",
-		Long: `Remove one or more devices from a group. The devices stay in the project
-and in their other groups.`,
+		Long: `Remove one or more devices from a group. They stay in the project and in
+their other groups.`,
 		Example: `  simpleota group member remove kitchen lamp-2`,
 		Args:    minArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -211,7 +217,7 @@ func matchGroupID(groups []api.Group, name string) (string, error) {
 		names[i] = g.Name
 	}
 	if len(names) == 0 {
-		return "", usageErr("no group %q: this project has no device groups", name)
+		return "", usageErr("no group %q: this project has no device groups\nCreate one with:\n  simpleota group create <name>", name)
 	}
-	return "", usageErr("no group %q in this project (groups: %s)", name, strings.Join(names, ", "))
+	return "", usageErr("no group %q in this project\nGroups: %s", name, strings.Join(names, ", "))
 }

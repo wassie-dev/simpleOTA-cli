@@ -215,7 +215,7 @@ func (s Service) prepare(ctx context.Context, o Options) (prepared, error) {
 func (s Service) chooseChip(ctx context.Context, flag, image, path string) (string, error) {
 	if flag == "" {
 		if image == "" {
-			return "", chipErr("--chip is required, since the header of %s names no chip simpleota knows; e.g. --chip esp32s3", path)
+			return "", chipErr("cannot read the chip from %s: its header names no chip simpleota knows\nPass --chip, e.g. --chip esp32s3.", path)
 		}
 		return image, nil
 	}
@@ -225,14 +225,14 @@ func (s Service) chooseChip(ctx context.Context, flag, image, path string) (stri
 	}
 	devices, err := s.API.ListDevices(ctx, s.ProjectID, api.DeviceFilter{})
 	if err != nil {
-		return "", fmt.Errorf("%s was built for %s, not %s; checking whether a device reports %s failed: %w", path, image, chip, chip, err)
+		return "", fmt.Errorf("%s was built for %s, not %s\nChecking whether a device reports %s failed: %w", path, image, chip, chip, err)
 	}
 	for _, d := range devices {
 		if strings.EqualFold(strings.TrimSpace(d.ChipFamily), chip) {
 			return chip, nil
 		}
 	}
-	return "", chipErr("%s was built for %s, but --chip is %s and no device in this project reports %s, so no device would be offered the build; leave out --chip to use %s", path, image, chip, chip, image)
+	return "", chipErr("%s was built for %s, but --chip is %s\nNo device in this project reports %s, so none would be offered the build.\nLeave out --chip to use %s.", path, image, chip, chip, image)
 }
 
 // refuseDuplicate fails when the project already has a build of this
@@ -245,8 +245,8 @@ func (s Service) refuseDuplicate(ctx context.Context, sha string) error {
 	}
 	for _, a := range artifacts {
 		if strings.EqualFold(a.ChecksumSHA256, sha) {
-			return fmt.Errorf("%w: build %d (version %s) has the same sha256 %s; pass --allow-duplicate to upload it again as a new build",
-				ErrDuplicate, a.BuildNumber, a.VersionLabel, sha)
+			return fmt.Errorf("%w: build %d (version %s) has the same SHA-256\nTo upload it again as a new build, pass --allow-duplicate.",
+				ErrDuplicate, a.BuildNumber, a.VersionLabel)
 		}
 	}
 	return nil
@@ -260,13 +260,13 @@ func uploadErr(err error, allowDuplicate bool) error {
 	case errors.Is(err, context.Canceled):
 		return err
 	case errors.As(err, &ae) && ae.StatusCode == http.StatusBadRequest && strings.HasPrefix(ae.Detail, "sha256 mismatch"):
-		return fmt.Errorf("%w: the server received different bytes than were sent (%s); nothing was created, so it is safe to run the command again", ErrChecksumMismatch, ae.Detail)
+		return fmt.Errorf("%w: the server received different bytes than were sent (%s)\nNothing was created, so it is safe to run the command again.", ErrChecksumMismatch, ae.Detail)
 	case errors.As(err, &ae) && ae.StatusCode < http.StatusInternalServerError:
 		return err
 	case allowDuplicate:
-		return fmt.Errorf("%w; the upload may still have created a build, so check the project's builds before releasing again", err)
+		return fmt.Errorf("%w\nThe upload may still have created a build. Check before uploading again:\n  simpleota build list", err)
 	default:
-		return fmt.Errorf("%w; the upload may still have created a build: run the same command again to find out, since it stops if the project already has this binary", err)
+		return fmt.Errorf("%w\nThe upload may still have created a build. Run the same command again to\nfind out: it stops if the project already has this binary.", err)
 	}
 }
 
@@ -283,9 +283,9 @@ func (s Service) registeredKeyID(ctx context.Context, pub ed25519.PublicKey) (st
 			continue
 		}
 		if k.RevokedAt != nil {
-			return "", fmt.Errorf("signing key %q is revoked on this project; sign with an active key", k.KeyID)
+			return "", fmt.Errorf("signing key %q is revoked on this project\nSign with an active key.", k.KeyID)
 		}
 		return k.KeyID, nil
 	}
-	return "", errors.New("this signing key is not registered on the project; register it with simpleota key generate, or use the key file that command created")
+	return "", errors.New("this signing key is not registered on the project\nUse a key file made by 'simpleota key generate', or make a new one:\n  simpleota key generate --key-id <id>")
 }

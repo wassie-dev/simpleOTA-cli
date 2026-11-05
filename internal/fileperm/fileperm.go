@@ -22,7 +22,7 @@ func CheckPrivate(path string) error {
 		return nil
 	}
 	if perm := fi.Mode().Perm(); perm&0o077 != 0 {
-		return fmt.Errorf("%s has permissions %04o, which lets other users read it; run: chmod 600 %s", path, perm, path)
+		return fmt.Errorf("%s has permissions %04o, which lets other users read it\nFix it with:\n  chmod 600 %s", path, perm, path)
 	}
 	return nil
 }

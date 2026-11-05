@@ -63,7 +63,7 @@ func (p Printer) ProjectUse(v ProjectUseView) error {
 	if p.JSON {
 		return p.WriteJSON(v)
 	}
-	fmt.Fprintf(p.Out, "Commands against %s now act on %s (%s).\n", v.APIURL, v.Project.Slug, v.Project.Name)
+	fmt.Fprintf(p.Out, "Commands now act on %s (%s).\n", v.Project.Slug, v.Project.Name)
 	return nil
 }
 

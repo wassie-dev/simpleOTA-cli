@@ -33,7 +33,7 @@ func (p Printer) Update(v UpdateView) error {
 	var err error
 	switch v.Outcome {
 	case UpdateCheckedAvailable:
-		_, err = fmt.Fprintf(p.Out, "simpleota %s is available (you have %s). Run: simpleota update\n", v.Latest, v.Current)
+		_, err = fmt.Fprintf(p.Out, "simpleota %s is available (you have %s). Update with:\n  simpleota update\n", v.Latest, v.Current)
 	case UpdateCheckedDevBuild:
 		_, err = fmt.Fprintf(p.Out, "This is a development build; the latest release is %s.\n", v.Latest)
 	case UpdateUpToDate:

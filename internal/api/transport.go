@@ -226,7 +226,7 @@ func (c *Client) doOnce(req *http.Request, path string, out any) error {
 		return fmt.Errorf("%s %s: response is larger than %d bytes", req.Method, path, maxResponse)
 	}
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		return fmt.Errorf("the server redirected %s to %q; check --api-url", path, resp.Header.Get("Location"))
+		return fmt.Errorf("the server redirected %s to %q\nCheck --api-url.", path, resp.Header.Get("Location"))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		apiErr := &Error{StatusCode: resp.StatusCode, Method: req.Method, Path: path, Detail: errorDetail(body)}

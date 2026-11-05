@@ -70,7 +70,7 @@ type session struct {
 func (a *App) newSession(st settings, token, source string) (*session, error) {
 	kind, err := credentials.Classify(token)
 	if err != nil {
-		return nil, authErr("%s is invalid: %v", source, err)
+		return nil, authErr("the token from %s is invalid: %v", source, err)
 	}
 	return &session{settings: st, app: a, tokenSource: source, kind: kind, api: a.newAPI(st.apiURL, token)}, nil
 }
@@ -84,9 +84,9 @@ func (a *App) openSession() (*session, error) {
 	token, source, err := a.findToken(st)
 	switch {
 	case errors.Is(err, errNoToken):
-		return nil, authErr("not logged in to %s; run simpleota login, or set %s", st.apiURL, tokenEnv)
+		return nil, authErr("not logged in to %s\nLog in with:\n  simpleota login\nOr set %s.", st.apiURL, tokenEnv)
 	case err != nil:
-		return nil, authErr("not logged in to %s (%v); run simpleota login, or set %s", st.apiURL, err, tokenEnv)
+		return nil, authErr("not logged in to %s (%v)\nLog in with:\n  simpleota login\nOr set %s.", st.apiURL, err, tokenEnv)
 	}
 	return a.newSession(st, token, source)
 }
@@ -108,7 +108,7 @@ func (a *App) projectSession(ctx context.Context) (*session, string, error) {
 // sign firmware.
 func (s *session) requirePersonal(what string) error {
 	if s.kind != credentials.KindPersonal {
-		return authErr("%s needs a personal token (soto_pat_...), so a leaked CI token cannot change signing keys; log in with a personal token from the dashboard", what)
+		return authErr("'simpleota %s' needs a personal token (soto_pat_...)\nThis stops a leaked CI token from changing signing keys. Log in with one:\n  simpleota login", what)
 	}
 	return nil
 }

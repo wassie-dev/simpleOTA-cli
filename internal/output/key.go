@@ -23,17 +23,17 @@ func (p Printer) KeyGenerated(v KeyView) error {
 	if p.JSON {
 		return p.WriteJSON(v)
 	}
-	fmt.Fprintf(p.Out, "Registered signing key %q with the project.\n", v.KeyID)
+	fmt.Fprintf(p.Out, "Registered signing key %s with the project.\n", v.KeyID)
 	fmt.Fprintf(p.Out, "Encrypted private key: %s\n", v.PrivateKeyFile)
 	if v.DefaultSigningKey {
-		fmt.Fprintln(p.Out, "simpleota release signs with this key by default.")
+		fmt.Fprintln(p.Out, "New builds are signed with this key by default.")
 	} else {
-		fmt.Fprintf(p.Out, "Sign with it using: simpleota release --key-file %s ...\n", v.PrivateKeyFile)
+		fmt.Fprintf(p.Out, "To sign with it, add this to a release:\n  --key-file %s\n", v.PrivateKeyFile)
 	}
 	fmt.Fprintf(p.Out, "\nPublic key:\n%s\n", v.PublicKeyPEM)
 	if len(v.PinnedKeyIDs) == 1 {
 		fmt.Fprintf(p.Out, "Pin it in your firmware (1.0 clients):\n\n%s", v.FirmwareSnippet)
-		fmt.Fprintln(p.Out, "\nNext: run key generate again for an offline backup key, and pin both keys before your first signed release.")
+		fmt.Fprintln(p.Out, "\nNext, make an offline backup key and pin both in your firmware:\n  simpleota key generate --key-id <backup-id> --out <offline-path>")
 		return nil
 	}
 	fmt.Fprintf(p.Out, "Pin %s in your firmware (1.0 clients):\n\n%s", strings.Join(v.PinnedKeyIDs, " and "), v.FirmwareSnippet)
@@ -75,7 +75,7 @@ func (p Printer) KeyList(keys []SigningKeyView) error {
 		return p.WriteJSON(keys)
 	}
 	if len(keys) == 0 {
-		fmt.Fprintln(p.Out, "No signing keys. Create one with: simpleota key generate --key-id <id>")
+		fmt.Fprintln(p.Out, "No signing keys. Create one with:\n  simpleota key generate --key-id <id>")
 		return nil
 	}
 	rows := make([][]string, len(keys))

@@ -143,7 +143,7 @@ func TestChecksumMismatchCreatesNothing(t *testing.T) {
 	_, err := svc.Release(context.Background(), release.Options{
 		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32",
 	}, everyone)
-	if !errors.Is(err, release.ErrChecksumMismatch) || !strings.Contains(err.Error(), "nothing was created") {
+	if !errors.Is(err, release.ErrChecksumMismatch) || !strings.Contains(err.Error(), "Nothing was created") {
 		t.Fatalf("err = %v", err)
 	}
 	if len(fake.Artifacts) != 0 || len(fake.Deployments) != 0 {
@@ -348,7 +348,7 @@ func TestChipComesFromImageHeader(t *testing.T) {
 		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1",
 	}, everyone)
 	var chipErr *release.ChipError
-	if !errors.As(err, &chipErr) || !strings.Contains(err.Error(), "--chip is required") {
+	if !errors.As(err, &chipErr) || !strings.Contains(err.Error(), "Pass --chip") {
 		t.Fatalf("an image without a known chip needs --chip: %v", err)
 	}
 }

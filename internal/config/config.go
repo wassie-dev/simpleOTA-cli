@@ -110,7 +110,7 @@ func NormalizeAPIURL(raw string) (string, error) {
 	case "https":
 	case "http":
 		if !IsLoopback(u.Hostname()) {
-			return "", fmt.Errorf("refusing plain http for %s: use https (http is allowed only for localhost)", u.Host)
+			return "", fmt.Errorf("refusing plain http for %s\nUse https; http is allowed only for localhost.", u.Host)
 		}
 	default:
 		return "", fmt.Errorf("invalid API URL %q: scheme must be https", raw)

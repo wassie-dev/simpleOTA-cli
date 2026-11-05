@@ -57,7 +57,7 @@ func ValidKeyID(id string) bool {
 func NormalizeChip(chip string) (string, error) {
 	c := strings.ToLower(strings.TrimSpace(chip))
 	if !chipPattern.MatchString(c) {
-		return "", fmt.Errorf("invalid chip %q: use the chip family the device reports, such as esp32, esp32s3 or esp32c3", chip)
+		return "", fmt.Errorf("invalid chip %q\nUse the chip family the device reports, such as esp32, esp32s3 or esp32c3.", chip)
 	}
 	return c, nil
 }

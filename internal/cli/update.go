@@ -21,13 +21,11 @@ func (a *App) updateCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "Update simpleota to the latest release",
-		Long: `Download the latest simpleota release from GitHub, check it against the
-release's checksums.txt, and replace this binary with it. --check only
-reports whether a newer release exists. --version installs a specific
-release, older ones included.
+		Long: `Replace this binary with the latest release from GitHub, after checking the
+download against the release's checksums.txt.
 
-If the binary's folder is not writable, rerun with sudo or reinstall with
-the install script.`,
+If the binary's folder is not writable, run this with sudo, or reinstall
+with the install script.`,
 		Example: `  simpleota update
   simpleota update --check
   simpleota update --version 0.1.0`,
@@ -37,7 +35,7 @@ the install script.`,
 		},
 	}
 	cmd.Flags().BoolVar(&check, "check", false, "only report whether an update is available")
-	cmd.Flags().StringVar(&want, "version", "", "install this version instead of the latest")
+	cmd.Flags().StringVar(&want, "version", "", "install version `x.y.z` instead of the latest, even if it is older")
 	return cmd
 }
 
@@ -110,7 +108,7 @@ func (a *App) runUpdate(ctx context.Context, check bool, want string) error {
 	}
 	switch {
 	case devBuild && want == "":
-		return usageErr("this is a development build (%s); pass --version to install a release over it", current)
+		return usageErr("this is a development build (%s)\nPass --version to install a release over it.", current)
 	case want == "" && !view.UpdateAvailable:
 		view.Outcome = output.UpdateUpToDate
 		return p.Update(view)
@@ -133,7 +131,7 @@ func (a *App) runUpdate(ctx context.Context, check bool, want string) error {
 	}
 	if err := update.Replace(exe, binary); err != nil {
 		if errors.Is(err, os.ErrPermission) {
-			return fmt.Errorf("cannot replace %s: permission denied; rerun with sudo, or reinstall with the install script", exe)
+			return fmt.Errorf("cannot replace %s: permission denied\nRun this with sudo, or reinstall with the install script.", exe)
 		}
 		return fmt.Errorf("replacing %s: %w", exe, err)
 	}

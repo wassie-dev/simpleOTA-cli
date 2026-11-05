@@ -28,7 +28,7 @@ func TestBuildUploadAndArchive(t *testing.T) {
 	if !strings.Contains(r.stderr, "Uploaded unsigned") {
 		t.Fatalf("unsigned notice: %+v", r)
 	}
-	if r := h.run("build", "upload", bin, "--version-label", "1.0.1", "--chip", "esp32"); r.code != ExitError || !strings.Contains(r.stderr, "build 1 (version 1.0.0) has the same sha256") {
+	if r := h.run("build", "upload", bin, "--version-label", "1.0.1", "--chip", "esp32"); r.code != ExitError || !strings.Contains(r.stderr, "build 1 (version 1.0.0) has the same SHA-256") {
 		t.Fatalf("duplicate: %+v", r)
 	}
 	if r := h.run("build", "upload", bin); r.code != ExitUsage {
@@ -38,7 +38,7 @@ func TestBuildUploadAndArchive(t *testing.T) {
 	if r := h.run("build", "archive", "1"); r.code != 0 || !strings.Contains(r.stdout, "archived") {
 		t.Fatalf("archive: %+v", r)
 	}
-	if r := h.run("deployment", "create", "--build", "1"); r.code != ExitUsage || !strings.Contains(r.stderr, "unarchive it first") {
+	if r := h.run("deployment", "create", "--build", "1"); r.code != ExitUsage || !strings.Contains(r.stderr, "simpleota build unarchive 1") {
 		t.Fatalf("deploying an archived build: %+v", r)
 	}
 	if r := h.run("build", "unarchive", "1"); r.code != 0 || !strings.Contains(r.stdout, "ready") {

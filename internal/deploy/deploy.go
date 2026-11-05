@@ -63,7 +63,7 @@ func Latest(ctx context.Context, a API, projectID string) (api.Deployment, error
 		return api.Deployment{}, err
 	}
 	if len(deps) == 0 {
-		return api.Deployment{}, errors.New("this project has no deployments yet; create one with simpleota release")
+		return api.Deployment{}, errors.New("this project has no deployments yet\nCreate one with:\n  simpleota release <bin> --version-label <label>")
 	}
 	latest := deps[0]
 	for _, d := range deps[1:] {

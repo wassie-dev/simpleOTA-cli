@@ -77,7 +77,7 @@ func TestStatusLoggedIn(t *testing.T) {
 		t.Fatalf("project: %+v", v)
 	}
 	r = h.run("status")
-	for _, want := range []string{"simpleota 0.1.0 (0.2.0 is available; run simpleota update)", "logged in    yes, personal token", "project      fleet"} {
+	for _, want := range []string{"simpleota 0.1.0 (0.2.0 is available; run 'simpleota update')", "logged in    yes, personal token", "project      fleet"} {
 		if !strings.Contains(r.stdout, want) {
 			t.Errorf("human output missing %q:\n%s", want, r.stdout)
 		}
@@ -183,7 +183,7 @@ func TestStatusStaffProject(t *testing.T) {
 	if r.code != 0 || v.Project != nil || v.Auth.Account == nil || !v.Auth.Account.IsStaff {
 		t.Fatalf("staff account without projects: %+v %+v", r, v)
 	}
-	if r := h.run("status"); !strings.Contains(r.stdout, "for staff@example.invalid (staff)") || !strings.Contains(r.stdout, "none selected; choose one with simpleota project use") {
+	if r := h.run("status"); !strings.Contains(r.stdout, "for staff@example.invalid (staff)") || !strings.Contains(r.stdout, "none selected; choose one with 'simpleota project use") {
 		t.Fatalf("human output: %+v", r)
 	}
 	if r := h.run("project", "use", fakeapi.ProjectID); r.code != 0 {
@@ -199,7 +199,7 @@ func TestStatusStaffProject(t *testing.T) {
 	}
 	h.fake.NoMe = true
 	r = h.run("--project", "fleet", "status")
-	if r.code != ExitUsage || !strings.Contains(r.stdout, "pass the project ID instead of a slug") {
+	if r.code != ExitUsage || !strings.Contains(r.stdout, "not a slug") {
 		t.Fatalf("staff --project slug without /me/: %+v", r)
 	}
 }
@@ -213,7 +213,7 @@ func TestStatusChosenProjectGone(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, v := cliStatus(t, h)
-	if r.code != ExitUsage || !strings.Contains(v.ProjectError, "chosen with project use (gone)") {
+	if r.code != ExitUsage || !strings.Contains(v.ProjectError, "the chosen project (gone)") {
 		t.Fatalf("%+v %+v", r, v)
 	}
 }

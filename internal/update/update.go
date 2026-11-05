@@ -170,7 +170,7 @@ func (s Source) fetch(ctx context.Context, version, asset string, limit int64) (
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("simpleota %s has no %s; check the version at %s", version, asset, ReleasesURL)
+		return nil, fmt.Errorf("simpleota %s has no %s\nCheck the version at %s", version, asset, ReleasesURL)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("downloading %s: server returned %d", asset, resp.StatusCode)
@@ -207,7 +207,7 @@ func (s Source) Download(ctx context.Context, version string) ([]byte, error) {
 	}
 	sum := sha256.Sum256(archive)
 	if got := hex.EncodeToString(sum[:]); got != want {
-		return nil, fmt.Errorf("checksum mismatch for %s: checksums.txt says %s, the download is %s", name, want, got)
+		return nil, fmt.Errorf("checksum mismatch for %s\nchecksums.txt: %s\ndownload:      %s", name, want, got)
 	}
 	if s.GOOS == "windows" {
 		return fromZip(archive, "simpleota.exe")

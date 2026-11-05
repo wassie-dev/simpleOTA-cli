@@ -167,7 +167,7 @@ func ParsePrivateKey(data []byte, passphrase PassphraseFunc) (ed25519.PrivateKey
 	}
 	block, _ := pem.Decode(data)
 	if block == nil || block.Type != pemPrivateType {
-		return nil, errors.New("not a signing key: expected an encrypted simpleota key file or a PEM \"BEGIN PRIVATE KEY\" block")
+		return nil, errors.New("not a signing key\nExpected an encrypted simpleota key file, or a PEM private key.")
 	}
 	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
@@ -175,7 +175,7 @@ func ParsePrivateKey(data []byte, passphrase PassphraseFunc) (ed25519.PrivateKey
 	}
 	priv, ok := key.(ed25519.PrivateKey)
 	if !ok {
-		return nil, errors.New("the private key is not Ed25519; SimpleOTA signs firmware with Ed25519 only")
+		return nil, errors.New("the private key is not Ed25519\nSimpleOTA signs firmware with Ed25519 only.")
 	}
 	return priv, nil
 }
@@ -230,7 +230,7 @@ func WriteNewKeyFile(path string, data []byte) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- the user chooses where the key goes
 	if err != nil {
 		if os.IsExist(err) {
-			return fmt.Errorf("%s already exists; choose another --out path or key id", path)
+			return fmt.Errorf("%s already exists\nChoose another --out path or --key-id.", path)
 		}
 		return err
 	}

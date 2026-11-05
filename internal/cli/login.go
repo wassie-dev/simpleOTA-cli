@@ -17,40 +17,37 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
 )
 
-const pasteLabel = "Paste your SimpleOTA token: "
+const pasteLabel = "Paste your token: "
 
 func (a *App) loginCommand() *cobra.Command {
 	var noBrowser bool
 	cmd := &cobra.Command{
 		Use:   "login",
-		Short: "Store an API token from the dashboard",
-		Long: `Check an API token against SimpleOTA and store it for later commands, in
-the OS keychain or, where there is none, a 0600 file in the config
-directory. Paste the token at the prompt, or pipe it on stdin.
+		Short: "Log in with an API token from the dashboard",
+		Long: `Log in by storing an API token from the SimpleOTA dashboard. The token is
+checked with the server, then kept in the OS keychain, or in a 0600 file in
+the config directory if there is no keychain.
 
-On a terminal, pressing Enter at the prompt opens the API tokens page in
-your browser, so you can make a personal token and paste it back. Nothing
-opens unless you press Enter, and --no-browser removes the offer. Over SSH
-or without a graphical session, login prints the page's address instead.
+On a terminal, paste the token at the prompt. If you don't have one yet,
+press Enter to open the API tokens page in your browser. The offer is
+skipped over SSH or without a graphical session. Anywhere else, pipe the
+token on stdin.
 
-Two kinds of token work:
+Tokens:
+  personal (soto_pat_...)   For your own machine. Reaches every project
+                            your account can open. Make one under API
+                            tokens in the dashboard.
+  project (soto_proj_...)   For CI. Reaches one project. Make one with
+                            Issue token on the project's page, with the
+                            API scope.
 
-  personal token (soto_pat_...)  for your own machine; it reaches every
-                                 project your account can open. Make one
-                                 under API tokens in the dashboard.
-  project token (soto_proj_...)  for CI; it reaches one project. Make one
-                                 with Issue token on the project's page,
-                                 with the API scope.
+Logging in replaces the stored token and clears any chosen project. To choose
+one, see 'simpleota project --help'.
 
-login does not choose a project. A project token always acts on its own
-project. With a personal token, commands act on your only project, or on
-the one you choose with simpleota project use.
-
-Logging in again replaces the stored token and clears the chosen project.
-SIMPLEOTA_TOKEN, when set, takes precedence over the stored token.`,
+SIMPLEOTA_TOKEN, if set, overrides the stored token.`,
 		Example: `  simpleota login
-  echo "$SIMPLEOTA_TOKEN" | simpleota login
   simpleota login --no-browser
+  echo "$SIMPLEOTA_TOKEN" | simpleota login
   simpleota --api-url http://127.0.0.1:8000 login`,
 		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -81,7 +78,7 @@ func (a *App) runLogin(ctx context.Context, noBrowser bool) error {
 	if err != nil {
 		var ae *api.Error
 		if errors.As(err, &ae) && ae.StatusCode == http.StatusUnauthorized {
-			return authErr("%s rejected the token; check it was copied whole and has not been revoked (project tokens need the api scope)", apiURL)
+			return authErr("%s rejected the token\nCheck that it was copied whole and has not been revoked. A project token also\nneeds the API scope.", apiURL)
 		}
 		return err
 	}
@@ -120,7 +117,7 @@ func (a *App) runLogin(ctx context.Context, noBrowser bool) error {
 
 	p := a.printer()
 	if a.Getenv(tokenEnv) != "" {
-		p.Notice("Note: %s is set and takes precedence over the stored token.", tokenEnv)
+		p.Notice("Note: %s is set, so commands use it instead of the stored token.", tokenEnv)
 	}
 	return p.Login(view)
 }
@@ -151,7 +148,7 @@ func (a *App) readToken(apiURL string, noBrowser bool) (string, error) {
 	}
 	token := strings.TrimSpace(raw)
 	if token == "" {
-		return "", usageErr("no token given; paste it at the prompt or pipe it on stdin")
+		return "", usageErr("no token given\nPaste it at the prompt, or pipe it on stdin.")
 	}
 	return token, nil
 }
@@ -165,27 +162,30 @@ func (a *App) readRawToken(apiURL string, noBrowser bool) (string, error) {
 		return line, nil
 	}
 	if a.Prompt == nil {
-		return "", usageErr("cannot prompt for the token; pipe it on stdin")
+		return "", usageErr("cannot prompt for the token\nPipe it on stdin instead.")
 	}
 	tokensURL := apiURL + "/tokens/"
 	p := a.printer()
 	p.Notice(`Log in with a token from the SimpleOTA dashboard:
-  - a personal token (soto_pat_...) for your own machine; make one under
-    API tokens at %s
-  - a project token (soto_proj_...) with the API scope for CI; make one with
-    Issue token on the project's page
-The token is not shown as you paste it.`, tokensURL)
+
+  Personal token (soto_pat_...), for your own machine. Make one at:
+    %s
+  Project token (soto_proj_...), for CI. Make one with Issue token on the
+  project's page, with the API scope.
+
+The token is not shown as you paste it.
+`, tokensURL)
 	if noBrowser || a.OpenBrowser == nil {
 		return a.Prompt(pasteLabel)
 	}
-	raw, err := a.Prompt("Paste your SimpleOTA token, or press Enter to open API tokens in your browser: ")
+	raw, err := a.Prompt("Paste your token, or press Enter to open the tokens page: ")
 	if err != nil || strings.TrimSpace(raw) != "" {
 		return raw, err
 	}
 	if err := a.OpenBrowser(tokensURL); err != nil {
-		p.Notice("Could not open a browser (%v). Open %s yourself, make a token, and paste it here.", err, tokensURL)
+		p.Notice("Could not open a browser (%v).\nOpen this page, make a token, and paste it here:\n  %s", err, tokensURL)
 	} else {
-		p.Notice("Opened %s. Sign in if asked, make a token, and paste it here.", tokensURL)
+		p.Notice("Opened %s\nSign in if asked, make a token, and paste it here.", tokensURL)
 	}
 	return a.Prompt(pasteLabel)
 }
@@ -194,9 +194,12 @@ func (a *App) logoutCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout",
 		Short: "Remove the stored token and chosen project",
-		Long: `Remove the token stored for the current API URL and the project chosen
-with project use. SIMPLEOTA_TOKEN, when set, is not affected.`,
-		Args: exactArgs(0),
+		Long: `Remove the token stored for this API URL, and the project chosen with
+'simpleota project use'.
+
+SIMPLEOTA_TOKEN, if set, stays in effect.`,
+		Example: `  simpleota logout`,
+		Args:    exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			st, err := a.loadSettings()
 			if err != nil {
@@ -222,7 +225,7 @@ with project use. SIMPLEOTA_TOKEN, when set, is not affected.`,
 				return err
 			}
 			if a.Getenv(tokenEnv) != "" {
-				p.Notice("Note: %s is still set in this environment.", tokenEnv)
+				p.Notice("Note: %s is still set, so commands keep using it.", tokenEnv)
 			}
 			return nil
 		},

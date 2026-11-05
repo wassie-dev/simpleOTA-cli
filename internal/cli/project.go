@@ -32,9 +32,9 @@ type noProjectError struct{ projects []api.Project }
 
 func (e *noProjectError) Error() string {
 	if len(e.projects) == 0 {
-		return "this account has no projects yet; create one in the dashboard, or pass --project <project-id> for a project you can open"
+		return "this account has no projects yet\nCreate one in the dashboard, or pass --project <project-id> for a project\nyou can open."
 	}
-	return fmt.Sprintf("no project selected, and this token can see %d (%s); choose one with simpleota project use <slug>, or pass --project <slug>", len(e.projects), projectSlugs(e.projects))
+	return fmt.Sprintf("no project selected, and this token can see %d (%s)\nChoose one with:\n  simpleota project use <slug>\nOr pass --project <slug>.", len(e.projects), projectSlugs(e.projects))
 }
 
 // currentProject resolves the project a command acts on: --project, then
@@ -60,7 +60,7 @@ func (s *session) currentProject(ctx context.Context) (api.Project, string, erro
 	}
 	projects, err := s.api.ListProjects(ctx)
 	if isStaffListing(err) {
-		return api.Project{}, "", usageErr("this server does not list a staff account's projects; choose one with simpleota project use <project-id>, or pass --project <project-id>")
+		return api.Project{}, "", usageErr("this server does not list a staff account's projects\nChoose one by ID with:\n  simpleota project use <project-id>\nOr pass --project <project-id>.")
 	}
 	if err != nil {
 		return api.Project{}, "", err
@@ -88,7 +88,7 @@ func (s *session) fullProject(ctx context.Context) (api.Project, string, error) 
 	full, err := s.api.GetProject(ctx, p.ID)
 	var ae *api.Error
 	if errors.As(err, &ae) && ae.StatusCode == http.StatusNotFound {
-		return api.Project{}, source, usageErr("the project chosen with project use (%s) does not exist or this token cannot see it; choose another with simpleota project use <slug>", p.Slug)
+		return api.Project{}, source, usageErr("the chosen project (%s) does not exist, or this token cannot see it\nChoose another with:\n  simpleota project use <slug>", p.Slug)
 	}
 	return full, source, err
 }
@@ -99,13 +99,13 @@ func findProject(ctx context.Context, a api.API, ref string) (api.Project, error
 		p, err := a.GetProject(ctx, ref)
 		var ae *api.Error
 		if errors.As(err, &ae) && ae.StatusCode == http.StatusNotFound {
-			return p, usageErr("project %s does not exist or this token cannot see it", ref)
+			return p, usageErr("project %s does not exist, or this token cannot see it", ref)
 		}
 		return p, err
 	}
 	projects, err := a.ListProjects(ctx)
 	if isStaffListing(err) {
-		return api.Project{}, usageErr("this server does not list a staff account's projects, so pass the project ID instead of a slug, copying it from the project's page")
+		return api.Project{}, usageErr("this server does not list a staff account's projects\nUse the project ID from the project's page, not a slug.")
 	}
 	if err != nil {
 		return api.Project{}, err
@@ -115,7 +115,7 @@ func findProject(ctx context.Context, a api.API, ref string) (api.Project, error
 			return p, nil
 		}
 	}
-	return api.Project{}, usageErr("no project with slug %q is visible to this token (visible: %s)", ref, projectSlugs(projects))
+	return api.Project{}, usageErr("no project with slug %q is visible to this token\nVisible projects: %s", ref, projectSlugs(projects))
 }
 
 func projectSlugs(ps []api.Project) string {
@@ -140,17 +140,17 @@ func (a *App) projectCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "project",
 		Aliases: []string{"projects"},
-		Short:   "List projects and choose the one commands act on",
-		Long: `A project holds a fleet: its builds, deployments, devices, release
-channels and signing keys. Every resource command acts on one project, the
-current project, chosen in this order:
+		Short:   "List projects and choose the current one",
+		Long: `A project holds a fleet: its builds, deployments, devices, release channels,
+device groups, signing keys and audit log. Projects are created and deleted
+in the dashboard.
+
+Most commands act on the current project, the first of these that applies:
 
   1. --project <slug|id>
   2. SIMPLEOTA_PROJECT
-  3. the project chosen with simpleota project use (personal tokens only)
-  4. the only project the token can see; a project token sees just its own
-
-Projects are created and deleted in the dashboard.`,
+  3. the project chosen with 'simpleota project use' (personal tokens only)
+  4. the only project the token can see; a project token sees just its own`,
 		Example: `  simpleota project list
   simpleota project use my-fleet
   simpleota project show`,
@@ -165,9 +165,10 @@ func (a *App) projectListCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List the projects this token can see",
-		Long: `List the projects this token can see, marking the current project with *.
-A staff account sees its own projects; open any other project by ID with
---project <id>.`,
+		Long: `List the projects this token can see. A * marks the current project.
+
+A staff account sees its own projects. To open any other project, use its
+ID with --project <id>.`,
 		Example: `  simpleota project list
   simpleota project list --json | jq -r '.[].slug'`,
 		Args: exactArgs(0),
@@ -179,7 +180,7 @@ A staff account sees its own projects; open any other project by ID with
 			}
 			projects, err := s.api.ListProjects(ctx)
 			if isStaffListing(err) {
-				return usageErr("this server does not list a staff account's projects; open one by ID with simpleota project show <project-id>")
+				return usageErr("this server does not list a staff account's projects\nOpen one by ID with:\n  simpleota project show <project-id>")
 			}
 			if err != nil {
 				return err
@@ -198,9 +199,9 @@ A staff account sees its own projects; open any other project by ID with
 func (a *App) projectShowCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show [slug|id]",
-		Short: "Show a project (the current one by default)",
+		Short: "Show a project",
 		Long: `Show a project's name, slug, ID, default framework and last build number.
-Without an argument it shows the current project.`,
+Without an argument, show the current project.`,
 		Example: `  simpleota project show
   simpleota project show my-fleet`,
 		Args: maxArgs(1),
@@ -227,12 +228,11 @@ Without an argument it shows the current project.`,
 func (a *App) projectUseCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "use <slug|id>",
-		Short: "Choose the project commands act on",
-		Long: `Remember a project as the current project for the API URL you are logged
-in to. --project and SIMPLEOTA_PROJECT still override it for one command.
-logout and login clear it.
+		Short: "Choose the current project",
+		Long: `Set the current project for the API URL you are logged in to. --project and
+SIMPLEOTA_PROJECT still override it, and logging in or out clears it.
 
-A project token always acts on its own project, so use is for personal
+A project token always acts on its own project, so this is for personal
 tokens.`,
 		Example: `  simpleota project use my-fleet
   simpleota project use 5f0c2b1e-1d2c-4b7a-9a3e-0123456789ab`,
@@ -244,7 +244,7 @@ tokens.`,
 				return err
 			}
 			if s.kind == credentials.KindProject {
-				return usageErr("a project token always acts on its own project; project use is for personal tokens")
+				return usageErr("a project token always acts on its own project\n'simpleota project use' is for personal tokens.")
 			}
 			p, err := findProject(ctx, s.api, args[0])
 			if err != nil {

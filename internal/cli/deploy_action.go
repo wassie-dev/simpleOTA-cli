@@ -10,28 +10,34 @@ import (
 )
 
 var actionHelp = map[string]string{
-	deploy.ActionRamp:     "Offer the build to a larger share of devices (it cannot go down)",
-	deploy.ActionPause:    "Stop offering the build until the deployment is resumed",
+	deploy.ActionRamp:     "Offer the build to a larger share of devices",
+	deploy.ActionPause:    "Stop offering the build until resumed",
 	deploy.ActionResume:   "Offer the build again after a pause",
 	deploy.ActionComplete: "Mark the deployment finished",
 	deploy.ActionCancel:   "Stop the deployment for good",
 }
 
 var actionLong = map[string]string{
-	deploy.ActionRamp: `Raise the share of the targeted devices that are offered the build. Each
-device falls in a fixed bucket, so a device in at 10% stays in at 50%. The
-percentage cannot go down, since devices that already took the build
-would be decided again; to shrink a rollout, cancel the deployment and
-create a new one.`,
-	deploy.ActionPause: `Stop offering the build. Devices that already installed it keep it.
-Rollbacks also pause a deployment, once they reach its rollback threshold.
-Resume it to offer the build again.`,
+	deploy.ActionRamp: `Raise the share of targeted devices that are offered the build. Each device
+has a fixed place in the rollout, so a device included at 10% stays included
+at 50%.
+
+The percentage cannot go down. To shrink a rollout, cancel the deployment
+and create a new one.`,
+	deploy.ActionPause: `Stop offering the build until the deployment is resumed. Devices that already
+installed it keep it.
+
+Rollbacks also pause a deployment, once they reach its rollback threshold.`,
 	deploy.ActionResume: `Offer the build again after a pause, at the same percentage.`,
 	deploy.ActionComplete: `Mark an active or paused deployment finished. It stops offering the build,
-and stays in the history as completed. This cannot be undone.`,
+and stays in the history as completed.
+
+This cannot be undone.`,
 	deploy.ActionCancel: `Stop a deployment for good. It stops offering the build, and devices that
-already installed it keep it. This cannot be undone; to go back, release
-the previous source again as a new, higher build.`,
+already installed it keep it.
+
+This cannot be undone. To go back to earlier firmware, release the previous
+source again as a new, higher build.`,
 }
 
 func (a *App) deploymentActionCommand(action string) *cobra.Command {
@@ -53,7 +59,7 @@ func (a *App) deploymentActionCommand(action string) *cobra.Command {
 	if action == deploy.ActionRamp {
 		cmd.Use = "ramp <deployment-id> --percent <n>"
 		cmd.Example = "  simpleota deployment ramp 5f0c2b1e-... --percent 50"
-		cmd.Flags().IntVar(&percent, "percent", 0, "new rollout percentage (required)")
+		cmd.Flags().IntVar(&percent, "percent", 0, "raise the rollout to `n` percent (required)")
 	}
 	return cmd
 }
@@ -64,7 +70,7 @@ func (a *App) runRollout(ctx context.Context, action, deploymentID string, perce
 		return usageErr("%v", err)
 	}
 	if !api.IsUUID(deploymentID) {
-		return usageErr("%q is not a deployment ID; release and deployment list print it", deploymentID)
+		return notDeploymentID(deploymentID)
 	}
 	s, projectID, err := a.projectSession(ctx)
 	if err != nil {

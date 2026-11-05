@@ -20,21 +20,26 @@ const signingKeyEnv = "SIMPLEOTA_SIGNING_KEY"
 
 // uploadHelp describes how release and build upload check, sign and send a
 // build.
-const uploadHelp = `The chip family comes from the image header, which names the chip the
-image was built for. A --chip that differs from it is refused unless a
-device in the project reports that chip, since no other device would be
-offered the build.
+const uploadHelp = `Chip:
+  Read from the image header. A --chip that differs is refused unless a
+  device in the project reports that chip, because no other device would
+  be offered the build.
 
-The build is signed when a key is available: --key-file, then
-SIMPLEOTA_SIGNING_KEY (an exported key; set SIMPLEOTA_SIGNING_KEY_PASSPHRASE
-for an encrypted one), then the default key from key generate.
+Signing:
+  Signed with the first key found, or left unsigned if there is none:
+    1. --key-file
+    2. SIMPLEOTA_SIGNING_KEY, an exported key (set
+       SIMPLEOTA_SIGNING_KEY_PASSPHRASE if it is encrypted)
+    3. the default key from 'simpleota key generate'
 
-The manifest carries the binary's SHA-256, and the server rejects the upload
-if the bytes it received differ. The upload is sent once and never retried:
-every accepted upload uses a new build number and counts against the plan's
-monthly limit. The command stops before uploading when the project already
-has a build of the same binary, so running it again after a failed upload
-cannot create a second build; pass --allow-duplicate to upload it anyway.`
+Upload:
+  Sent once and never retried, because every accepted upload uses a build
+  number and counts toward the plan's monthly limit. The server rejects it
+  if the bytes it received do not match the binary's SHA-256.
+
+  If the project already has this binary, the command stops before
+  uploading, so it is safe to run again after a failed upload. Use
+  --allow-duplicate to upload it anyway.`
 
 // buildFlags are the flags release and build upload share.
 type buildFlags struct {
@@ -47,17 +52,17 @@ type buildFlags struct {
 }
 
 func (f *buildFlags) register(fl *pflag.FlagSet) {
-	fl.StringVar(&f.versionLabel, "version-label", "", "human-readable version, e.g. 1.4.0 (required)")
-	fl.StringVar(&f.chip, "chip", "", "chip family the build targets, e.g. esp32s3 (default: the chip the image header names)")
-	fl.StringVar(&f.framework, "framework", "", "arduino or esp_idf (default: the project's default framework)")
-	fl.StringVar(&f.keyFile, "key-file", "", "signing key file")
-	fl.StringVar(&f.securityMode, "security-mode", "auto", "auto (signed when a key is available), basic or signed")
-	fl.BoolVar(&f.allowDuplicate, "allow-duplicate", false, "upload even if the project already has a build of this binary")
+	fl.StringVar(&f.versionLabel, "version-label", "", "version `label`, e.g. 1.4.0 (required)")
+	fl.StringVar(&f.chip, "chip", "", "chip family `name`, e.g. esp32s3 (default: read from the image)")
+	fl.StringVar(&f.framework, "framework", "", "framework `name`: arduino or esp_idf (default: the project's)")
+	fl.StringVar(&f.keyFile, "key-file", "", "`path` of the signing key file")
+	fl.StringVar(&f.securityMode, "security-mode", "auto", "signing `mode`: auto (sign if a key is available), basic or signed")
+	fl.BoolVar(&f.allowDuplicate, "allow-duplicate", false, "upload even if the project has this binary")
 }
 
 func (f buildFlags) validate() error {
 	if f.versionLabel == "" {
-		return usageErr("--version-label is required")
+		return usageErr("--version-label is required, e.g. --version-label 1.4.0")
 	}
 	if f.framework != "" && f.framework != manifest.FrameworkArduino && f.framework != manifest.FrameworkESPIDF {
 		return usageErr("--framework must be arduino or esp_idf")
@@ -95,7 +100,7 @@ func (a *App) prepareBuild(ctx context.Context, binPath string, f buildFlags) (b
 			return buildJob{}, err
 		}
 		if key == nil && f.securityMode == manifest.SecuritySigned {
-			return buildJob{}, usageErr("--security-mode signed needs a key: pass --key-file or set %s", signingKeyEnv)
+			return buildJob{}, usageErr("--security-mode signed needs a key\nPass --key-file, or set %s.", signingKeyEnv)
 		}
 	}
 	return buildJob{
@@ -125,7 +130,7 @@ func buildErr(err error) error {
 // noticeUnsigned warns after an upload that went out unsigned.
 func noticeUnsigned(p output.Printer, res release.Result) {
 	if res.SecurityMode == manifest.SecurityBasic {
-		p.Notice("Uploaded unsigned (basic). Devices that enforce signed firmware will not be offered this build.")
+		p.Notice("Uploaded unsigned (basic). Devices that enforce signed firmware will not be\noffered this build.")
 	}
 }
 
@@ -146,19 +151,21 @@ func (a *App) releaseCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "release <bin> --version-label <label>",
 		Short: "Sign, upload and deploy a firmware binary in one step",
-		Long: `Upload an application binary to the current project and start a
-deployment to a channel in one call. The server assigns the build number;
-devices are offered only builds higher than the one they run. To upload
-without deploying, use simpleota build upload, then
-simpleota deployment create.
+		Long: `Upload a firmware binary to the current project and deploy it to a
+channel, in one step. To upload now and deploy later, use
+'simpleota build upload'.
 
-When another deployment for the same chip is still active on the channel,
-release names it. A device installs the highest build offered to it, so
-the older deployment goes on reaching the devices this release does not.
+The server assigns the build number. Devices are offered only builds higher
+than the one they run.
+
+If another deployment for the same chip is still active on the channel, it
+is listed. A device installs the highest build offered to it, so the older
+deployment keeps reaching the devices this one does not.
 
 ` + uploadHelp,
 		Example: `  simpleota release build/app.bin --version-label 1.4.0
-  simpleota release build/app.bin --version-label 1.4.1 --percent 10 --channel beta`,
+  simpleota release build/app.bin --version-label 1.4.1 --percent 10
+  simpleota release build/app.bin --version-label 1.4.2 --channel beta`,
 		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if percent < 0 || percent > 100 {
@@ -181,8 +188,8 @@ the older deployment goes on reaching the devices this release does not.
 		},
 	}
 	f.register(cmd.Flags())
-	cmd.Flags().IntVar(&percent, "percent", 100, "percentage of the channel's devices to offer the build to")
-	cmd.Flags().StringVar(&channel, "channel", api.DefaultChannel, "release channel; it must already exist on the project")
+	cmd.Flags().IntVar(&percent, "percent", 100, "offer the build to `n` percent of the channel's devices")
+	cmd.Flags().StringVar(&channel, "channel", api.DefaultChannel, "`name` of the channel to deploy to; it must already exist")
 	return cmd
 }
 

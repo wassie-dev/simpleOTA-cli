@@ -53,16 +53,16 @@ func (p Printer) Login(v LoginView) error {
 	if v.TokenType == "project" {
 		return nil
 	}
+	fmt.Fprintln(p.Out)
 	switch {
 	case v.ProjectCount == 1 && v.Project != nil:
 		fmt.Fprintf(p.Out, "Commands act on %s, the only project this account has.\n", v.Project.Slug)
 	case v.ProjectCount == 0:
 		fmt.Fprintln(p.Out, "This account has no projects yet; create one in the dashboard.")
 	case v.ProjectCount < 0:
-		fmt.Fprintln(p.Out, "Choose a project with: simpleota project use <project-id>")
+		fmt.Fprintln(p.Out, "Choose a project by ID:\n  simpleota project use <project-id>")
 	default:
-		fmt.Fprintf(p.Out, "This account has %d projects. Choose one with: simpleota project use <slug>\n", v.ProjectCount)
-		fmt.Fprintln(p.Out, "List them with: simpleota project list")
+		fmt.Fprintf(p.Out, "This account has %d projects. List them, then choose one:\n  simpleota project list\n  simpleota project use <slug>\n", v.ProjectCount)
 	}
 	return nil
 }

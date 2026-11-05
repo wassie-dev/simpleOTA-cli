@@ -28,18 +28,18 @@ func (a *App) keyCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "key",
 		Aliases: []string{"keys"},
-		Short:   "Create, list, export and revoke firmware signing keys",
-		Long: `Signed releases carry an Ed25519 signature that devices check against the
-public keys pinned in their firmware. The private key is made and kept on
-your machine, encrypted with a passphrase; only the public key is
-registered with the current project, and SimpleOTA never holds a private
-key.
+		Short:   "Create, list, export and revoke signing keys",
+		Long: `Signed releases carry an Ed25519 signature, which devices check against the
+public keys pinned in their firmware.
 
-Devices pin at most two keys and cannot change them over the air, so make
-a second, offline backup key before your first signed release and pin
-both.`,
+The private key is made and kept on your machine, encrypted with a
+passphrase. Only the public key is registered with the project; SimpleOTA
+never holds a private key.
+
+Devices pin at most two keys and cannot change them over the air. Before your
+first signed release, make a second, offline backup key and pin both.`,
 		Example: `  simpleota key generate --key-id prod-2026
-  simpleota key generate --key-id backup-2026 --out /Volumes/offline/backup-2026.key
+  simpleota key generate --key-id backup-2026 --out /Volumes/usb/backup.key
   simpleota key list
   simpleota key export | gh secret set SIMPLEOTA_SIGNING_KEY
   simpleota key revoke prod-2025 --yes`,
@@ -53,11 +53,11 @@ both.`,
 func (a *App) keyListCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
-		Short: "List the public signing keys registered on the project",
-		Long: `List the public signing keys registered on the current project, active
-and revoked, newest first. --json includes each public key's PEM.`,
+		Short: "List the project's public signing keys",
+		Long: `List the public signing keys registered on the current project, active and
+revoked, newest first. With --json, each key includes its PEM.`,
 		Example: `  simpleota key list
-  simpleota key list --json | jq -r '.[] | select(.revoked_at == null) | .key_id'`,
+  simpleota key list --json | jq -r '.[].key_id'`,
 		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			s, projectID, err := a.projectSession(cmd.Context())
@@ -79,26 +79,27 @@ func (a *App) keyGenerateCommand() *cobra.Command {
 	var keyID, out string
 	cmd := &cobra.Command{
 		Use:   "generate --key-id <id>",
-		Short: "Create an Ed25519 signing key on this machine and register its public key",
-		Long: `Create an Ed25519 keypair on this machine, save the private key encrypted
-with a passphrase (0600, in <config dir>/keys by default), and register
-only the public key with the current project. The first key you generate
-becomes the default that release signs with.
+		Short: "Create a signing key and register its public key",
+		Long: `Create an Ed25519 key on this machine and register its public key with the
+current project. The private key is saved encrypted with a passphrase, with
+0600 permissions. The first key you generate becomes the default for signing
+builds.
 
-Prints the signing_keys snippet for the 1.0 Arduino and ESP-IDF clients,
-which pin two keys: the new key and the project's newest other active key.
+The output includes the signing_keys snippet for the 1.0 Arduino and ESP-IDF
+clients. It pins two keys: the new one and the project's newest other active
+key.
 
-Needs a personal token, so a leaked CI token cannot add signing keys. The
-passphrase is prompted for, or read from SIMPLEOTA_SIGNING_KEY_PASSPHRASE.`,
+Needs a personal token, so a leaked CI token cannot add signing keys. You are
+asked for the passphrase unless SIMPLEOTA_SIGNING_KEY_PASSPHRASE is set.`,
 		Example: `  simpleota key generate --key-id prod-2026
-  simpleota key generate --key-id backup-2026 --out /Volumes/offline/backup-2026.key`,
+  simpleota key generate --key-id backup-2026 --out /Volumes/usb/backup.key`,
 		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.runKeyGenerate(cmd.Context(), keyID, out)
 		},
 	}
-	cmd.Flags().StringVar(&keyID, "key-id", "", "name for the key on the project, e.g. prod-2026 (required)")
-	cmd.Flags().StringVar(&out, "out", "", "where to write the encrypted private key (default: <config dir>/keys/<key-id>.key)")
+	cmd.Flags().StringVar(&keyID, "key-id", "", "`id` for the key on the project, e.g. prod-2026 (required)")
+	cmd.Flags().StringVar(&out, "out", "", "`path` of the encrypted private key (default: in the config directory)")
 	return cmd
 }
 
@@ -107,7 +108,7 @@ func (a *App) runKeyGenerate(ctx context.Context, keyID, out string) error {
 		return usageErr("--key-id is required, e.g. --key-id prod-2026")
 	}
 	if !manifest.ValidKeyID(keyID) {
-		return usageErr("invalid --key-id %q: use 1-64 letters, digits, '.', '_' or '-', starting with a letter or digit", keyID)
+		return usageErr("invalid --key-id %q\nUse 1-64 letters, digits, '.', '_' or '-', starting with a letter or digit.", keyID)
 	}
 	s, projectID, err := a.projectSession(ctx)
 	if err != nil {
@@ -122,7 +123,7 @@ func (a *App) runKeyGenerate(ctx context.Context, keyID, out string) error {
 	}
 	for _, k := range existing {
 		if k.KeyID == keyID {
-			return usageErr("the project already has a signing key named %q; choose another --key-id", keyID)
+			return usageErr("the project already has a signing key named %q\nChoose another --key-id.", keyID)
 		}
 	}
 	if out, err = newKeyPath(s.configDir, keyID, out); err != nil {
@@ -142,7 +143,7 @@ func (a *App) runKeyGenerate(ctx context.Context, keyID, out string) error {
 	}
 	isDefault, err := s.makeDefaultKey(out)
 	if err != nil {
-		return fmt.Errorf("key %q is registered and saved to %s, but making it the default failed (%w); pass --key-file to sign with it", keyID, out, err)
+		return fmt.Errorf("key %q is registered and saved to %s\nMaking it the default failed: %w\nPass --key-file to sign with it.", keyID, out, err)
 	}
 
 	pinned, others := pinnedKeys(existing, signing.PinnedKey{KeyID: keyID, PublicKeyPEM: publicPEM})
@@ -161,7 +162,7 @@ func (a *App) runKeyGenerate(ctx context.Context, keyID, out string) error {
 	p := a.printer()
 	p.Notice("%s", keyWarning)
 	if len(others) > len(pinned)-1 {
-		p.Notice("The project has %d other active keys (%s). 1.0 clients pin %d keys, so the snippet pins %s; swap in another key ID if you need it.",
+		p.Notice("Note: the project has %d other active keys (%s), but 1.0 clients pin %d.\nThe snippet pins %s. Swap in another key if you need it.",
 			len(others), strings.Join(others, ", "), signing.MaxPinnedKeys, strings.Join(view.PinnedKeyIDs, " and "))
 	}
 	return p.KeyGenerated(view)
@@ -178,7 +179,7 @@ func newKeyPath(configDir, keyID, out string) (string, error) {
 		return "", err
 	}
 	if _, err := os.Lstat(out); err == nil {
-		return "", usageErr("%s already exists; choose another --out path", out)
+		return "", usageErr("%s already exists\nChoose another --out path.", out)
 	}
 	return out, nil
 }
@@ -229,21 +230,20 @@ func (a *App) keyRevokeCommand() *cobra.Command {
 		Use:   "revoke <key-id> --yes",
 		Short: "Revoke a public signing key on the project",
 		Long: `Revoke a signing key on the current project, for a key that leaked or is
-retired. The server then refuses new uploads signed with it. Builds it
-already verified stay servable, and the private key file on this machine
-is left alone.
+retired. The server then refuses new uploads signed with it. Builds it already
+verified can still be served, and the private key file on this machine is
+left alone.
 
-Revoking cannot be undone. Devices keep the keys pinned in their firmware,
-so before revoking, ship firmware that pins the key you will sign with
-next: a device that pins only the revoked key cannot verify a release
-signed with any other.
+This cannot be undone. Devices keep the keys pinned in their firmware, so
+first ship firmware that pins the key you will sign with next. A device that
+pins only the revoked key cannot verify a release signed with any other.
 
 Needs a personal token, and --yes to confirm.`,
 		Example: `  simpleota key revoke prod-2025 --yes`,
 		Args:    exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !yes {
-				return usageErr("revoking %s cannot be undone; pass --yes to confirm", args[0])
+				return usageErr("revoking %s cannot be undone\nPass --yes to confirm.", args[0])
 			}
 			s, projectID, err := a.projectSession(cmd.Context())
 			if err != nil {
@@ -266,14 +266,16 @@ func (a *App) keyExportCommand() *cobra.Command {
 	var keyFile, format string
 	cmd := &cobra.Command{
 		Use:   "export",
-		Short: "Print the private signing key, encrypted or as PEM for a CI secret",
-		Long: `Print a private signing key to stdout, to store as a CI secret. It reads
-the key file on this machine and calls no API.
+		Short: "Print a private signing key, to store as a CI secret",
+		Long: `Print a private signing key to stdout, to store as a CI secret. This reads the
+key file on this machine and does not call the API.
 
---format encrypted (the default) prints the passphrase-protected key file;
-set it as SIMPLEOTA_SIGNING_KEY and the passphrase as
-SIMPLEOTA_SIGNING_KEY_PASSPHRASE in CI. --format pem prints the
-unencrypted PKCS#8 PEM, for a secret store that encrypts on its own.`,
+Formats:
+  encrypted  The passphrase-protected key file (the default). In CI, set it as
+             SIMPLEOTA_SIGNING_KEY, and the passphrase as
+             SIMPLEOTA_SIGNING_KEY_PASSPHRASE.
+  pem        The unencrypted PKCS#8 PEM, for a secret store that encrypts on
+             its own.`,
 		Example: `  simpleota key export | gh secret set SIMPLEOTA_SIGNING_KEY
   simpleota key export --format pem --key-file ~/keys/prod-2026.key`,
 		Args: exactArgs(0),
@@ -281,8 +283,8 @@ unencrypted PKCS#8 PEM, for a secret store that encrypts on its own.`,
 			return a.runKeyExport(keyFile, format)
 		},
 	}
-	cmd.Flags().StringVar(&keyFile, "key-file", "", "key file to export (default: the key key generate set as default)")
-	cmd.Flags().StringVar(&format, "format", "encrypted", "encrypted or pem")
+	cmd.Flags().StringVar(&keyFile, "key-file", "", "`path` of the key file to export (default: your default signing key)")
+	cmd.Flags().StringVar(&format, "format", "encrypted", "output `format`: encrypted or pem")
 	return cmd
 }
 
@@ -300,7 +302,7 @@ func (a *App) runKeyExport(keyFile, format string) error {
 			return err
 		}
 		if cfg.SigningKeyFile == "" {
-			return usageErr("no default signing key; pass --key-file")
+			return usageErr("no default signing key\nPass --key-file <path>.")
 		}
 		keyFile = cfg.SigningKeyFile
 	}
@@ -311,7 +313,7 @@ func (a *App) runKeyExport(keyFile, format string) error {
 	var exported string
 	if format == "encrypted" {
 		if !signing.IsEncrypted(data) {
-			return errors.New("that key file is not encrypted; export it with --format pem")
+			return errors.New("that key file is not encrypted\nExport it with --format pem.")
 		}
 		exported = string(data)
 	} else {
@@ -339,7 +341,7 @@ func (a *App) newPassphrase() (string, error) {
 		return p, nil
 	}
 	if a.Prompt == nil {
-		return "", usageErr("set %s or run in a terminal to enter the key passphrase", passphraseEnv)
+		return "", usageErr("no passphrase for the new key\nSet %s, or run this in a terminal to be asked for it.", passphraseEnv)
 	}
 	p, err := a.Prompt(fmt.Sprintf("Passphrase for the new key (at least %d characters): ", signing.MinPassphraseLen))
 	if err != nil {
@@ -366,7 +368,7 @@ func (a *App) passphraseSource() signing.PassphraseFunc {
 			return p, nil
 		}
 		if a.Prompt == nil {
-			return "", fmt.Errorf("%w: set %s", signing.ErrPassphraseRequired, passphraseEnv)
+			return "", fmt.Errorf("%w\nSet %s.", signing.ErrPassphraseRequired, passphraseEnv)
 		}
 		return a.Prompt("Signing key passphrase: ")
 	}

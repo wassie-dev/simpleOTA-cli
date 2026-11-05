@@ -41,6 +41,24 @@ type SigningKeyState struct {
 	Error  string `json:"error,omitempty"`
 }
 
+// statusValueColumn is where values start in the status listing.
+const statusValueColumn = 15
+
+// projectSourceText says how the current project was chosen.
+func projectSourceText(source string) string {
+	switch source {
+	case "":
+		return ""
+	case "project use":
+		return ", chosen with 'simpleota project use'"
+	case "the project token":
+		return ", the project token's project"
+	case "the only project":
+		return ", the only project you have"
+	}
+	return ", from " + source
+}
+
 // Status prints the CLI's own status.
 func (p Printer) Status(v StatusView) error {
 	if p.JSON {
@@ -51,7 +69,7 @@ func (p Printer) Status(v StatusView) error {
 	case v.UpdateError != "":
 		update = "could not check for updates: " + v.UpdateError
 	case v.UpdateAvailable:
-		update = p.yellow(v.LatestVersion+" is available") + "; run simpleota update"
+		update = p.yellow(v.LatestVersion+" is available") + "; run 'simpleota update'"
 	}
 	fmt.Fprintf(p.Out, "simpleota %s (%s)\n", v.Version, update)
 	fmt.Fprintf(p.Out, "  api          %s\n", v.APIURL)
@@ -67,24 +85,20 @@ func (p Printer) Status(v StatusView) error {
 		}
 		fmt.Fprintf(p.Out, "  logged in    %s, %s token%s from %s\n", p.green("yes"), v.Auth.TokenType, who, v.Auth.Source)
 	case AuthNotLoggedIn:
-		fmt.Fprintf(p.Out, "  logged in    %s; run simpleota login, or set SIMPLEOTA_TOKEN\n", p.red("no"))
+		fmt.Fprintf(p.Out, "  logged in    %s; run 'simpleota login', or set SIMPLEOTA_TOKEN\n", p.red("no"))
 	case AuthRejected:
-		fmt.Fprintf(p.Out, "  logged in    %s: the %s token from %s was rejected; run simpleota login\n", p.red("no"), v.Auth.TokenType, v.Auth.Source)
+		fmt.Fprintf(p.Out, "  logged in    %s; the %s token from %s was rejected, so run 'simpleota login'\n", p.red("no"), v.Auth.TokenType, v.Auth.Source)
 	case AuthUnreachable:
 		fmt.Fprintf(p.Out, "  logged in    %s token from %s, not checked: %s\n", v.Auth.TokenType, v.Auth.Source, v.Auth.Error)
 	}
 
 	switch {
 	case v.ProjectError != "":
-		fmt.Fprintf(p.Out, "  project      %s\n", p.red(v.ProjectError))
+		fmt.Fprintf(p.Out, "  project      %s\n", p.red(indentRest(v.ProjectError, statusValueColumn)))
 	case v.Project != nil:
-		from := ""
-		if v.ProjectSource != "" {
-			from = ", from " + v.ProjectSource
-		}
-		fmt.Fprintf(p.Out, "  project      %s (%s)%s\n", v.Project.Slug, v.Project.ID, from)
+		fmt.Fprintf(p.Out, "  project      %s (%s)%s\n", v.Project.Slug, v.Project.ID, projectSourceText(v.ProjectSource))
 	case v.Auth.State == AuthValid:
-		fmt.Fprintln(p.Out, "  project      none selected; choose one with simpleota project use <slug>")
+		fmt.Fprintln(p.Out, "  project      none selected; choose one with 'simpleota project use <slug>'")
 	default:
 		fmt.Fprintln(p.Out, "  project      none selected")
 	}
@@ -93,13 +107,13 @@ func (p Printer) Status(v StatusView) error {
 	case "file":
 		key := v.SigningKey.Path
 		if v.SigningKey.Error != "" {
-			key += " " + p.red("("+v.SigningKey.Error+")")
+			key += " " + p.red("("+indentRest(v.SigningKey.Error, statusValueColumn)+")")
 		}
 		fmt.Fprintf(p.Out, "  signing key  %s\n", key)
 	case "env":
 		fmt.Fprintln(p.Out, "  signing key  from SIMPLEOTA_SIGNING_KEY")
 	default:
-		fmt.Fprintln(p.Out, "  signing key  none; releases are unsigned (basic)")
+		fmt.Fprintln(p.Out, "  signing key  none; builds are uploaded unsigned (basic)")
 	}
 	fmt.Fprintf(p.Out, "  config       %s\n", v.ConfigDir)
 	return nil

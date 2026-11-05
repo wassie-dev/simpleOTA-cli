@@ -155,7 +155,7 @@ func TestLoginBrowserOffer(t *testing.T) {
 		h.openBrowser = opener(&opened, errors.New("no xdg-open"))
 		h.prompts = []string{"", fakeapi.PersonalToken}
 		r := h.run("login")
-		if r.code != 0 || !strings.Contains(r.stderr, "Could not open a browser (no xdg-open)") || !strings.Contains(r.stderr, "Open "+h.fake.URL+"/tokens/ yourself") {
+		if r.code != 0 || !strings.Contains(r.stderr, "Could not open a browser (no xdg-open)") || !strings.Contains(r.stderr, "paste it here:\n  "+h.fake.URL+"/tokens/") {
 			t.Fatalf("%+v", r)
 		}
 	})
