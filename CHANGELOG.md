@@ -6,6 +6,20 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-06
+
+### Added
+
+- `login` offers to open the API tokens page in your browser: press Enter at
+  the prompt. `--no-browser` removes the offer, and it is not made over SSH or
+  without a graphical session.
+
+### Fixed
+
+- An error about the number of arguments to a nested command pointed at the
+  wrong help page. It now shows the command's usage.
+- An invalid stored token was reported as "the OS keychain is invalid".
+
 ### Changed
 
 - `list` commands show 20 rows as text and say when there are more. `--limit <n>`
@@ -20,18 +34,6 @@ All notable changes to simpleota are documented here. The format follows
   sentence are in single quotes. Errors say what is wrong on the first line and
   what to do on the lines after it, so `error` in `--json` output can contain
   newlines, as can `next_step`.
-
-### Fixed
-
-- An error about the number of arguments to a nested command pointed at the
-  wrong help page. It now shows the command's usage.
-- An invalid stored token was reported as "the OS keychain is invalid".
-
-### Added
-
-- `login` offers to open the API tokens page in your browser: press Enter at
-  the prompt. `--no-browser` removes the offer, and it is not made over SSH or
-  without a graphical session.
 
 ## [0.1.2] - 2026-10-30
 
@@ -142,7 +144,8 @@ project. Commands that changed name or behaviour are listed under Changed.
 - `install.sh` and `install.ps1`: one-line install and update scripts,
   published with each release, that verify the download's checksum.
 
-[Unreleased]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/wassie-dev/simpleOTA-cli/releases/tag/v0.1.0
