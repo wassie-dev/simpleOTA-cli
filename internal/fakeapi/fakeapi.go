@@ -209,6 +209,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		detail(w, http.StatusNotFound, "Not Found")
 		return
 	}
+	if token == StaffToken && r.Method != http.MethodGet {
+		detail(w, http.StatusNotFound, "Not Found: No Project matches the given query.")
+		return
+	}
 	route := strings.Join(parts[2:], "/")
 	switch {
 	case route == "" && r.Method == http.MethodGet:

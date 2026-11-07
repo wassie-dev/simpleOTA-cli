@@ -83,7 +83,8 @@ type App struct {
 	Executable     func() (string, error)
 	UpdateSource   *update.Source
 
-	flags globalFlags
+	flags  globalFlags
+	opened *openedProject
 }
 
 type globalFlags struct {
@@ -153,13 +154,14 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	if err == nil {
 		return ExitOK
 	}
+	err = a.explainReadOnly(ctx, err)
 	code := exitCode(err)
 	var ee *exitError
 	if errors.As(err, &ee) && ee.quiet {
 		return code
 	}
 	msg := message(err)
-	if a.flags.json {
+	if a.flags.json || jsonRequested(args) {
 		_ = a.printer().WriteJSON(output.ErrorView{Error: msg, ExitCode: code})
 	} else {
 		fmt.Fprintln(a.Err, "Error: "+msg)
@@ -248,4 +250,18 @@ func (a *App) rootCommand() *cobra.Command {
 	}
 	setupHelp(root)
 	return root
+}
+
+// jsonRequested reports whether args ask for --json, for errors raised
+// before the flags are parsed.
+func jsonRequested(args []string) bool {
+	for _, arg := range args {
+		switch arg {
+		case "--":
+			return false
+		case "--json", "--json=true":
+			return true
+		}
+	}
+	return false
 }

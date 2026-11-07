@@ -136,7 +136,7 @@ func TestUnknownDeploymentIsExplained(t *testing.T) {
 	h.login(fakeapi.ProjectToken)
 	for _, args := range [][]string{{"deployment", "show", depA}, {"deployment", "pause", depA}, {"deployment", "wait", depA}} {
 		r := h.run(args...)
-		if r.code != ExitError || !strings.Contains(r.stderr, "no deployment aaaaaaaa") {
+		if r.code != ExitUsage || !strings.Contains(r.stderr, "no deployment aaaaaaaa") {
 			t.Errorf("%v: %+v", args, r)
 		}
 	}
@@ -160,5 +160,64 @@ func TestGroupsRejectUnknownSubcommands(t *testing.T) {
 	}
 	if r := h.run("deployment"); r.code != 0 || !strings.Contains(r.stdout, "Commands:") {
 		t.Errorf("bare group should print help: %+v", r)
+	}
+}
+
+func TestFailuresNameTheReportedDeviceID(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.ProjectToken)
+	h.fake.AddDeployment(depA, api.StateActive, 5, 100)
+	uuid := "dddddddd-dddd-4ddd-8ddd-000000000001"
+	h.fake.Devices = []api.Device{{ID: uuid, DeviceID: "lamp-kitchen"}}
+	h.fake.SetStates(depA, api.DeviceState{DeviceID: uuid, FinalStatus: api.DeviceFailed, AssignedToRollout: true, StatusReason: "boom"})
+	r := h.run("deployment", "wait", depA)
+	if r.code != ExitDeployment || !strings.Contains(r.stdout, "device lamp-kitchen failed: boom") || !strings.Contains(r.stderr, "device lamp-kitchen failed") {
+		t.Fatalf("%+v", r)
+	}
+	r = h.run("deployment", "show", depA, "--json")
+	if !strings.Contains(r.stdout, `"device_id": "`+uuid+`"`) || !strings.Contains(r.stdout, `"device": "lamp-kitchen"`) {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestStaffWriteToAnotherOwnersProjectIsExplained(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.StaffToken)
+	h.fake.AddDeployment(depA, api.StateActive, 5, 100)
+	for _, args := range [][]string{{"channel", "create", "beta"}, {"deployment", "pause", depA}} {
+		r := h.run(append(args, "--project", fakeapi.ProjectID)...)
+		if r.code != ExitAuth || !strings.Contains(r.stderr, "can read the project but not change it") {
+			t.Errorf("%v: %+v", args, r)
+		}
+	}
+	if r := h.run("channel", "list", "--project", fakeapi.ProjectID); r.code != 0 {
+		t.Fatalf("staff read: %+v", r)
+	}
+}
+
+func TestParseErrorsFollowJSON(t *testing.T) {
+	h := newHarness(t)
+	for _, args := range [][]string{{"build", "list", "--bogus", "--json"}, {"--json", "nonsense"}} {
+		r := h.run(args...)
+		var v struct {
+			Error    string `json:"error"`
+			ExitCode int    `json:"exit_code"`
+		}
+		if r.code != ExitUsage || r.stderr != "" || json.Unmarshal([]byte(r.stdout), &v) != nil || v.ExitCode != ExitUsage || v.Error == "" {
+			t.Errorf("%v: %+v", args, r)
+		}
+	}
+}
+
+func TestProjectEnvPrefixOnlyOnProjectErrors(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.PersonalToken)
+	h.env["SIMPLEOTA_PROJECT"] = "nope"
+	if r := h.run("build", "list"); r.code != ExitUsage || !strings.Contains(r.stderr, "SIMPLEOTA_PROJECT: no project with slug") {
+		t.Fatalf("unknown project: %+v", r)
+	}
+	h.fake.FailNext["/api/v1/projects/"] = []int{500}
+	if r := h.run("build", "list"); r.code != ExitError || strings.Contains(r.stderr, "SIMPLEOTA_PROJECT") {
+		t.Fatalf("server error: %+v", r)
 	}
 }

@@ -16,6 +16,7 @@ type API interface {
 	ListDeployments(ctx context.Context, projectID string) ([]api.Deployment, error)
 	GetDeployment(ctx context.Context, projectID, deploymentID string) (api.Deployment, error)
 	ListDeploymentStates(ctx context.Context, projectID, deploymentID string) ([]api.DeviceState, error)
+	ListDevices(ctx context.Context, projectID string, f api.DeviceFilter) ([]api.Device, error)
 }
 
 // ActionStart starts a draft deployment. deployment create sends it; it is
@@ -85,9 +86,12 @@ type Counts struct {
 
 // Failure is one device that failed or rolled back.
 type Failure struct {
+	// DeviceID is the device's SimpleOTA UUID.
 	DeviceID string `json:"device_id"`
-	Status   string `json:"status"`
-	Reason   string `json:"reason"`
+	// Device is the ID the device reports, when it could be looked up.
+	Device string `json:"device,omitempty"`
+	Status string `json:"status"`
+	Reason string `json:"reason"`
 }
 
 // Summary is a deployment with its device progress.
@@ -168,7 +172,36 @@ func Status(ctx context.Context, a API, projectID, deploymentID string) (Summary
 	if err != nil {
 		return Summary{}, err
 	}
-	return Summarize(d, states), nil
+	s := Summarize(d, states)
+	nameFailures(ctx, a, projectID, s.Failures)
+	return s, nil
+}
+
+// nameFailures fills in the ID each failed device reports. A failed lookup
+// leaves the UUIDs alone.
+func nameFailures(ctx context.Context, a API, projectID string, failures []Failure) {
+	if len(failures) == 0 {
+		return
+	}
+	devices, err := a.ListDevices(ctx, projectID, api.DeviceFilter{})
+	if err != nil {
+		return
+	}
+	reported := make(map[string]string, len(devices))
+	for _, d := range devices {
+		reported[d.ID] = d.DeviceID
+	}
+	for i := range failures {
+		failures[i].Device = reported[failures[i].DeviceID]
+	}
+}
+
+// Name is how output names the device: its reported ID, or its UUID.
+func (f Failure) Name() string {
+	if f.Device != "" {
+		return f.Device
+	}
+	return f.DeviceID
 }
 
 // Waiter polls a deployment until Evaluate reaches a verdict or the timeout
