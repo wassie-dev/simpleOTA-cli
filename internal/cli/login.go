@@ -63,7 +63,7 @@ func (a *App) runLogin(ctx context.Context, noBrowser bool) error {
 	if err != nil {
 		return err
 	}
-	apiURL, cfg := st.apiURL, st.cfg
+	apiURL := st.apiURL
 	token, err := a.readToken(apiURL, noBrowser)
 	if err != nil {
 		return err
@@ -83,18 +83,8 @@ func (a *App) runLogin(ctx context.Context, noBrowser bool) error {
 		return err
 	}
 
-	store := a.store(st.configDir)
-	where := store.Name()
-	if fb, ok := store.(credentials.Fallback); ok {
-		where, err = fb.SetWhere(apiURL, token)
-	} else {
-		err = store.Set(apiURL, token)
-	}
+	where, err := saveLogin(st.configDir, a.store(st.configDir), apiURL, token)
 	if err != nil {
-		return fmt.Errorf("storing the token: %w", err)
-	}
-	cfg.APIURL, cfg.ProjectID, cfg.ProjectSlug = apiURL, "", ""
-	if err := config.Save(st.configDir, cfg); err != nil {
 		return err
 	}
 
@@ -205,23 +195,12 @@ SIMPLEOTA_TOKEN, if set, stays in effect.`,
 			if err != nil {
 				return err
 			}
-			dir, cfg, apiURL := st.configDir, st.cfg, st.apiURL
-			store := a.store(dir)
-			_, err = store.Get(apiURL)
-			hadToken := err == nil
-			if err := store.Delete(apiURL); err != nil {
-				return fmt.Errorf("removing the stored token: %w", err)
+			loggedOut, err := removeLogin(st.configDir, a.store(st.configDir), st.apiURL)
+			if err != nil {
+				return err
 			}
-			hadProject := cfg.APIURL == apiURL
-			if hadProject {
-				cfg.APIURL, cfg.ProjectID, cfg.ProjectSlug = "", "", ""
-				if err := config.Save(dir, cfg); err != nil {
-					return err
-				}
-			}
-			loggedOut := hadToken || hadProject
 			p := a.printer()
-			if err := p.Logout(output.LogoutView{APIURL: apiURL, LoggedOut: loggedOut}); err != nil {
+			if err := p.Logout(output.LogoutView{APIURL: st.apiURL, LoggedOut: loggedOut}); err != nil {
 				return err
 			}
 			if a.Getenv(tokenEnv) != "" {
@@ -230,4 +209,52 @@ SIMPLEOTA_TOKEN, if set, stays in effect.`,
 			return nil
 		},
 	}
+}
+
+// saveLogin stores the token and makes apiURL the config's server in one
+// step under the config lock, so that a login, logout or project use running
+// at the same time cannot interleave with it. It returns where the token is
+// stored.
+func saveLogin(dir string, store credentials.Store, apiURL, token string) (string, error) {
+	where := store.Name()
+	err := config.Locked(dir, func() error {
+		var err error
+		if fb, ok := store.(credentials.Fallback); ok {
+			where, err = fb.SetWhere(apiURL, token)
+		} else {
+			err = store.Set(apiURL, token)
+		}
+		if err != nil {
+			return fmt.Errorf("storing the token: %w", err)
+		}
+		c, err := config.Load(dir)
+		if err != nil {
+			return err
+		}
+		c.APIURL, c.ProjectID, c.ProjectSlug = apiURL, "", ""
+		return config.Save(dir, c)
+	})
+	return where, err
+}
+
+// removeLogin removes the token for apiURL and, when it is the config's
+// server, the chosen project, in one step under the config lock. It reports
+// whether there was anything to remove.
+func removeLogin(dir string, store credentials.Store, apiURL string) (bool, error) {
+	removed := false
+	err := config.Locked(dir, func() error {
+		_, getErr := store.Get(apiURL)
+		removed = getErr == nil
+		if err := store.Delete(apiURL); err != nil {
+			return fmt.Errorf("removing the stored token: %w", err)
+		}
+		c, err := config.Load(dir)
+		if err != nil || c.APIURL != apiURL {
+			return err
+		}
+		removed = true
+		c.APIURL, c.ProjectID, c.ProjectSlug = "", "", ""
+		return config.Save(dir, c)
+	})
+	return removed, err
 }

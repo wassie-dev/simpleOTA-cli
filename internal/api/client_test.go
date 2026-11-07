@@ -252,3 +252,63 @@ func TestIsTransient(t *testing.T) {
 		}
 	}
 }
+
+func TestLargeUploadArrivesWhole(t *testing.T) {
+	binary := make([]byte, 30<<20)
+	binary[0], binary[len(binary)-1] = 0xe9, 0x7f
+	var got int64
+	var last byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f, _, err := r.FormFile("binary")
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		buf := make([]byte, 64<<10)
+		for {
+			n, err := f.Read(buf)
+			if n > 0 {
+				got += int64(n)
+				last = buf[n-1]
+			}
+			if err != nil {
+				break
+			}
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"id":"a","build_number":1}`)
+	}))
+	defer srv.Close()
+	_, err := newClient(srv.URL, fakeapi.ProjectToken).UploadArtifact(context.Background(), fakeapi.ProjectID, api.UploadRequest{ManifestJSON: []byte(`{}`), FileName: "app.bin", Binary: binary})
+	if err != nil || got != int64(len(binary)) || last != 0x7f {
+		t.Fatalf("err=%v, server read %d of %d bytes", err, got, len(binary))
+	}
+}
+
+func TestInterruptedUploadStopsPromptlyAndIsNotRetried(t *testing.T) {
+	var requests atomic.Int32
+	finished := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		buf := make([]byte, 1024)
+		for {
+			if _, err := r.Body.Read(buf); err != nil {
+				return
+			}
+			select {
+			case <-finished:
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}))
+	defer srv.Close()
+	defer close(finished)
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(200*time.Millisecond, cancel)
+	start := time.Now()
+	_, err := newClient(srv.URL, fakeapi.ProjectToken).UploadArtifact(ctx, fakeapi.ProjectID, api.UploadRequest{ManifestJSON: []byte(`{}`), FileName: "app.bin", Binary: make([]byte, 8<<20)})
+	if !errors.Is(err, context.Canceled) || time.Since(start) > 5*time.Second || requests.Load() != 1 {
+		t.Fatalf("err=%v after %s, %d requests", err, time.Since(start), requests.Load())
+	}
+}
