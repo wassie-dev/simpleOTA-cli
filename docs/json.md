@@ -125,7 +125,8 @@ token can see, or -1 when the server would not list them.
 ```
 
 `pinned_key_ids` names the keys `firmware_snippet` pins: the new key, then
-the project's newest other active key.
+your default signing key, or the project's newest other active key when the
+default is not one of them.
 
 ## key export
 

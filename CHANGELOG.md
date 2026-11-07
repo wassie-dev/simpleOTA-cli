@@ -6,6 +6,15 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `key generate` no longer deletes the new private key when the server's reply
+  to the registration is lost or is a server error. It checks the project's
+  keys and finishes if the key was registered. Otherwise it keeps the
+  encrypted key, and running the same command again finishes the job.
+- The `key generate` snippet pins your default signing key next to the new
+  key, instead of the project's newest other key.
+
 ## [0.1.3] - 2026-11-06
 
 ### Added

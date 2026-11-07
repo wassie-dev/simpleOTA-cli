@@ -76,6 +76,13 @@ func ParsePublicKeyPEM(s string) (ed25519.PublicKey, error) {
 	return pub, nil
 }
 
+// SamePublicKey reports whether two PEMs hold the same Ed25519 public key.
+func SamePublicKey(a, b string) bool {
+	ka, errA := ParsePublicKeyPEM(a)
+	kb, errB := ParsePublicKeyPEM(b)
+	return errA == nil && errB == nil && ka.Equal(kb)
+}
+
 // PrivateKeyPEM returns the unencrypted PKCS#8 PEM, the format OpenSSL and
 // the SimpleOTA GitHub Action read.
 func PrivateKeyPEM(priv ed25519.PrivateKey) ([]byte, error) {

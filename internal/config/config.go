@@ -25,6 +25,9 @@ type Config struct {
 	ProjectID      string `json:"project_id,omitempty"`
 	ProjectSlug    string `json:"project_slug,omitempty"`
 	SigningKeyFile string `json:"signing_key_file,omitempty"`
+	// SigningKeyPublicPEM is the public key of SigningKeyFile, so the key
+	// can be recognised among the project's keys without its passphrase.
+	SigningKeyPublicPEM string `json:"signing_key_public_pem,omitempty"`
 }
 
 // Dir returns the directory holding config, the token fallback file and
