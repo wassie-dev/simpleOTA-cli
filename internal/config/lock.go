@@ -1,48 +1,51 @@
 package config
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
 )
 
-const (
-	lockWait  = 10 * time.Second
-	lockStale = 30 * time.Second
-)
+const lockWait = 10 * time.Second
 
-// WithLock runs fn while holding a lock on path, shared by every simpleota
-// process: a file next to path, created exclusively. A lock older than 30
-// seconds is left over from a process that stopped and is removed.
+// WithLock runs fn while holding an exclusive lock on path, shared by every
+// simpleota process: an operating system lock on the file path+".lock". The
+// system drops the lock if the process ends, so a crash leaves none behind.
+// fn must not take the same lock again.
 func WithLock(path string, fn func() error) error {
-	lock := path + ".lock"
-	if err := os.MkdirAll(filepath.Dir(lock), 0o700); err != nil {
+	lockPath := path + ".lock"
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
 		return err
 	}
+	f, err := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, 0o600) // #nosec G304 -- next to the CLI's own file
+	if err != nil {
+		return fmt.Errorf("locking %s: %w", path, err)
+	}
+	defer f.Close()
 	deadline := time.Now().Add(lockWait)
 	for {
-		f, err := os.OpenFile(lock, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- next to the CLI's own file
-		if err == nil {
-			_ = f.Close()
-			break
-		}
-		if !errors.Is(err, fs.ErrExist) && !errors.Is(err, fs.ErrPermission) {
+		locked, err := tryLock(f)
+		if err != nil {
 			return fmt.Errorf("locking %s: %w", path, err)
 		}
-		if fi, statErr := os.Stat(lock); statErr == nil && time.Since(fi.ModTime()) > lockStale {
-			_ = os.Remove(lock)
-			continue
+		if locked {
+			break
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("another simpleota command is using %s\nIf none is running, delete %s.", path, lock)
+			return fmt.Errorf("another simpleota command has been changing %s for over %s\nTry again once it has finished.", path, lockWait)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	defer func() { _ = os.Remove(lock) }()
+	defer unlock(f)
 	return fn()
+}
+
+// Locked runs fn while holding the config's lock, for a change that also
+// touches something else, such as the stored token. fn reads and saves the
+// config with Load and Save.
+func Locked(dir string, fn func() error) error {
+	return WithLock(filepath.Join(dir, fileName), fn)
 }
 
 // Update changes the saved config under the lock: it reads the file afresh,
@@ -51,7 +54,7 @@ func WithLock(path string, fn func() error) error {
 // the config as saved.
 func Update(dir string, change func(*Config) bool) (Config, error) {
 	var c Config
-	err := WithLock(filepath.Join(dir, fileName), func() error {
+	err := Locked(dir, func() error {
 		var err error
 		if c, err = Load(dir); err != nil {
 			return err

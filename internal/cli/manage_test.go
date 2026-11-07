@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
+	"github.com/wassie-dev/simpleOTA-cli/internal/config"
 	"github.com/wassie-dev/simpleOTA-cli/internal/fakeapi"
 )
 
@@ -248,5 +249,27 @@ func TestAudit(t *testing.T) {
 	}
 	if r := h.run("audit", "--limit", "0"); r.code != ExitUsage {
 		t.Fatalf("limit: %+v", r)
+	}
+}
+
+func TestKeysGenerateKeepsAProjectUseMadeWhileItWaits(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.PersonalToken)
+	h.prompts = []string{"correct horse battery", "correct horse battery"}
+	h.onPrompt = func(label string) {
+		h.onPrompt = nil
+		saved := h.prompts
+		h.prompts = nil
+		if r := h.run("project", "use", "fleet"); r.code != 0 {
+			t.Errorf("project use: %+v", r)
+		}
+		h.prompts = saved
+	}
+	if r := h.run("keys", "generate", "--key-id", "prod"); r.code != 0 {
+		t.Fatalf("%+v", r)
+	}
+	cfg, err := config.Load(h.configDir)
+	if err != nil || cfg.ProjectID != fakeapi.ProjectID || cfg.SigningKeyFile == "" {
+		t.Fatalf("a project use made during the prompt was undone: %+v %v", cfg, err)
 	}
 }
