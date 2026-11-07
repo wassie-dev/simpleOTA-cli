@@ -93,6 +93,7 @@ deploying it. To deploy it later, use 'simpleota deployment create'.
 				return buildErr(err)
 			}
 			p := a.printer()
+			noticeRecovered(p, res)
 			noticeUnsigned(p, res)
 			return p.Upload(output.NewUploadView(res))
 		},

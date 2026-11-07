@@ -224,3 +224,40 @@ func TestReleaseChipComesFromImage(t *testing.T) {
 		t.Fatalf("also_active = %+v, want it to name %s", second.AlsoActive, first.DeploymentID)
 	}
 }
+
+func TestReleaseRecoversFromLostReply(t *testing.T) {
+	c := ciCLI(t)
+	bin := firmware(t)
+	args := []string{"release", bin, "--version-label", "e2e-" + uid(), "--json"}
+	c.extra["SIMPLEOTA_API_URL"] = lossyProxy(t, http.MethodPost, "/release/")
+	r := c.run("", args...)
+	if r.code != 0 || !strings.Contains(r.stderr, "reply to the upload was lost") {
+		t.Fatalf("lost reply: %+v", r)
+	}
+	out := decode[struct {
+		releaseOut
+		Recovered bool `json:"recovered"`
+	}](t, r.stdout)
+	t.Cleanup(func() { cancelDeployment(t, out.DeploymentID) })
+	delete(c.extra, "SIMPLEOTA_API_URL")
+
+	deps := decode[[]struct {
+		ID          string `json:"id"`
+		BuildNumber int    `json:"build_number"`
+		State       string `json:"state"`
+	}](t, c.mustRun("deployment", "list", "--json").stdout)
+	var ours []string
+	for _, d := range deps {
+		if d.BuildNumber == out.BuildNumber {
+			ours = append(ours, d.ID)
+		}
+	}
+	if !out.Recovered || len(ours) != 1 || ours[0] != out.DeploymentID {
+		t.Fatalf("recovered %+v, deployments of build %d: %v", out, out.BuildNumber, ours)
+	}
+
+	again := c.run("", args...)
+	if again.code != 1 || !strings.Contains(again.stdout, "deployment "+out.DeploymentID+" is active") {
+		t.Fatalf("re-run: %+v", again)
+	}
+}

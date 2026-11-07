@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"fmt"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -134,6 +135,18 @@ func noticeUnsigned(p output.Printer, res release.Result) {
 	}
 }
 
+// noticeRecovered explains a result found after the upload's reply was lost.
+func noticeRecovered(p output.Printer, res release.Result) {
+	if !res.Recovered {
+		return
+	}
+	what := fmt.Sprintf("build %d", res.BuildNumber)
+	if res.DeploymentID != "" {
+		what += fmt.Sprintf(" and its deployment %s to channel %s", res.DeploymentID, res.Channel)
+	}
+	p.Notice("The reply to the upload was lost. The project has %s; they are taken to be\nthis upload's, because the project had no build of this binary before it.", what)
+}
+
 // alsoActive lists the other active deployments reaching the same devices,
 // printing a notice instead of failing when the check itself fails.
 func alsoActive(ctx context.Context, p output.Printer, s *session, projectID, deploymentID, chip string) []output.DeploymentView {
@@ -181,6 +194,7 @@ deployment keeps reaching the devices this one does not.
 				return buildErr(err)
 			}
 			p := a.printer()
+			noticeRecovered(p, res)
 			noticeUnsigned(p, res)
 			view := output.NewReleaseView(res)
 			view.AlsoActive = alsoActive(ctx, p, job.session, job.projectID, res.DeploymentID, res.Chip)
