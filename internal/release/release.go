@@ -81,6 +81,8 @@ type API interface {
 	GetProject(ctx context.Context, projectID string) (api.Project, error)
 	ListSigningKeys(ctx context.Context, projectID string) ([]api.SigningKey, error)
 	ListArtifacts(ctx context.Context, projectID string) ([]api.Artifact, error)
+	ListDeployments(ctx context.Context, projectID string) ([]api.Deployment, error)
+	ListChannels(ctx context.Context, projectID string) ([]api.Channel, error)
 	ListDevices(ctx context.Context, projectID string, f api.DeviceFilter) ([]api.Device, error)
 	UploadArtifact(ctx context.Context, projectID string, req api.UploadRequest) (api.Artifact, error)
 	Release(ctx context.Context, projectID string, req api.ReleaseRequest) (api.ReleaseResult, error)
@@ -101,7 +103,7 @@ func (s Service) Upload(ctx context.Context, o Options) (Result, error) {
 	}
 	art, err := s.API.UploadArtifact(ctx, s.ProjectID, api.UploadRequest{ManifestJSON: p.manifest, FileName: p.fileName, Binary: p.binary})
 	if err != nil {
-		return p.res, uploadErr(err, o.AllowDuplicate)
+		return p.res, s.uploadErr(ctx, err, o.AllowDuplicate, p.req)
 	}
 	p.res.BuildNumber = art.BuildNumber
 	p.res.ArtifactID = art.ID
@@ -131,7 +133,8 @@ func (s Service) Release(ctx context.Context, o Options, t Target) (Result, erro
 		ChannelName:       t.Channel,
 	})
 	if err != nil {
-		return p.res, uploadErr(err, o.AllowDuplicate)
+		p.req.target = &t
+		return p.res, s.uploadErr(ctx, err, o.AllowDuplicate, p.req)
 	}
 	p.res.BuildNumber = out.BuildNumber
 	p.res.ArtifactID = out.ArtifactID
@@ -147,6 +150,7 @@ type prepared struct {
 	fileName string
 	manifest []byte
 	res      Result
+	req      request
 }
 
 // prepare reads the binary, settles its chip, refuses a duplicate, and
@@ -213,6 +217,7 @@ func (s Service) prepare(ctx context.Context, o Options) (prepared, error) {
 		return p, err
 	}
 	p.res.SecurityMode = m.SecurityMode
+	p.req = request{sha: m.SHA256, label: m.VersionLabel, framework: m.Framework, chip: m.ChipFamily, security: m.SecurityMode}
 	p.manifest, err = json.Marshal(m)
 	return p, err
 }
@@ -253,16 +258,37 @@ func (s Service) refuseDuplicate(ctx context.Context, sha string) error {
 	}
 	for _, a := range artifacts {
 		if strings.EqualFold(a.ChecksumSHA256, sha) {
-			return fmt.Errorf("%w: build %d (version %s) has the same SHA-256\nTo upload it again as a new build, pass --allow-duplicate.",
-				ErrDuplicate, a.BuildNumber, a.VersionLabel)
+			return fmt.Errorf("%w: build %d (version %s) has the same SHA-256%s\nTo upload it again as a new build, pass --allow-duplicate.",
+				ErrDuplicate, a.BuildNumber, a.VersionLabel, s.deploymentsOf(ctx, a))
 		}
 	}
 	return nil
 }
 
+// deploymentsOf describes the deployments of a build that are still
+// running, for the duplicate refusal, or returns "" when there are none or
+// they cannot be listed.
+func (s Service) deploymentsOf(ctx context.Context, a api.Artifact) string {
+	deps, err := s.API.ListDeployments(ctx, s.ProjectID)
+	if err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, d := range deps {
+		if d.ArtifactID == a.ID && (d.State == api.StateActive || d.State == api.StatePaused) {
+			fmt.Fprintf(&b, "\n  deployment %s is %s at %d%%", d.ID, d.State, d.RolloutPercentage)
+		}
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return fmt.Sprintf("\nIt is already deployed:%s\nWatch a deployment with:\n  simpleota deployment wait <deployment-id>", b.String())
+}
+
 // uploadErr explains a failed upload. When the connection failed or the
-// server answered 5xx, the build may exist anyway.
-func uploadErr(err error, allowDuplicate bool) error {
+// server answered 5xx, the build may exist anyway, so the project is read to
+// show what it now has.
+func (s Service) uploadErr(ctx context.Context, err error, allowDuplicate bool, req request) error {
 	var ae *api.Error
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -273,9 +299,8 @@ func uploadErr(err error, allowDuplicate bool) error {
 		return err
 	case allowDuplicate:
 		return fmt.Errorf("%w\nThe upload may still have created a build. Check before uploading again:\n  simpleota build list", err)
-	default:
-		return fmt.Errorf("%w\nThe upload may still have created a build. Run the same command again to\nfind out: it stops if the project already has this binary.", err)
 	}
+	return s.uncertainErr(ctx, err, req)
 }
 
 // registeredKeyID finds the active project key matching pub, so a release

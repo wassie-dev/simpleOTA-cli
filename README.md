@@ -127,8 +127,13 @@ The manifest carries the binary's SHA-256, so if the bytes change on the way,
 the server rejects the upload and nothing is created.
 
 If the connection drops or a gateway answers 5xx mid-upload, the build may
-exist anyway. Run the same `release` again: it checks the project's builds
-first and stops with the existing build number if the binary is already
+exist anyway. `release` then reads the project and lists each build of the
+binary with its deployments, and how each differs from what you asked for:
+version, security mode, chip, state, percentage and channel. It exits 1 and
+sends nothing more, because another upload of the same binary, or a release
+the server did not finish, looks the same. Run the same `release` again: it
+checks the project's builds first and stops with the existing build number
+and its running deployments if the binary is already
 there, so it cannot create a second build.
 
 ## Commands

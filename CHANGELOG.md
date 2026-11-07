@@ -27,6 +27,13 @@ All notable changes to simpleota are documented here. The format follows
   dashes, as the server stores it in one form.
 - `release` and `build upload` check the binary before loading the signing
   key, so a wrong file is reported as such instead of as a missing passphrase.
+- When a `release` or `build upload` fails without showing whether the server
+  created anything, the command reads the project and lists each build of the
+  binary, and for `release` its deployments, with how they differ from what
+  was asked for. It still exits 1, claims none of them, and sends nothing
+  again.
+- When `release` stops because the project already has the binary, it lists
+  that build's running deployments.
 
 ## [0.1.3] - 2026-11-06
 
