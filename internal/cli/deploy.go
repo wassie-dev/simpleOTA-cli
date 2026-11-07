@@ -105,8 +105,8 @@ Exit codes:
 
 A device counts once it has checked in and been offered the build, so the
 wait cannot finish until devices check in. Network and gateway errors are
-retried until the timeout. Progress goes to stderr, and the final state to
-stdout.`,
+retried until the timeout, which also cuts short a request in flight.
+Progress goes to stderr, and the final state to stdout.`,
 		Example: `  simpleota deployment wait
   simpleota deployment wait 5f0c2b1e-... --timeout 30m
 
@@ -164,8 +164,13 @@ func (a *App) runDeploymentWait(ctx context.Context, ref string, timeout, interv
 	if interval < time.Second {
 		return usageErr("--interval must be at least 1s")
 	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	s, projectID, id, err := a.deploymentTarget(ctx, ref)
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s before the deployment could be found: %w", timeout, err)}
+		}
 		return err
 	}
 	p := a.printer()
@@ -182,6 +187,9 @@ func (a *App) runDeploymentWait(ctx context.Context, ref string, timeout, interv
 		w.OnProgress = p.Progress
 	}
 	sum, outcome, err := w.Wait(ctx, id)
+	if errors.Is(err, deploy.ErrNoStatus) {
+		return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s: %w", timeout, err)}
+	}
 	if err != nil {
 		return deploymentErr(err, id)
 	}

@@ -362,3 +362,17 @@ func TestParseErrorsStayTextWithoutJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestWaitTimesOutWhenNoPollSucceeds(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.ProjectToken)
+	h.fake.AddDeployment(depA, api.StateActive, 5, 100)
+	path := "/api/v1/projects/" + fakeapi.ProjectID + "/deployments/" + depA + "/states/"
+	for range 100 {
+		h.fake.FailNext[path] = append(h.fake.FailNext[path], 503)
+	}
+	r := h.run("deployment", "wait", depA, "--timeout", "30s", "--json")
+	if r.code != ExitTimeout || !strings.Contains(r.stdout, "could not be read before the timeout") || !strings.Contains(r.stdout, "503") {
+		t.Fatalf("%+v", r)
+	}
+}

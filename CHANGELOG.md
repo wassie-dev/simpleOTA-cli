@@ -57,6 +57,9 @@ All notable changes to simpleota are documented here. The format follows
 
 - An unknown deployment ID exits with code 2, like an unknown build or
   device, instead of 1.
+- `deployment wait --timeout` now bounds the whole command, including a
+  request or retry in flight, and exits 5 when it passes. Against a server that
+  did not answer, it ran about 90 seconds past the timeout and exited 1.
 
 ## [0.1.3] - 2026-11-06
 
