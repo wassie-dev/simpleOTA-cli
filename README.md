@@ -250,6 +250,10 @@ into `.devserver/` and runs it on `http://127.0.0.1:8765` with SQLite and
 local storage. It needs Python 3.12+. Plain `http` is accepted only for
 localhost.
 
+In CI the e2e job needs the `SIMPLEOTA_SERVER_READ_TOKEN` secret to clone the
+server, and fails without it rather than passing untested. A release tag runs
+the whole CI workflow, e2e included, before anything is published.
+
 ## License
 
 MIT. Report security issues privately as described in [SECURITY.md](SECURITY.md).

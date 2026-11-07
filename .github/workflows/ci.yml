@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
+    secrets:
+      SIMPLEOTA_SERVER_READ_TOKEN:
+        required: true
 
 permissions:
   contents: read
@@ -65,23 +69,22 @@ jobs:
       # Read access to the private wassie-dev/simpleOTA repository.
       SERVER_TOKEN: ${{ secrets.SIMPLEOTA_SERVER_READ_TOKEN }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Skip without server access
+      - name: Require server access
         if: env.SERVER_TOKEN == ''
-        run: echo "::notice::SIMPLEOTA_SERVER_READ_TOKEN is not set, so the e2e suite was skipped."
+        run: |
+          echo "::error::SIMPLEOTA_SERVER_READ_TOKEN is not set, so the e2e suite cannot run."
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        if: env.SERVER_TOKEN != ''
         with:
           go-version-file: go.mod
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        if: env.SERVER_TOKEN != ''
         with:
           python-version: "3.12"
       - name: End-to-end tests against a local dev server
-        if: env.SERVER_TOKEN != ''
         run: |
           git config --global url."https://x-access-token:${SERVER_TOKEN}@github.com/".insteadOf "https://github.com/"
           make e2e
       - name: Dev server log
-        if: failure() && env.SERVER_TOKEN != ''
+        if: failure()
         run: cat .devserver/server.log
