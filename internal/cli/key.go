@@ -2,10 +2,13 @@ package cli
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -86,8 +89,14 @@ current project. The private key is saved encrypted with a passphrase, with
 builds.
 
 The output includes the signing_keys snippet for the 1.0 Arduino and ESP-IDF
-clients. It pins two keys: the new one and the project's newest other active
-key.
+clients. It pins two keys: the new one and your default signing key, or the
+project's newest other active key when the default is not one of them. A
+default key set by an older version at a path of your choosing is read once,
+with its passphrase, to recognise it.
+
+If registering the public key fails without a clear refusal, the encrypted key
+is kept. Run the same command again to finish: it reads the existing key file
+and registers its public key only if the project does not have it yet.
 
 Needs a personal token, so a leaked CI token cannot add signing keys. You are
 asked for the passphrase unless SIMPLEOTA_SIGNING_KEY_PASSPHRASE is set.`,
@@ -121,32 +130,51 @@ func (a *App) runKeyGenerate(ctx context.Context, keyID, out string) error {
 	if err != nil {
 		return err
 	}
-	for _, k := range existing {
-		if k.KeyID == keyID {
+	if out, err = keyPath(s.configDir, keyID, out); err != nil {
+		return err
+	}
+	p := a.printer()
+	registered := findKey(existing, keyID)
+	var publicPEM string
+	created := false
+	if _, err := os.Lstat(out); err == nil {
+		if publicPEM, err = a.resumeKey(existing, keyID, out); err != nil {
+			return err
+		}
+		p.Notice("Using the existing key file %s.", out)
+	} else {
+		if registered != nil {
 			return usageErr("the project already has a signing key named %q\nChoose another --key-id.", keyID)
 		}
+		passphrase, err := a.newPassphrase()
+		if err != nil {
+			return err
+		}
+		if publicPEM, err = signing.NewKeyFile(out, passphrase); err != nil {
+			return err
+		}
+		created = true
 	}
-	if out, err = newKeyPath(s.configDir, keyID, out); err != nil {
-		return err
+	if registered == nil {
+		err := registerKey(ctx, s.api, p, projectID, keyID, publicPEM)
+		if errors.Is(err, errKeyRefused) && created {
+			_ = os.Remove(out)
+			return fmt.Errorf("%w, so the new key was discarded", err)
+		}
+		if err != nil {
+			return fmt.Errorf("%w\nThe encrypted key is kept at %s.\nRun the same command again to finish. It registers the key only if the\nproject does not have it yet.", err, out)
+		}
 	}
-	passphrase, err := a.newPassphrase()
-	if err != nil {
-		return err
-	}
-	publicPEM, err := signing.NewKeyFile(out, passphrase)
-	if err != nil {
-		return err
-	}
-	if _, err := s.api.RegisterSigningKey(ctx, projectID, keyID, publicPEM); err != nil {
-		_ = os.Remove(out)
-		return fmt.Errorf("registering the public key failed, so the new key was discarded: %w", err)
-	}
-	isDefault, err := s.makeDefaultKey(out)
+	isDefault, err := s.makeDefaultKey(out, publicPEM)
 	if err != nil {
 		return fmt.Errorf("key %q is registered and saved to %s\nMaking it the default failed: %w\nPass --key-file to sign with it.", keyID, out, err)
 	}
+	isDefault = isDefault || s.cfg.SigningKeyFile == out
+	if !isDefault && s.cfg.SigningKeyPublicPEM == "" && !slices.ContainsFunc(existing, s.isDefaultKey) {
+		a.recordDefaultPublicKey(s)
+	}
 
-	pinned, others := pinnedKeys(existing, signing.PinnedKey{KeyID: keyID, PublicKeyPEM: publicPEM})
+	pinned, others, defaultPinned := pinnedKeys(existing, signing.PinnedKey{KeyID: keyID, PublicKeyPEM: publicPEM}, s.isDefaultKey)
 	view := output.KeyView{
 		KeyID:             keyID,
 		ProjectID:         projectID,
@@ -159,8 +187,11 @@ func (a *App) runKeyGenerate(ctx context.Context, keyID, out string) error {
 	for i, k := range pinned {
 		view.PinnedKeyIDs[i] = k.KeyID
 	}
-	p := a.printer()
 	p.Notice("%s", keyWarning)
+	createdIsDefault := isDefault || s.isDefaultKey(api.SigningKey{KeyID: keyID, PublicKeyPEM: publicPEM})
+	if !createdIsDefault && !defaultPinned && len(pinned) > 1 {
+		p.Notice("Note: none of the project's active keys is recognised as your default signing\nkey, so the snippet pins %s, the newest. Check that you hold its private key.", pinned[1].KeyID)
+	}
 	if len(others) > len(pinned)-1 {
 		p.Notice("Note: the project has %d other active keys (%s), but 1.0 clients pin %d.\nThe snippet pins %s. Swap in another key if you need it.",
 			len(others), strings.Join(others, ", "), signing.MaxPinnedKeys, strings.Join(view.PinnedKeyIDs, " and "))
@@ -168,60 +199,216 @@ func (a *App) runKeyGenerate(ctx context.Context, keyID, out string) error {
 	return p.KeyGenerated(view)
 }
 
-// newKeyPath returns the absolute path for a new key file, defaulting to
-// <config dir>/keys/<key-id>.key, and refuses one that exists.
-func newKeyPath(configDir, keyID, out string) (string, error) {
-	if out == "" {
-		out = filepath.Join(configDir, "keys", keyID+".key")
+// errKeyRefused means the server answered that it did not register the key.
+var errKeyRefused = errors.New("the server refused the public key")
+
+// registerKey registers publicPEM as keyID. When the outcome is unknown,
+// because the reply was lost or was a server error, it lists the project's
+// keys to see whether the key was stored. It returns errKeyRefused only when
+// the key is known not to be registered.
+func registerKey(ctx context.Context, c api.API, p output.Printer, projectID, keyID, publicPEM string) error {
+	_, err := c.RegisterSigningKey(ctx, projectID, keyID, publicPEM)
+	if err == nil {
+		return nil
 	}
-	out, err := filepath.Abs(out)
+	if !registrationUncertain(err) {
+		return fmt.Errorf("%w: %w", errKeyRefused, err)
+	}
+	keys, listErr := c.ListSigningKeys(ctx, projectID)
+	if listErr == nil {
+		if k := findKey(keys, keyID); k != nil {
+			if !signing.SamePublicKey(k.PublicKeyPEM, publicPEM) {
+				return fmt.Errorf("%w: the project now has a different key named %q", errKeyRefused, keyID)
+			}
+			p.Notice("The reply to the registration was lost, but the project has key %s.", keyID)
+			return nil
+		}
+	}
+	return fmt.Errorf("could not confirm that the project registered key %q: %w", keyID, err)
+}
+
+// registrationUncertain reports whether the server may have stored a key
+// despite err: anything but a 4xx answer that is not a timeout or rate limit.
+func registrationUncertain(err error) bool {
+	var ae *api.Error
+	if errors.As(err, &ae) {
+		return ae.StatusCode >= 500 || ae.StatusCode == http.StatusRequestTimeout || ae.StatusCode == http.StatusTooManyRequests
+	}
+	return true
+}
+
+// resumeKey reads the public key of an existing key file, to finish a key
+// generate whose registration did not complete. It refuses a file whose key
+// the project holds under another ID, or whose ID the project gave to
+// another key.
+func (a *App) resumeKey(existing []api.SigningKey, keyID, path string) (string, error) {
+	data, err := signing.ReadKeyFile(path)
 	if err != nil {
 		return "", err
 	}
-	if _, err := os.Lstat(out); err == nil {
-		return "", usageErr("%s already exists\nChoose another --out path.", out)
+	priv, err := signing.ParsePrivateKey(data, a.passphraseSource())
+	if err != nil {
+		return "", err
 	}
-	return out, nil
+	publicPEM, err := signing.PublicKeyPEM(priv.Public().(ed25519.PublicKey))
+	if err != nil {
+		return "", err
+	}
+	for _, k := range existing {
+		same := signing.SamePublicKey(k.PublicKeyPEM, publicPEM)
+		switch {
+		case k.KeyID == keyID && !same:
+			return "", usageErr("the project already has a signing key named %q, and it is not the key in %s\nChoose another --key-id or --out.", keyID, path)
+		case k.KeyID == keyID && k.RevokedAt != nil:
+			return "", usageErr("signing key %q is revoked on the project\nChoose another --key-id and --out.", keyID)
+		case k.KeyID != keyID && same:
+			return "", usageErr("the key in %s is already registered as %q\nChoose another --out path.", path, k.KeyID)
+		}
+	}
+	return publicPEM, nil
+}
+
+func findKey(keys []api.SigningKey, keyID string) *api.SigningKey {
+	for i := range keys {
+		if keys[i].KeyID == keyID {
+			return &keys[i]
+		}
+	}
+	return nil
+}
+
+// keyPath returns the absolute path for a key file, defaulting to
+// <config dir>/keys/<key-id>.key.
+func keyPath(configDir, keyID, out string) (string, error) {
+	if out == "" {
+		out = defaultKeyPath(configDir, keyID)
+	}
+	return filepath.Abs(out)
+}
+
+func defaultKeyPath(configDir, keyID string) string {
+	return filepath.Join(configDir, "keys", keyID+".key")
 }
 
 // makeDefaultKey makes path the key release signs with when there is no
 // default yet, and reports whether it did.
-func (s *session) makeDefaultKey(path string) (bool, error) {
-	if s.cfg.SigningKeyFile != "" {
-		return false, nil
+func (s *session) makeDefaultKey(path, publicPEM string) (bool, error) {
+	made := false
+	err := s.updateConfig(func(c *config.Config) bool {
+		if made = c.SigningKeyFile == ""; made {
+			c.SigningKeyFile, c.SigningKeyPublicPEM = path, publicPEM
+		}
+		return made
+	})
+	return made, err
+}
+
+// updateConfig reads the config afresh, lets change edit it, and saves it if
+// change reports a change, so that a command waiting at a prompt does not
+// undo what another command saved meanwhile.
+func (s *session) updateConfig(change func(*config.Config) bool) error {
+	cfg, err := config.Load(s.configDir)
+	if err != nil {
+		return err
 	}
-	s.cfg.SigningKeyFile = path
-	return true, config.Save(s.configDir, s.cfg)
+	if change(&cfg) {
+		err = config.Save(s.configDir, cfg)
+	}
+	s.cfg = cfg
+	return err
+}
+
+// recordDefaultPublicKey saves the public key of a default signing key set
+// before the CLI recorded one, so the key can be recognised among the
+// project's keys. An encrypted key needs its passphrase, from the
+// environment or the terminal; without it nothing is saved.
+func (a *App) recordDefaultPublicKey(s *session) {
+	path := s.cfg.SigningKeyFile
+	passphrase := func() (string, error) {
+		if p := a.Getenv(passphraseEnv); p != "" {
+			return p, nil
+		}
+		if a.Prompt == nil {
+			return "", signing.ErrPassphraseRequired
+		}
+		p, err := a.Prompt(fmt.Sprintf("Passphrase of your default signing key %s, to recognise it (Enter to skip): ", path))
+		if err == nil && p == "" {
+			err = errors.New("skipped")
+		}
+		return p, err
+	}
+	data, err := signing.ReadKeyFile(path)
+	if err != nil {
+		return
+	}
+	priv, err := signing.ParsePrivateKey(data, passphrase)
+	if err != nil {
+		a.printer().Notice("Your default signing key %s could not be read (%v), so it is not recognised.", path, err)
+		return
+	}
+	publicPEM, err := signing.PublicKeyPEM(priv.Public().(ed25519.PublicKey))
+	if err != nil {
+		return
+	}
+	if err := s.updateConfig(func(c *config.Config) bool {
+		if c.SigningKeyFile != path {
+			return false
+		}
+		c.SigningKeyPublicPEM = publicPEM
+		return true
+	}); err != nil {
+		a.printer().Notice("Recording the public key of your default signing key failed: %v", err)
+	}
+}
+
+// isDefaultKey reports whether k is the default signing key: by its public
+// key, or, for a config that does not record it, by the file name key
+// generate gives a key.
+func (s *session) isDefaultKey(k api.SigningKey) bool {
+	if s.cfg.SigningKeyPublicPEM != "" {
+		return signing.SamePublicKey(k.PublicKeyPEM, s.cfg.SigningKeyPublicPEM)
+	}
+	return s.cfg.SigningKeyFile != "" && s.cfg.SigningKeyFile == defaultKeyPath(s.configDir, k.KeyID)
 }
 
 // pinnedKeys returns the keys for the firmware snippet: the new key, then
-// the project's newest other active key. It also returns the IDs of all the
-// other active keys. Public keys from the server are parsed and re-encoded
-// before they go into the snippet's C strings.
-func pinnedKeys(existing []api.SigningKey, created signing.PinnedKey) ([]signing.PinnedKey, []string) {
-	active := make([]api.SigningKey, 0, len(existing))
-	for _, k := range existing {
-		if k.RevokedAt == nil && manifest.ValidKeyID(k.KeyID) {
-			active = append(active, k)
-		}
-	}
-	sort.SliceStable(active, func(i, j int) bool { return active[i].CreatedAt.After(active[j].CreatedAt) })
-	pinned := []signing.PinnedKey{created}
+// the default signing key if it is another active project key, or else the
+// project's newest other active key. It also returns the IDs of all the
+// other active keys, and whether the default key was pinned. Public keys
+// from the server are parsed and re-encoded before they go into the
+// snippet's C strings.
+func pinnedKeys(existing []api.SigningKey, created signing.PinnedKey, isDefault func(api.SigningKey) bool) ([]signing.PinnedKey, []string, bool) {
+	var active []signing.PinnedKey
 	var others []string
-	for _, k := range active {
+	second := -1
+	sorted := slices.Clone(existing)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].CreatedAt.After(sorted[j].CreatedAt) })
+	for _, k := range sorted {
+		if k.RevokedAt != nil || k.KeyID == created.KeyID || !manifest.ValidKeyID(k.KeyID) {
+			continue
+		}
 		pub, err := signing.ParsePublicKeyPEM(k.PublicKeyPEM)
 		if err != nil {
 			continue
 		}
-		others = append(others, k.KeyID)
-		if len(pinned) < signing.MaxPinnedKeys {
-			pemText, err := signing.PublicKeyPEM(pub)
-			if err == nil {
-				pinned = append(pinned, signing.PinnedKey{KeyID: k.KeyID, PublicKeyPEM: pemText})
-			}
+		pemText, err := signing.PublicKeyPEM(pub)
+		if err != nil {
+			continue
 		}
+		if second < 0 && isDefault(k) {
+			second = len(active)
+		}
+		active = append(active, signing.PinnedKey{KeyID: k.KeyID, PublicKeyPEM: pemText})
+		others = append(others, k.KeyID)
 	}
-	return pinned, others
+	pinned := []signing.PinnedKey{created}
+	switch {
+	case second >= 0:
+		pinned = append(pinned, active[second])
+	case len(active) > 0:
+		pinned = append(pinned, active[0])
+	}
+	return pinned, others, second >= 0
 }
 
 func (a *App) keyRevokeCommand() *cobra.Command {

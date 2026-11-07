@@ -26,6 +26,9 @@ type harness struct {
 	openBrowser func(url string) error
 	// promptLabels records the labels of the prompts shown.
 	promptLabels []string
+	// onPrompt, when set, runs as each prompt is shown, before it is
+	// answered, as if another command ran while this one waited.
+	onPrompt func(label string)
 }
 
 func newHarness(t *testing.T) *harness {
@@ -72,6 +75,9 @@ func (h *harness) run(args ...string) result {
 		a.StdinIsTerminal = true
 		a.Prompt = func(label string) (string, error) {
 			h.promptLabels = append(h.promptLabels, label)
+			if h.onPrompt != nil {
+				h.onPrompt(label)
+			}
 			p := prompts[0]
 			prompts = prompts[1:]
 			return p, nil

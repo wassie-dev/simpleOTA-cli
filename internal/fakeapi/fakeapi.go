@@ -84,9 +84,13 @@ type Server struct {
 	StaffProjects []api.Project
 	// NoMe makes /me/ answer 404, as on a server without it.
 	NoMe bool
-	// FailNext makes the next requests to a path fail with these statuses,
-	// one per request.
+	// FailNext makes the next requests to a path, or to "METHOD path", fail
+	// with these statuses, one per request.
 	FailNext map[string][]int
+	// LoseReply makes the next requests to "METHOD path" take effect and then
+	// answer with these statuses instead, one per request. 0 closes the
+	// connection without a reply.
+	LoseReply map[string][]int
 
 	clock int
 }
@@ -105,6 +109,7 @@ func New(t *testing.T) *Server {
 		States:        map[string][]api.DeviceState{},
 		Requests:      map[string]int{},
 		FailNext:      map[string][]int{},
+		LoseReply:     map[string][]int{},
 	}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	t.Cleanup(s.Close)
@@ -167,12 +172,31 @@ func detail(w http.ResponseWriter, status int, msg string) {
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	s.Mu.Lock()
 	defer s.Mu.Unlock()
-	s.Requests[r.Method+" "+r.URL.Path]++
-	if codes := s.FailNext[r.URL.Path]; len(codes) > 0 {
-		s.FailNext[r.URL.Path] = codes[1:]
-		detail(w, codes[0], "injected failure")
+	key := r.Method + " " + r.URL.Path
+	s.Requests[key]++
+	for _, k := range []string{key, r.URL.Path} {
+		if codes := s.FailNext[k]; len(codes) > 0 {
+			s.FailNext[k] = codes[1:]
+			detail(w, codes[0], "injected failure")
+			return
+		}
+	}
+	if codes := s.LoseReply[key]; len(codes) > 0 {
+		s.LoseReply[key] = codes[1:]
+		s.handle(httptest.NewRecorder(), r)
+		if codes[0] != 0 {
+			detail(w, codes[0], "injected failure")
+			return
+		}
+		if conn, _, err := http.NewResponseController(w).Hijack(); err == nil {
+			_ = conn.Close()
+		}
 		return
 	}
+	s.handle(w, r)
+}
+
+func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 
 	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if token != PersonalToken && token != ProjectToken && token != StaffToken {

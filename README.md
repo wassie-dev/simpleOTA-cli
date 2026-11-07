@@ -97,8 +97,10 @@ A staff account sees its own projects, and opens any other project by ID.
 Run `simpleota key generate` a second time for a backup key, keep that one
 offline, and pin both keys in your first signed firmware. Devices pin at most
 two keys and cannot change them over the air. Each `key generate` prints a
-snippet that pins the new key and the project's newest other active key, so
-the second run's snippet holds both.
+snippet that pins the new key and your default signing key, so the second
+run's snippet holds both. If registering the public key fails without a clear
+refusal from the server, the encrypted key is kept: run the same command again
+to finish.
 
 `release` reads the chip family from the image header, which names the chip
 the image was built for. It refuses a `--chip` that differs from the header
