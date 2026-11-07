@@ -6,6 +6,17 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `release` and `build upload` refuse ESP-IDF's `bootloader.bin`,
+  `partition-table.bin` and `ota_data_initial.bin`, which are not OTA app
+  images. The content check is still only the image header's first byte and
+  chip ID.
+- A device whose ID is a MAC address can be named in any case, with colons or
+  dashes, as the server stores it in one form.
+- `release` and `build upload` check the binary before loading the signing
+  key, so a wrong file is reported as such instead of as a missing passphrase.
+
 ## [0.1.3] - 2026-11-06
 
 ### Added

@@ -54,6 +54,10 @@ func registerKey(t *testing.T, fake *fakeapi.Server, keyID string, revoked bool)
 	return priv
 }
 
+func keyLoader(k ed25519.PrivateKey) func() (ed25519.PrivateKey, error) {
+	return func() (ed25519.PrivateKey, error) { return k, nil }
+}
+
 // everyone targets every device on the stable channel.
 var everyone = release.Target{Channel: "stable", Percent: 100}
 
@@ -98,7 +102,7 @@ func TestSignedReleaseUsesRegisteredKeyID(t *testing.T) {
 	registerKey(t, fake, "other", false)
 	priv := registerKey(t, fake, "prod-2026", false)
 	res, err := svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1.0.0", Chip: "esp32", Key: priv,
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1.0.0", Chip: "esp32", LoadKey: keyLoader(priv),
 	}, everyone)
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +120,7 @@ func TestUnregisteredKeyIsRefusedBeforeUpload(t *testing.T) {
 	registerKey(t, fake, "prod-2026", false)
 	stranger, _ := signing.Generate()
 	_, err := svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Key: stranger,
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", LoadKey: keyLoader(stranger),
 	}, everyone)
 	if err == nil || !strings.Contains(err.Error(), "not registered") {
 		t.Fatalf("err = %v", err)
@@ -130,7 +134,7 @@ func TestRevokedKeyIsRefused(t *testing.T) {
 	fake, svc := service(t)
 	priv := registerKey(t, fake, "old", true)
 	_, err := svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Key: priv,
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", LoadKey: keyLoader(priv),
 	}, everyone)
 	if err == nil || !strings.Contains(err.Error(), "revoked") {
 		t.Fatalf("err = %v", err)
@@ -217,6 +221,10 @@ func TestReadBinary(t *testing.T) {
 		{name: "elf", file: "app.elf", data: []byte("\x7fELF"), wantErr: "not the .elf"},
 		{name: "merged", file: "sketch.ino.merged.bin", data: firmware, wantErr: "not an OTA app image"},
 		{name: "partitions", file: "x.partitions.bin", data: firmware, wantErr: "not an OTA app image"},
+		{name: "esp-idf bootloader", file: "bootloader.bin", data: firmware, wantErr: "ESP-IDF bootloader"},
+		{name: "esp-idf partition table", file: "Partition-Table.bin", data: firmware, wantErr: "not an OTA app image"},
+		{name: "esp-idf ota data", file: "ota_data_initial.bin", data: firmware, wantErr: "not an OTA app image"},
+		{name: "app named after its project", file: "bootloader-tool.bin", data: firmware},
 		{name: "too big", file: "app.bin", data: big, wantErr: "limit"},
 	}
 	for _, tt := range tests {

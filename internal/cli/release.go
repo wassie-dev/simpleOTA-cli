@@ -20,7 +20,12 @@ const signingKeyEnv = "SIMPLEOTA_SIGNING_KEY"
 
 // uploadHelp describes how release and build upload check, sign and send a
 // build.
-const uploadHelp = `Chip:
+const uploadHelp = `Binary:
+  The application image, not the bootloader, partition table, merged or
+  filesystem image. Only the file name and the header's first byte and chip
+  are checked.
+
+Chip:
   Read from the image header. A --chip that differs is refused unless a
   device in the project reports that chip, because no other device would
   be offered the build.
@@ -83,8 +88,8 @@ type buildJob struct {
 	opts      release.Options
 }
 
-// prepareBuild validates the flags, resolves the current project and loads
-// the signing key.
+// prepareBuild validates the flags and resolves the current project. The
+// signing key is loaded once the binary has passed its checks.
 func (a *App) prepareBuild(ctx context.Context, binPath string, f buildFlags) (buildJob, error) {
 	if err := f.validate(); err != nil {
 		return buildJob{}, err
@@ -93,15 +98,15 @@ func (a *App) prepareBuild(ctx context.Context, binPath string, f buildFlags) (b
 	if err != nil {
 		return buildJob{}, err
 	}
-	var key ed25519.PrivateKey
-	if f.securityMode != manifest.SecurityBasic {
-		key, err = a.loadSigningKey(f.keyFile, s.cfg.SigningKeyFile)
-		if err != nil {
-			return buildJob{}, err
+	loadKey := func() (ed25519.PrivateKey, error) {
+		if f.securityMode == manifest.SecurityBasic {
+			return nil, nil
 		}
-		if key == nil && f.securityMode == manifest.SecuritySigned {
-			return buildJob{}, usageErr("--security-mode signed needs a key\nPass --key-file, or set %s.", signingKeyEnv)
+		key, err := a.loadSigningKey(f.keyFile, s.cfg.SigningKeyFile)
+		if err == nil && key == nil && f.securityMode == manifest.SecuritySigned {
+			return nil, usageErr("--security-mode signed needs a key\nPass --key-file, or set %s.", signingKeyEnv)
 		}
+		return key, err
 	}
 	return buildJob{
 		session:   s,
@@ -112,7 +117,7 @@ func (a *App) prepareBuild(ctx context.Context, binPath string, f buildFlags) (b
 			VersionLabel:   f.versionLabel,
 			Chip:           f.chip,
 			Framework:      f.framework,
-			Key:            key,
+			LoadKey:        loadKey,
 			AllowDuplicate: f.allowDuplicate,
 		},
 	}, nil

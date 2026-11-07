@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
@@ -258,12 +260,27 @@ func findDevice(ctx context.Context, client api.API, projectID, ref string) (api
 	return matchDevice(devices, ref)
 }
 
-// matchDevice finds a device by UUID or reported device ID in a listing.
+// matchDevice finds a device by UUID or reported device ID in a listing. A
+// MAC address matches in any case, with colons or dashes, as the server
+// stores it in one form.
 func matchDevice(devices []api.Device, ref string) (api.Device, error) {
+	want := normalizeDeviceID(ref)
 	for _, d := range devices {
-		if d.ID == ref || d.DeviceID == ref {
+		if d.ID == ref || normalizeDeviceID(d.DeviceID) == want {
 			return d, nil
 		}
 	}
 	return api.Device{}, usageErr("no device %q in this project\nList devices with:\n  simpleota device list", ref)
+}
+
+var macAddress = regexp.MustCompile(`^[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}$`)
+
+// normalizeDeviceID is the server's rule for device IDs: surrounding space
+// is dropped, and a MAC address becomes upper case with colons.
+func normalizeDeviceID(id string) string {
+	id = strings.TrimSpace(id)
+	if macAddress.MatchString(id) {
+		return strings.ReplaceAll(strings.ToUpper(id), "-", ":")
+	}
+	return id
 }
