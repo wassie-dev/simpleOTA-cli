@@ -162,6 +162,8 @@ Newest first, revoked keys included.
 ```
 
 `security_mode` is `basic` or `signed`. `key_id` is omitted for `basic`.
+`recovered` is present and `true` only when the reply to the upload was lost
+and the build and deployment were then found on the project.
 `chip` is the chip family in the manifest. `also_active` lists the other
 active deployments for the same chip on the channel as
 [deployment objects](#deployment-object), highest build first; it is always
@@ -202,7 +204,8 @@ so it is also the checksum the server stored.
 { "build_number": 42, "artifact_id": "…", "security_mode": "signed", "key_id": "prod-2026", "chip": "esp32s3", "sha256": "…", "size": 1048576 }
 ```
 
-`key_id` is omitted for `basic`.
+`key_id` is omitted for `basic`. `recovered` is present and `true` only when
+the reply to the upload was lost and the build was then found on the project.
 
 ## device list, device show, device update
 

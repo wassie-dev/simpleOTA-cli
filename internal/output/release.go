@@ -18,6 +18,9 @@ type ReleaseView struct {
 	Chip         string `json:"chip"`
 	SHA256       string `json:"sha256"`
 	Size         int64  `json:"size"`
+	// Recovered means the reply to the upload was lost, and the build and
+	// deployment were found on the project afterwards.
+	Recovered bool `json:"recovered,omitempty"`
 	// AlsoActive lists the other active deployments for the same chip on
 	// the channel, highest build first.
 	AlsoActive []DeploymentView `json:"also_active"`
@@ -36,6 +39,7 @@ func NewReleaseView(r release.Result) ReleaseView {
 		Chip:         r.Chip,
 		SHA256:       r.SHA256,
 		Size:         r.Size,
+		Recovered:    r.Recovered,
 		AlsoActive:   []DeploymentView{},
 	}
 }

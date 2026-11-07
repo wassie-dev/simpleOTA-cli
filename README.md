@@ -125,8 +125,13 @@ The manifest carries the binary's SHA-256, so if the bytes change on the way,
 the server rejects the upload and nothing is created.
 
 If the connection drops or a gateway answers 5xx mid-upload, the build may
-exist anyway. Run the same `release` again: it checks the project's builds
-first and stops with the existing build number if the binary is already
+exist anyway. `release` then reads the project's builds and deployments, and
+sends nothing more. If the project has exactly one build of the binary and one
+deployment of it to the channel, `release` reports them with `"recovered":
+true` and a notice, and exits 0: the project had no build of the binary
+before, so they are taken to be this upload's. Otherwise it exits 1. Run the
+same `release` again: it checks the project's builds first and stops with the
+existing build number and its running deployments if the binary is already
 there, so it cannot create a second build.
 
 ## Commands

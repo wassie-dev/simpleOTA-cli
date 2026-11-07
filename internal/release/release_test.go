@@ -374,3 +374,71 @@ func TestChipMismatchIsRefusedUnlessADeviceReportsIt(t *testing.T) {
 		t.Fatalf("a matching --chip: %v", err)
 	}
 }
+
+const (
+	releasePath = "POST /api/v1/projects/" + fakeapi.ProjectID + "/release/"
+	uploadPath  = "POST /api/v1/projects/" + fakeapi.ProjectID + "/artifacts/"
+)
+
+func TestReleaseFindsBuildAndDeploymentAfterLostReply(t *testing.T) {
+	for name, status := range map[string]int{"dropped": 0, "bad gateway": 502} {
+		t.Run(name, func(t *testing.T) {
+			fake, svc := service(t)
+			fake.LoseReply[releasePath] = []int{status}
+			opts := release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32"}
+			res, err := svc.Release(context.Background(), opts, everyone)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := fake.Deployments[0]
+			if !res.Recovered || res.BuildNumber != 1 || res.DeploymentID != d.ID || res.State != api.StateActive || res.Channel != "stable" {
+				t.Fatalf("%+v, want deployment %s", res, d.ID)
+			}
+			if fake.Count(releasePath) != 1 || len(fake.Artifacts) != 1 {
+				t.Fatalf("%d release requests, %d builds", fake.Count(releasePath), len(fake.Artifacts))
+			}
+		})
+	}
+}
+
+func TestUploadFindsBuildAfterLostReply(t *testing.T) {
+	fake, svc := service(t)
+	fake.LoseReply[uploadPath] = []int{0}
+	res, err := svc.Upload(context.Background(), release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32"})
+	if err != nil || !res.Recovered || res.BuildNumber != 1 || fake.Count(uploadPath) != 1 {
+		t.Fatalf("%+v %v", res, err)
+	}
+}
+
+func TestReleaseStaysUncertainWhenNothingIsFound(t *testing.T) {
+	fake, svc := service(t)
+	fake.FailNext[releasePath] = []int{503}
+	_, err := svc.Release(context.Background(), release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32"}, everyone)
+	if err == nil || !strings.Contains(err.Error(), "may still have created a build") || fake.Count(releasePath) != 1 {
+		t.Fatalf("err = %v, %d requests", err, fake.Count(releasePath))
+	}
+}
+
+func TestReleaseWithAllowDuplicateDoesNotGuessAfterLostReply(t *testing.T) {
+	fake, svc := service(t)
+	opts := release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", AllowDuplicate: true}
+	if _, err := svc.Release(context.Background(), opts, everyone); err != nil {
+		t.Fatal(err)
+	}
+	fake.LoseReply[releasePath] = []int{0}
+	if res, err := svc.Release(context.Background(), opts, everyone); err == nil || res.Recovered {
+		t.Fatalf("%+v %v", res, err)
+	}
+}
+
+func TestDuplicateRefusalNamesRunningDeployments(t *testing.T) {
+	fake, svc := service(t)
+	opts := release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32"}
+	if _, err := svc.Release(context.Background(), opts, everyone); err != nil {
+		t.Fatal(err)
+	}
+	_, err := svc.Release(context.Background(), opts, everyone)
+	if !errors.Is(err, release.ErrDuplicate) || !strings.Contains(err.Error(), "deployment "+fake.Deployments[0].ID+" is active at 100%") {
+		t.Fatalf("err = %v", err)
+	}
+}
