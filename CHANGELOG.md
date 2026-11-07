@@ -6,6 +6,12 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- On Windows, two `simpleota` commands saving the config or the credentials
+  file at the same moment could fail with "Access is denied". The save now
+  retries for up to a second.
+
 ## [0.1.3] - 2026-11-06
 
 ### Added
