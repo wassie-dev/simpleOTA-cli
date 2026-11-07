@@ -1,6 +1,10 @@
 package output
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
+)
 
 // Auth states in StatusView.
 const (
@@ -78,7 +82,7 @@ func (p Printer) Status(v StatusView) error {
 	case AuthValid:
 		who := ""
 		if a := v.Auth.Account; a != nil {
-			who = " for " + a.Email
+			who = " for " + termtext.Clean(a.Email)
 			if a.IsStaff {
 				who += " (staff)"
 			}
@@ -89,14 +93,14 @@ func (p Printer) Status(v StatusView) error {
 	case AuthRejected:
 		fmt.Fprintf(p.Out, "  logged in    %s; the %s token from %s was rejected, so run 'simpleota login'\n", p.red("no"), v.Auth.TokenType, v.Auth.Source)
 	case AuthUnreachable:
-		fmt.Fprintf(p.Out, "  logged in    %s token from %s, not checked: %s\n", v.Auth.TokenType, v.Auth.Source, v.Auth.Error)
+		fmt.Fprintf(p.Out, "  logged in    %s token from %s, not checked: %s\n", v.Auth.TokenType, v.Auth.Source, termtext.CleanLines(v.Auth.Error))
 	}
 
 	switch {
 	case v.ProjectError != "":
-		fmt.Fprintf(p.Out, "  project      %s\n", p.red(indentRest(v.ProjectError, statusValueColumn)))
+		fmt.Fprintf(p.Out, "  project      %s\n", p.red(indentRest(termtext.CleanLines(v.ProjectError), statusValueColumn)))
 	case v.Project != nil:
-		fmt.Fprintf(p.Out, "  project      %s (%s)%s\n", v.Project.Slug, v.Project.ID, projectSourceText(v.ProjectSource))
+		fmt.Fprintf(p.Out, "  project      %s (%s)%s\n", termtext.Clean(v.Project.Slug), termtext.Clean(v.Project.ID), projectSourceText(v.ProjectSource))
 	case v.Auth.State == AuthValid:
 		fmt.Fprintln(p.Out, "  project      none selected; choose one with 'simpleota project use <slug>'")
 	default:

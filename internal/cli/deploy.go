@@ -13,6 +13,7 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/deploy"
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 func (a *App) deploymentCommand() *cobra.Command {
@@ -230,7 +231,7 @@ func deploymentErr(err error, id string) error {
 func failureText(s deploy.Summary) string {
 	parts := make([]string, 0, len(s.Failures))
 	for _, f := range s.Failures {
-		parts = append(parts, fmt.Sprintf("device %s %s", f.DeviceID, strings.ReplaceAll(f.Status, "_", " ")))
+		parts = append(parts, fmt.Sprintf("device %s %s", termtext.Clean(f.DeviceID), termtext.Clean(strings.ReplaceAll(f.Status, "_", " "))))
 	}
 	return strings.Join(parts, "; ")
 }

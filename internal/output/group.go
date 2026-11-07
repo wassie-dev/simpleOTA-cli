@@ -3,6 +3,7 @@ package output
 import (
 	"fmt"
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 	"strings"
 )
 
@@ -39,7 +40,7 @@ func (p Printer) GroupShow(g GroupView) error {
 	if p.JSON {
 		return p.WriteJSON(g)
 	}
-	fmt.Fprintf(p.Out, "Group %s\n", p.bold(g.Name))
+	fmt.Fprintf(p.Out, "Group %s\n", p.bold(termtext.Clean(g.Name)))
 	p.field("id", g.ID)
 	p.field("description", g.Description)
 	return nil
@@ -61,6 +62,6 @@ func (p Printer) MembersChanged(v MembersView) error {
 	if !v.Added {
 		verb, prep = "Removed", "from"
 	}
-	fmt.Fprintf(p.Out, "%s %s %s group %s.\n", verb, strings.Join(v.Devices, ", "), prep, v.Group)
+	fmt.Fprintf(p.Out, "%s %s %s group %s.\n", verb, termtext.Clean(strings.Join(v.Devices, ", ")), prep, termtext.Clean(v.Group))
 	return nil
 }

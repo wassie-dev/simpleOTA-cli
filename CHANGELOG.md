@@ -6,6 +6,14 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Text from the server, such as a failure reason a device reported or a device
+  ID, could carry terminal control sequences that recoloured, retitled or
+  overwrote the terminal, or forged output lines. Text output now shows
+  control characters as escapes such as `\x1b`. JSON keeps the exact values,
+  and now escapes C1 control characters too.
+
 ## [0.1.3] - 2026-11-06
 
 ### Added

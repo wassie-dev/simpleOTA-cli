@@ -5,6 +5,11 @@ With `--json`, each command prints one JSON value to stdout: an array for
 otherwise. Notices and warnings go to stderr. Fields are added over time; existing fields keep
 their names and types. Times are RFC 3339 in UTC.
 
+Strings hold the values exactly as the server sent them, including text a
+device reported. Control characters, C1 included, are written as `\u` escapes.
+In text output they are shown as escapes such as `\x1b` instead, so they
+cannot change what a terminal or CI log shows.
+
 ## Errors
 
 A failed command prints this object to stdout and exits with the code it

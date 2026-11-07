@@ -162,3 +162,44 @@ func TestGroupsRejectUnknownSubcommands(t *testing.T) {
 		t.Errorf("bare group should print help: %+v", r)
 	}
 }
+
+// hostile is device-reported text that tries to recolour, retitle,
+// overwrite and forge lines on the operator's terminal.
+const hostile = "probe \x1b[31mRED\x1b[0m \x1b]0;TITLE\x07 \rOVERWRITE \bX \xc2\x9b31mC1\n2nd-line"
+
+func hasTerminalControl(s string) bool {
+	for _, r := range s {
+		if r != '\n' && (r < 0x20 || (r >= 0x7f && r <= 0x9f)) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestServerTextCannotDriveTheTerminal(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.ProjectToken)
+	h.fake.AddDeployment(depA, api.StateActive, 5, 100)
+	h.fake.SetStates(depA, api.DeviceState{DeviceID: "dev\x1b[2J", FinalStatus: api.DeviceFailed, AssignedToRollout: true, StatusReason: hostile})
+	h.fake.Devices = []api.Device{{ID: "dddddddd-dddd-4ddd-8ddd-000000000001", DeviceID: hostile, Active: true}}
+
+	for _, args := range [][]string{{"deployment", "show", depA}, {"deployment", "wait", depA}, {"device", "list"}} {
+		r := h.run(args...)
+		if hasTerminalControl(r.stdout) || hasTerminalControl(r.stderr) || strings.Contains(r.stdout, "\n2nd-line") {
+			t.Errorf("%v printed control characters: %q %q", args, r.stdout, r.stderr)
+		}
+	}
+
+	r := h.run("deployment", "show", depA, "--json")
+	if strings.Contains(r.stdout, "\xc2\x9b") {
+		t.Fatalf("raw C1 in JSON: %q", r.stdout)
+	}
+	var v struct {
+		Failures []struct {
+			Reason string `json:"reason"`
+		} `json:"failures"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &v); err != nil || len(v.Failures) != 1 || v.Failures[0].Reason != hostile {
+		t.Fatalf("JSON must keep the exact reason: %+v %v", v, err)
+	}
+}
