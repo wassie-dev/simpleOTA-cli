@@ -234,3 +234,21 @@ func TestDeviceOrderAndLimit(t *testing.T) {
 		t.Fatalf("group member list --limit 1: %+v", r)
 	}
 }
+
+func TestDeviceLookupAcceptsAnyMACForm(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.ProjectToken)
+	h.fake.Groups = []api.Group{{ID: "g1", Name: "kitchen"}}
+	h.fake.Devices = []api.Device{{ID: "dddddddd-dddd-4ddd-8ddd-000000000001", DeviceID: "AA:BB:CC:DD:EE:01", Active: true}}
+	for _, ref := range []string{"AA:BB:CC:DD:EE:01", "aa:bb:cc:dd:ee:01", "aa-bb-cc-dd-ee-01", "AA-BB-CC-DD-EE-01"} {
+		if r := h.run("device", "show", ref); r.code != 0 || !strings.Contains(r.stdout, "AA:BB:CC:DD:EE:01") {
+			t.Errorf("show %s: %+v", ref, r)
+		}
+	}
+	if r := h.run("group", "member", "add", "kitchen", "aa-bb-cc-dd-ee-01"); r.code != 0 || len(h.fake.Devices[0].GroupIDs) != 1 {
+		t.Fatalf("group member add: %+v", r)
+	}
+	if r := h.run("device", "show", "aa:bb:cc:dd:ee"); r.code != ExitUsage {
+		t.Fatalf("a partial MAC must not match: %+v", r)
+	}
+}

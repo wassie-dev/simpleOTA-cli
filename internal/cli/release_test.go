@@ -105,6 +105,13 @@ func TestReleaseFromEnvKey(t *testing.T) {
 	if r := h.run("release", writeFirmware(t), "--version-label", "1", "--chip", "esp32"); r.code != ExitUsage || !strings.Contains(r.stderr, passphraseEnv) {
 		t.Fatalf("encrypted key without passphrase: %+v", r)
 	}
+	elf := filepath.Join(t.TempDir(), "app.elf")
+	if err := os.WriteFile(elf, []byte("\x7fELF"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if r := h.run("release", elf, "--version-label", "1"); r.code != ExitError || !strings.Contains(r.stderr, "not the .elf") {
+		t.Fatalf("a wrong file is reported before the key: %+v", r)
+	}
 	h.env[passphraseEnv] = "correct horse battery"
 	if r := h.run("release", writeFirmware(t), "--version-label", "1", "--chip", "esp32"); r.code != 0 || h.fake.LastManifest.SigningMetadata.KeyID != "ci-key" {
 		t.Fatalf("encrypted key: %+v", r)
