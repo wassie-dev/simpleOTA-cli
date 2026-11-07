@@ -251,7 +251,8 @@ local storage. It needs Python 3.12+. Plain `http` is accepted only for
 localhost.
 
 In CI the e2e job needs the `SIMPLEOTA_SERVER_READ_TOKEN` secret to clone the
-server, and fails without it rather than passing untested. A release tag runs
+server, and fails without it rather than passing untested. It runs the server
+commit pinned in `.github/workflows/ci.yml`. A release tag runs
 the whole CI workflow, e2e included, before anything is published.
 
 ## License
