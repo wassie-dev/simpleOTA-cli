@@ -97,5 +97,5 @@ jobs:
           GIT_CONFIG_VALUE_0: https://github.com/wassie-dev/simpleOTA
         run: make e2e
       - name: Dev server log
-        if: failure()
+        if: failure() && hashFiles('.devserver/server.log') != ''
         run: cat .devserver/server.log
