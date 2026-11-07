@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
@@ -73,9 +72,6 @@ type Result struct {
 	Chip         string
 	SHA256       string
 	Size         int64
-	// Recovered means the reply to the upload was lost, and the build and
-	// deployment were found by reading the project afterwards.
-	Recovered bool
 }
 
 // API is the part of the developer API that uploads need.
@@ -104,15 +100,8 @@ func (s Service) Upload(ctx context.Context, o Options) (Result, error) {
 		return p.res, err
 	}
 	art, err := s.API.UploadArtifact(ctx, s.ProjectID, api.UploadRequest{ManifestJSON: p.manifest, FileName: p.fileName, Binary: p.binary})
-	if err != nil && outcomeUnknown(err) && !o.AllowDuplicate {
-		var found bool
-		if art, found = s.findBuild(ctx, p.res.SHA256); found {
-			p.res.Recovered = true
-			err = nil
-		}
-	}
 	if err != nil {
-		return p.res, uploadErr(err, o.AllowDuplicate)
+		return p.res, s.uploadErr(ctx, err, o.AllowDuplicate, p.req)
 	}
 	p.res.BuildNumber = art.BuildNumber
 	p.res.ArtifactID = art.ID
@@ -141,13 +130,9 @@ func (s Service) Release(ctx context.Context, o Options, t Target) (Result, erro
 		RolloutPercentage: t.Percent,
 		ChannelName:       t.Channel,
 	})
-	if err != nil && outcomeUnknown(err) && !o.AllowDuplicate {
-		if res, ok := s.findRelease(ctx, p.res, t.Channel); ok {
-			return res, nil
-		}
-	}
 	if err != nil {
-		return p.res, uploadErr(err, o.AllowDuplicate)
+		p.req.target = &t
+		return p.res, s.uploadErr(ctx, err, o.AllowDuplicate, p.req)
 	}
 	p.res.BuildNumber = out.BuildNumber
 	p.res.ArtifactID = out.ArtifactID
@@ -163,6 +148,7 @@ type prepared struct {
 	fileName string
 	manifest []byte
 	res      Result
+	req      request
 }
 
 // prepare reads the binary, settles its chip, refuses a duplicate, and
@@ -223,6 +209,7 @@ func (s Service) prepare(ctx context.Context, o Options) (prepared, error) {
 		return p, err
 	}
 	p.res.SecurityMode = m.SecurityMode
+	p.req = request{sha: m.SHA256, label: m.VersionLabel, framework: m.Framework, chip: m.ChipFamily, security: m.SecurityMode}
 	p.manifest, err = json.Marshal(m)
 	return p, err
 }
@@ -290,72 +277,10 @@ func (s Service) deploymentsOf(ctx context.Context, a api.Artifact) string {
 	return fmt.Sprintf("\nIt is already deployed:%s\nWatch a deployment with:\n  simpleota deployment wait <deployment-id>", b.String())
 }
 
-// outcomeUnknown reports whether a failed upload may still have created a
-// build: the connection failed or the server answered 5xx.
-func outcomeUnknown(err error) bool {
-	var ae *api.Error
-	return !errors.Is(err, context.Canceled) && !(errors.As(err, &ae) && ae.StatusCode < http.StatusInternalServerError)
-}
-
-// findBuild looks for the build an upload with a lost reply created. Before
-// uploading, the project had no build of this binary, so the only one it
-// has now is taken to be it. It only reads.
-func (s Service) findBuild(ctx context.Context, sha string) (api.Artifact, bool) {
-	artifacts, err := s.API.ListArtifacts(ctx, s.ProjectID)
-	if err != nil {
-		return api.Artifact{}, false
-	}
-	var found []api.Artifact
-	for _, a := range artifacts {
-		if strings.EqualFold(a.ChecksumSHA256, sha) {
-			found = append(found, a)
-		}
-	}
-	if len(found) != 1 {
-		return api.Artifact{}, false
-	}
-	return found[0], true
-}
-
-// findRelease looks for the build and the deployment to channel that a
-// release with a lost reply created. It only reads.
-func (s Service) findRelease(ctx context.Context, res Result, channel string) (Result, bool) {
-	art, ok := s.findBuild(ctx, res.SHA256)
-	if !ok {
-		return res, false
-	}
-	channels, err := s.API.ListChannels(ctx, s.ProjectID)
-	if err != nil {
-		return res, false
-	}
-	channelID := ""
-	for _, c := range channels {
-		if c.Name == channel {
-			channelID = c.ID
-		}
-	}
-	deps, err := s.API.ListDeployments(ctx, s.ProjectID)
-	if err != nil {
-		return res, false
-	}
-	var found []api.Deployment
-	for _, d := range deps {
-		if d.ArtifactID == art.ID && channelID != "" && slices.Contains(d.TargetChannelIDs, channelID) {
-			found = append(found, d)
-		}
-	}
-	if len(found) != 1 {
-		return res, false
-	}
-	res.BuildNumber, res.ArtifactID = art.BuildNumber, art.ID
-	res.DeploymentID, res.State, res.Channel = found[0].ID, found[0].State, channel
-	res.Recovered = true
-	return res, true
-}
-
 // uploadErr explains a failed upload. When the connection failed or the
-// server answered 5xx, the build may exist anyway.
-func uploadErr(err error, allowDuplicate bool) error {
+// server answered 5xx, the build may exist anyway, so the project is read to
+// show what it now has.
+func (s Service) uploadErr(ctx context.Context, err error, allowDuplicate bool, req request) error {
 	var ae *api.Error
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -366,9 +291,8 @@ func uploadErr(err error, allowDuplicate bool) error {
 		return err
 	case allowDuplicate:
 		return fmt.Errorf("%w\nThe upload may still have created a build. Check before uploading again:\n  simpleota build list", err)
-	default:
-		return fmt.Errorf("%w\nThe upload may still have created a build. Run the same command again to\nfind out: it stops if the project already has this binary.", err)
 	}
+	return s.uncertainErr(ctx, err, req)
 }
 
 // registeredKeyID finds the active project key matching pub, so a release

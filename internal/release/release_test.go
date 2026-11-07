@@ -380,19 +380,20 @@ const (
 	uploadPath  = "POST /api/v1/projects/" + fakeapi.ProjectID + "/artifacts/"
 )
 
-func TestReleaseFindsBuildAndDeploymentAfterLostReply(t *testing.T) {
+func TestReleaseWithLostReplyListsWhatItFindsAndFails(t *testing.T) {
 	for name, status := range map[string]int{"dropped": 0, "bad gateway": 502} {
 		t.Run(name, func(t *testing.T) {
 			fake, svc := service(t)
 			fake.LoseReply[releasePath] = []int{status}
 			opts := release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32"}
-			res, err := svc.Release(context.Background(), opts, everyone)
-			if err != nil {
-				t.Fatal(err)
+			_, err := svc.Release(context.Background(), opts, everyone)
+			if err == nil || !strings.Contains(err.Error(), "It is not known whether the upload created anything") {
+				t.Fatalf("err = %v", err)
 			}
-			d := fake.Deployments[0]
-			if !res.Recovered || res.BuildNumber != 1 || res.DeploymentID != d.ID || res.State != api.StateActive || res.Channel != "stable" {
-				t.Fatalf("%+v, want deployment %s", res, d.ID)
+			msg := err.Error()
+			if !strings.Contains(msg, `build 1, version "1": matches the request`) ||
+				!strings.Contains(msg, "deployment "+fake.Deployments[0].ID+", active at 100% to channel \"stable\": matches the request") {
+				t.Fatalf("candidates missing: %s", msg)
 			}
 			if fake.Count(releasePath) != 1 || len(fake.Artifacts) != 1 {
 				t.Fatalf("%d release requests, %d builds", fake.Count(releasePath), len(fake.Artifacts))
@@ -401,12 +402,63 @@ func TestReleaseFindsBuildAndDeploymentAfterLostReply(t *testing.T) {
 	}
 }
 
-func TestUploadFindsBuildAfterLostReply(t *testing.T) {
+// concurrentJob serves the fake API, but the first release request instead
+// finds that another job uploaded the same binary under another label and
+// created a draft deployment at 7%. With forward set, the request then
+// reaches the fake and only its reply is lost.
+func concurrentJob(t *testing.T, fake *fakeapi.Server, forward bool) release.Service {
+	sum := sha256.Sum256(firmware)
+	var fired atomic.Bool
+	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method+" "+r.URL.Path != releasePath || !fired.CompareAndSwap(false, true) {
+			fake.Config.Handler.ServeHTTP(w, r)
+			return
+		}
+		fake.Mu.Lock()
+		fake.Artifacts = append(fake.Artifacts, api.Artifact{ID: "other-build", BuildNumber: 41, VersionLabel: "other", ChecksumSHA256: hex.EncodeToString(sum[:]), SecurityMode: "basic", ChipFamily: "esp32", Framework: "esp_idf"})
+		fake.Deployments = append(fake.Deployments, api.Deployment{ID: "other-deployment", ArtifactID: "other-build", State: api.StateDraft, RolloutPercentage: 7, TargetChannelIDs: []string{fakeapi.StableChannelID}})
+		fake.Mu.Unlock()
+		if forward {
+			fake.Config.Handler.ServeHTTP(httptest.NewRecorder(), r)
+		}
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	t.Cleanup(front.Close)
+	c := api.New(front.URL, fakeapi.ProjectToken, "test", api.WithSleep(func(context.Context, time.Duration) error { return nil }))
+	return release.Service{API: c, ProjectID: fakeapi.ProjectID}
+}
+
+func TestReleaseDoesNotClaimAnotherJobsBuild(t *testing.T) {
+	for name, forward := range map[string]bool{"request lost": false, "reply lost": true} {
+		t.Run(name, func(t *testing.T) {
+			fake := fakeapi.New(t)
+			svc := concurrentJob(t, fake, forward)
+			_, err := svc.Release(context.Background(), release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32"}, everyone)
+			if err == nil {
+				t.Fatal("a release whose outcome is unknown must fail")
+			}
+			msg := err.Error()
+			for _, want := range []string{
+				`build 41, version "other": differs: version "other", not "1"`,
+				`deployment other-deployment, draft at 7% to channel "stable": differs: draft, not active; 7%, not 100%`,
+			} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("missing %q in:\n%s", want, msg)
+				}
+			}
+			if strings.Contains(msg, "matches the request") != forward {
+				t.Errorf("forward=%v, message:\n%s", forward, msg)
+			}
+		})
+	}
+}
+
+func TestUploadWithLostReplyListsTheBuildAndFails(t *testing.T) {
 	fake, svc := service(t)
 	fake.LoseReply[uploadPath] = []int{0}
-	res, err := svc.Upload(context.Background(), release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32"})
-	if err != nil || !res.Recovered || res.BuildNumber != 1 || fake.Count(uploadPath) != 1 {
-		t.Fatalf("%+v %v", res, err)
+	_, err := svc.Upload(context.Background(), release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32"})
+	if err == nil || !strings.Contains(err.Error(), `build 1, version "1": matches the request`) || strings.Contains(err.Error(), "deployment") || fake.Count(uploadPath) != 1 {
+		t.Fatalf("err = %v, %d uploads", err, fake.Count(uploadPath))
 	}
 }
 
@@ -414,20 +466,20 @@ func TestReleaseStaysUncertainWhenNothingIsFound(t *testing.T) {
 	fake, svc := service(t)
 	fake.FailNext[releasePath] = []int{503}
 	_, err := svc.Release(context.Background(), release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32"}, everyone)
-	if err == nil || !strings.Contains(err.Error(), "may still have created a build") || fake.Count(releasePath) != 1 {
+	if err == nil || !strings.Contains(err.Error(), "shows none of\nthis binary yet") || fake.Count(releasePath) != 1 {
 		t.Fatalf("err = %v, %d requests", err, fake.Count(releasePath))
 	}
 }
 
-func TestReleaseWithAllowDuplicateDoesNotGuessAfterLostReply(t *testing.T) {
+func TestReleaseWithAllowDuplicateDoesNotLookAfterLostReply(t *testing.T) {
 	fake, svc := service(t)
 	opts := release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", AllowDuplicate: true}
 	if _, err := svc.Release(context.Background(), opts, everyone); err != nil {
 		t.Fatal(err)
 	}
 	fake.LoseReply[releasePath] = []int{0}
-	if res, err := svc.Release(context.Background(), opts, everyone); err == nil || res.Recovered {
-		t.Fatalf("%+v %v", res, err)
+	if _, err := svc.Release(context.Background(), opts, everyone); err == nil || !strings.Contains(err.Error(), "simpleota build list") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

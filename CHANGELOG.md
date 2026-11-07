@@ -8,10 +8,11 @@ All notable changes to simpleota are documented here. The format follows
 
 ### Fixed
 
-- When the reply to a `release` or `build upload` is lost after the server
-  created the build, the command reads the project and reports the build, and
-  for `release` its deployment, with `"recovered": true`, instead of failing
-  without a deployment ID. It sends no second upload.
+- When a `release` or `build upload` fails without showing whether the server
+  created anything, the command reads the project and lists each build of the
+  binary, and for `release` its deployments, with how they differ from what
+  was asked for. It still exits 1, claims none of them, and sends nothing
+  again.
 - When `release` stops because the project already has the binary, it lists
   that build's running deployments.
 

@@ -123,6 +123,7 @@ type Deployment struct {
 	RolloutStrategy     string     `json:"rollout_strategy"`
 	RolloutPercentage   int        `json:"rollout_percentage"`
 	TargetChannelIDs    []string   `json:"target_channel_ids"`
+	TargetGroupIDs      []string   `json:"target_group_ids"`
 	State               string     `json:"state"`
 	StartedAt           *time.Time `json:"started_at"`
 	CompletedAt         *time.Time `json:"completed_at"`

@@ -100,12 +100,11 @@ type UploadView struct {
 	Chip         string `json:"chip"`
 	SHA256       string `json:"sha256"`
 	Size         int64  `json:"size"`
-	Recovered    bool   `json:"recovered,omitempty"`
 }
 
 // NewUploadView converts an upload result.
 func NewUploadView(r release.Result) UploadView {
-	return UploadView{BuildNumber: r.BuildNumber, ArtifactID: r.ArtifactID, SecurityMode: r.SecurityMode, KeyID: r.KeyID, Chip: r.Chip, SHA256: r.SHA256, Size: r.Size, Recovered: r.Recovered}
+	return UploadView{BuildNumber: r.BuildNumber, ArtifactID: r.ArtifactID, SecurityMode: r.SecurityMode, KeyID: r.KeyID, Chip: r.Chip, SHA256: r.SHA256, Size: r.Size}
 }
 
 // Upload prints the result of build upload.
