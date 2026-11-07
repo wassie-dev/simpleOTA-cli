@@ -185,20 +185,40 @@ type Waiter struct {
 	OnPollError func(error)
 }
 
+// ErrNoStatus means the timeout passed before any poll succeeded. It wraps
+// the last poll error.
+var ErrNoStatus = errors.New("the deployment could not be read before the timeout")
+
 // Wait returns the last summary and its outcome. The outcome is
-// OutcomeTimedOut when the timeout passes first. A transient poll failure
-// (network, 429, 5xx gateway errors) does not end the wait; any other error
-// does.
+// OutcomeTimedOut when the timeout, or a deadline on ctx, passes first; the
+// timeout also cuts short a request or retry in flight. A transient poll
+// failure (network, 429, 5xx gateway errors) does not end the wait; any
+// other error does. When the timeout passes before any poll succeeded, the
+// error wraps ErrNoStatus and the last poll error.
 func (w Waiter) Wait(ctx context.Context, deploymentID string) (Summary, Outcome, error) {
 	deadline := w.Now().Add(w.Timeout)
+	ctx, cancel := context.WithTimeout(ctx, w.Timeout)
+	defer cancel()
 	var last Summary
 	var lastCounts *Counts
 	var lastErr error
+	read := false
+	timedOut := func() (Summary, Outcome, error) {
+		if !read {
+			return last, OutcomeTimedOut, fmt.Errorf("%w: %w", ErrNoStatus, lastErr)
+		}
+		return last, OutcomeTimedOut, nil
+	}
 	for {
 		s, err := Status(ctx, w.API, w.ProjectID, deploymentID)
 		switch {
+		case err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
+			if lastErr == nil {
+				lastErr = err
+			}
+			return timedOut()
 		case err == nil:
-			last, lastErr = s, nil
+			last, lastErr, read = s, nil, true
 			if w.OnProgress != nil && (lastCounts == nil || *lastCounts != s.Counts) {
 				c := s.Counts
 				lastCounts = &c
@@ -217,12 +237,12 @@ func (w Waiter) Wait(ctx context.Context, deploymentID string) (Summary, Outcome
 		}
 		remaining := deadline.Sub(w.Now())
 		if remaining <= 0 {
-			if lastCounts == nil && lastErr != nil {
-				return last, OutcomeInProgress, lastErr
-			}
-			return last, OutcomeTimedOut, nil
+			return timedOut()
 		}
 		if err := w.Sleep(ctx, min(w.Interval, remaining)); err != nil {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return timedOut()
+			}
 			return last, OutcomeInProgress, err
 		}
 	}

@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -216,5 +219,26 @@ func TestStatusWaitFailsWhenCompletedWithNoDevices(t *testing.T) {
 	r := <-waitAsync(c, out.DeploymentID, "30s")
 	if r.code != 4 || outcome(t, r) != "no_devices" || !strings.Contains(r.stdout+r.stderr, "so none updated") {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestStatusWaitTimeoutBoundsAHungServer(t *testing.T) {
+	c := ciCLI(t)
+	out := release(t, c)
+	target, _ := url.Parse(env["SIMPLEOTA_DEV_API_URL"])
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/states/") {
+			<-r.Context().Done()
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(hung.Close)
+	c.extra["SIMPLEOTA_API_URL"] = hung.URL
+	start := time.Now()
+	r := c.run("", "deployment", "wait", out.DeploymentID, "--timeout", "3s", "--interval", "1s")
+	if elapsed := time.Since(start); r.code != 5 || elapsed > 10*time.Second {
+		t.Fatalf("exit %d after %s: %+v", r.code, elapsed, r)
 	}
 }
