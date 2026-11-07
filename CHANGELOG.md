@@ -13,7 +13,9 @@ All notable changes to simpleota are documented here. The format follows
   keys and finishes if the key was registered. Otherwise it keeps the
   encrypted key, and running the same command again finishes the job.
 - The `key generate` snippet pins your default signing key next to the new
-  key, instead of the project's newest other key.
+  key, instead of the project's newest other key. A default key set by an
+  older version at a custom path is read once, with its passphrase, to
+  recognise it.
 
 ## [0.1.3] - 2026-11-06
 

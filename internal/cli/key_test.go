@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -283,4 +284,40 @@ func TestKeysGenerateSnippetPinsDefaultKeyOverNewerKey(t *testing.T) {
 			t.Fatalf("recorded %v: pinned %v", recorded, kv.PinnedKeyIDs)
 		}
 	}
+}
+
+func TestKeysGenerateRecognisesALegacyDefaultKeyAtACustomPath(t *testing.T) {
+	setup := func(t *testing.T) *harness {
+		h := newHarness(t)
+		h.login(fakeapi.PersonalToken)
+		h.env[passphraseEnv] = "correct horse battery"
+		decodeKey(t, h.run("keys", "generate", "--key-id", "prod", "--out", filepath.Join(t.TempDir(), "prod.key"), "--json"))
+		cfg, _ := config.Load(h.configDir)
+		cfg.SigningKeyPublicPEM = ""
+		if err := config.Save(h.configDir, cfg); err != nil {
+			t.Fatal(err)
+		}
+		orphan, _ := signing.Generate()
+		pemText, _ := signing.PublicKeyPEM(orphan.Public().(ed25519.PublicKey))
+		h.fake.SigningKeys = append(h.fake.SigningKeys, api.SigningKey{KeyID: "orphan", PublicKeyPEM: pemText, CreatedAt: time.Now()})
+		return h
+	}
+	t.Run("passphrase available", func(t *testing.T) {
+		h := setup(t)
+		kv := decodeKey(t, h.run("keys", "generate", "--key-id", "backup", "--out", filepath.Join(t.TempDir(), "backup.key"), "--json"))
+		cfg, _ := config.Load(h.configDir)
+		if strings.Join(kv.PinnedKeyIDs, ",") != "backup,prod" || cfg.SigningKeyPublicPEM == "" {
+			t.Fatalf("pinned %v, recorded %v", kv.PinnedKeyIDs, cfg.SigningKeyPublicPEM != "")
+		}
+	})
+	t.Run("prompt skipped", func(t *testing.T) {
+		h := setup(t)
+		delete(h.env, passphraseEnv)
+		h.prompts = []string{"another passphrase", "another passphrase", ""}
+		r := h.run("keys", "generate", "--key-id", "backup", "--out", filepath.Join(t.TempDir(), "backup.key"), "--json")
+		kv := decodeKey(t, r)
+		if strings.Join(kv.PinnedKeyIDs, ",") != "backup,orphan" || !strings.Contains(r.stderr, "not recognised") || !strings.Contains(r.stderr, "Check that you hold its private key") {
+			t.Fatalf("%+v %v", r, kv.PinnedKeyIDs)
+		}
+	})
 }

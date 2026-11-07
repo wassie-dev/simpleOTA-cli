@@ -90,7 +90,9 @@ builds.
 
 The output includes the signing_keys snippet for the 1.0 Arduino and ESP-IDF
 clients. It pins two keys: the new one and your default signing key, or the
-project's newest other active key when the default is not one of them.
+project's newest other active key when the default is not one of them. A
+default key set by an older version at a path of your choosing is read once,
+with its passphrase, to recognise it.
 
 If registering the public key fails without a clear refusal, the encrypted key
 is kept. Run the same command again to finish: it reads the existing key file
@@ -166,6 +168,9 @@ func (a *App) runKeyGenerate(ctx context.Context, keyID, out string) error {
 	isDefault, err := s.makeDefaultKey(out, publicPEM)
 	if err != nil {
 		return fmt.Errorf("key %q is registered and saved to %s\nMaking it the default failed: %w\nPass --key-file to sign with it.", keyID, out, err)
+	}
+	if !isDefault && s.cfg.SigningKeyPublicPEM == "" && !slices.ContainsFunc(existing, s.isDefaultKey) {
+		a.recordDefaultPublicKey(s)
 	}
 
 	pinned, others, defaultPinned := pinnedKeys(existing, signing.PinnedKey{KeyID: keyID, PublicKeyPEM: publicPEM}, s.isDefaultKey)
@@ -293,6 +298,44 @@ func (s *session) makeDefaultKey(path, publicPEM string) (bool, error) {
 	s.cfg.SigningKeyFile = path
 	s.cfg.SigningKeyPublicPEM = publicPEM
 	return true, config.Save(s.configDir, s.cfg)
+}
+
+// recordDefaultPublicKey saves the public key of a default signing key set
+// before the CLI recorded one, so the key can be recognised among the
+// project's keys. An encrypted key needs its passphrase, from the
+// environment or the terminal; without it nothing is saved.
+func (a *App) recordDefaultPublicKey(s *session) {
+	path := s.cfg.SigningKeyFile
+	passphrase := func() (string, error) {
+		if p := a.Getenv(passphraseEnv); p != "" {
+			return p, nil
+		}
+		if a.Prompt == nil {
+			return "", signing.ErrPassphraseRequired
+		}
+		p, err := a.Prompt(fmt.Sprintf("Passphrase of your default signing key %s, to recognise it (Enter to skip): ", path))
+		if err == nil && p == "" {
+			err = errors.New("skipped")
+		}
+		return p, err
+	}
+	data, err := signing.ReadKeyFile(path)
+	if err != nil {
+		return
+	}
+	priv, err := signing.ParsePrivateKey(data, passphrase)
+	if err != nil {
+		a.printer().Notice("Your default signing key %s could not be read (%v), so it is not recognised.", path, err)
+		return
+	}
+	publicPEM, err := signing.PublicKeyPEM(priv.Public().(ed25519.PublicKey))
+	if err != nil {
+		return
+	}
+	s.cfg.SigningKeyPublicPEM = publicPEM
+	if err := config.Save(s.configDir, s.cfg); err != nil {
+		a.printer().Notice("Recording the public key of your default signing key failed: %v", err)
+	}
 }
 
 // isDefaultKey reports whether k is the default signing key: by its public
