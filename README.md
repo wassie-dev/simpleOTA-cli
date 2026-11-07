@@ -250,10 +250,13 @@ into `.devserver/` and runs it on `http://127.0.0.1:8765` with SQLite and
 local storage. It needs Python 3.12+. Plain `http` is accepted only for
 localhost.
 
-In CI the e2e job needs the `SIMPLEOTA_SERVER_READ_TOKEN` secret to clone the
-server, and fails without it rather than passing untested. It runs the server
-commit pinned in `.github/workflows/ci.yml`. A release tag runs
-the whole CI workflow, e2e included, before anything is published.
+Public CI runs the unit tests, lint and install tests. The e2e suite needs the
+private server, so it runs only in the server's own CI, on a CLI commit a
+maintainer approved, and reports the result as the `simpleota/backend-e2e`
+commit status. A release tag runs the whole CI workflow and also needs a
+passing `simpleota/backend-e2e` status for the tagged commit from the account
+named in the `BACKEND_E2E_REPORTER` repository variable. Without one, nothing
+is published.
 
 ## License
 

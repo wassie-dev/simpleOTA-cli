@@ -12,11 +12,27 @@ jobs:
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
-    secrets:
-      SIMPLEOTA_SERVER_READ_TOKEN: ${{ secrets.SIMPLEOTA_SERVER_READ_TOKEN }}
+
+  # The end-to-end suite runs against the private server in the server's own
+  # CI, on a CLI commit a maintainer approved, and reports its result as a
+  # commit status. This job only reads that status for the tagged commit.
+  backend-e2e:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require a passing backend e2e result for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORTER: ${{ vars.BACKEND_E2E_REPORTER }}
+        run: gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/statuses" | jq -s add | scripts/check-backend-e2e.sh "$REPORTER"
 
   goreleaser:
-    needs: ci
+    needs: [ci, backend-e2e]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
