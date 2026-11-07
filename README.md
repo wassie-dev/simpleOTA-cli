@@ -190,11 +190,11 @@ build. A deployment completed before any device was offered the build exits
 | Exit code | Meaning |
 | --- | --- |
 | 0 | OK |
-| 1 | Error (for `status`: the API could not be reached) |
+| 1 | Error, or the command was interrupted (for `status`: the API could not be reached) |
 | 2 | Usage error, including no current project when the token sees several (for `status`: the chosen project cannot be found) |
 | 3 | Not logged in, or the token was rejected (`status` too) |
 | 4 | A device failed or rolled back, the deployment is paused, cancelled or not started, or it was completed before any device was offered the build |
-| 5 | `deployment wait` timed out |
+| 5 | `deployment wait` timed out, including when the server did not answer in time |
 
 | Variable | Use |
 | --- | --- |

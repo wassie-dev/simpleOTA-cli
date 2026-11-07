@@ -3,6 +3,8 @@ package deploy
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -213,7 +215,48 @@ func TestWaitReturnsErrorWhenNoPollEverSucceeded(t *testing.T) {
 		fake.FailNext[path] = append(fake.FailNext[path], 503)
 	}
 	_, o, err := newWaiter(t, fake, &fakeClock{now: time.Unix(0, 0)}, nil).Wait(context.Background(), depID)
-	if err == nil || o != OutcomeInProgress {
-		t.Fatalf("o=%s err=%v, want the poll error", o, err)
+	var ae *api.Error
+	if o != OutcomeTimedOut || !errors.Is(err, ErrNoStatus) || !errors.As(err, &ae) || ae.StatusCode != 503 {
+		t.Fatalf("o=%s err=%v, want a timeout wrapping the poll error", o, err)
+	}
+}
+
+// hangingWaiter waits on a server that never answers, with the real
+// transport, its retries and the real clock.
+func hangingWaiter(t *testing.T, timeout time.Duration) Waiter {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	t.Cleanup(srv.Close)
+	return Waiter{
+		API: api.New(srv.URL, fakeapi.ProjectToken, "test"), ProjectID: fakeapi.ProjectID,
+		Interval: time.Second, Timeout: timeout, Now: time.Now,
+		Sleep: func(ctx context.Context, d time.Duration) error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(d):
+				return nil
+			}
+		},
+	}
+}
+
+func TestWaitTimeoutCutsShortAHungRequest(t *testing.T) {
+	start := time.Now()
+	_, o, err := hangingWaiter(t, 300*time.Millisecond).Wait(context.Background(), depID)
+	if o != OutcomeTimedOut || !errors.Is(err, ErrNoStatus) {
+		t.Fatalf("o=%s err=%v", o, err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("waited %s for a 300ms timeout", elapsed)
+	}
+}
+
+func TestWaitStopsPromptlyWhenCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(200*time.Millisecond, cancel)
+	start := time.Now()
+	_, o, err := hangingWaiter(t, time.Hour).Wait(ctx, depID)
+	if o != OutcomeInProgress || !errors.Is(err, context.Canceled) || time.Since(start) > 5*time.Second {
+		t.Fatalf("o=%s err=%v after %s", o, err, time.Since(start))
 	}
 }
