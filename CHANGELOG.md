@@ -6,6 +6,25 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- With `--json`, an unknown flag or command now prints the JSON error object
+  to stdout, as for other errors.
+- A staff account's change to another owner's project, which the server
+  refuses, is explained as read-only access, with exit code 3, instead of as
+  a missing project or deployment.
+- A failure line names the device by the ID it reports, and the JSON failure
+  object adds `device`.
+- `SIMPLEOTA_PROJECT:` prefixes only errors about that project, not network
+  errors.
+- A `go install` build reports its version without a leading `v`, as release
+  builds do.
+
+### Changed
+
+- An unknown deployment ID exits with code 2, like an unknown build or
+  device, instead of 1.
+
 ## [0.1.3] - 2026-11-06
 
 ### Added

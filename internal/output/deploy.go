@@ -156,7 +156,7 @@ func (p Printer) DeploymentStatus(v DeploymentStatusView) error {
 		if reason == "" {
 			reason = "no reason given"
 		}
-		fmt.Fprintf(p.Out, "  %s  device %s %s: %s\n", p.red("failure"), f.DeviceID, strings.ReplaceAll(f.Status, "_", " "), reason)
+		fmt.Fprintf(p.Out, "  %s  device %s %s: %s\n", p.red("failure"), f.Name(), strings.ReplaceAll(f.Status, "_", " "), reason)
 	}
 	switch v.Outcome {
 	case deploy.OutcomeSucceeded:
