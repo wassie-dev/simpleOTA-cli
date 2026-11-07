@@ -303,17 +303,11 @@ func (s *session) makeDefaultKey(path, publicPEM string) (bool, error) {
 	return made, err
 }
 
-// updateConfig reads the config afresh, lets change edit it, and saves it if
-// change reports a change, so that a command waiting at a prompt does not
-// undo what another command saved meanwhile.
+// updateConfig changes the config through config.Update, under the lock
+// every simpleota process shares, so that a command waiting at a prompt does
+// not undo what another command saved meanwhile.
 func (s *session) updateConfig(change func(*config.Config) bool) error {
-	cfg, err := config.Load(s.configDir)
-	if err != nil {
-		return err
-	}
-	if change(&cfg) {
-		err = config.Save(s.configDir, cfg)
-	}
+	cfg, err := config.Update(s.configDir, change)
 	s.cfg = cfg
 	return err
 }
