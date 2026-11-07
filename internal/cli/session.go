@@ -117,7 +117,9 @@ type openedProject struct {
 // current project but not change it, as for a staff account on another
 // owner's project. The server answers such a change with the 404 it gives
 // for a project it cannot find, so this reads the project to tell the two
-// apart.
+// apart. The API has no field that says the project was what it could not
+// find; its "No Project matches" detail is the only sign, so a 404 without
+// that detail, such as one for a missing deployment, is left as it is.
 func (a *App) explainReadOnly(ctx context.Context, err error) error {
 	var ae *api.Error
 	if a.opened == nil || !errors.As(err, &ae) || ae.StatusCode != http.StatusNotFound ||
