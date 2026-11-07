@@ -8,6 +8,7 @@ import (
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/deploy"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 // DeploymentView is a deployment in every command that shows one.
@@ -71,12 +72,12 @@ func (p Printer) Created(v CreatedView) error {
 	d := v.Deployment
 	audience := "every device in the project"
 	if len(v.Targets) > 0 {
-		audience = strings.Join(v.Targets, ", ")
+		audience = termtext.Clean(strings.Join(v.Targets, ", "))
 	}
-	fmt.Fprintf(p.Out, "%s deployment %s\n", p.green("Started"), d.ID)
+	fmt.Fprintf(p.Out, "%s deployment %s\n", p.green("Started"), termtext.Clean(d.ID))
 	fmt.Fprintf(p.Out, "  build    %d, offered to %d%% of %s\n", d.BuildNumber, d.RolloutPercentage, audience)
 	p.alsoActive(v.AlsoActive, d.BuildNumber)
-	p.nextStep("Watch it", "simpleota deployment wait "+d.ID)
+	p.nextStep("Watch it", "simpleota deployment wait "+termtext.Clean(d.ID))
 	return nil
 }
 
@@ -89,7 +90,7 @@ func (p Printer) alsoActive(others []DeploymentView, build int) {
 	fmt.Fprintln(p.Out)
 	fmt.Fprintln(p.Out, p.yellow("Also active for the same devices:"))
 	for _, d := range others {
-		fmt.Fprintf(p.Out, "  deployment  %s (build %d, %d%%)\n", d.ID, d.BuildNumber, d.RolloutPercentage)
+		fmt.Fprintf(p.Out, "  deployment  %s (build %d, %d%%)\n", termtext.Clean(d.ID), d.BuildNumber, d.RolloutPercentage)
 	}
 	fmt.Fprintf(p.Out, "Each device installs the highest build offered to it, so these keep reaching\nthe devices build %d does not. To stop one:\n  simpleota deployment complete <id>\n", build)
 }
@@ -107,7 +108,7 @@ func (p Printer) Rollout(v RolloutView) error {
 		return p.WriteJSON(v)
 	}
 	d := v.Deployment
-	fmt.Fprintf(p.Out, "Deployment %s (build %d) is %s at %d%%\n", d.ID, d.BuildNumber, p.state(d.State), d.RolloutPercentage)
+	fmt.Fprintf(p.Out, "Deployment %s (build %d) is %s at %d%%\n", termtext.Clean(d.ID), d.BuildNumber, p.state(d.State), d.RolloutPercentage)
 	if v.NextStep != "" {
 		fmt.Fprintf(p.Out, "\n%s\n", v.NextStep)
 	}
@@ -147,16 +148,16 @@ func (p Printer) DeploymentStatus(v DeploymentStatusView) error {
 		return p.WriteJSON(v)
 	}
 	d := v.Deployment
-	fmt.Fprintf(p.Out, "Deployment %s\n", p.bold(d.ID))
+	fmt.Fprintf(p.Out, "Deployment %s\n", p.bold(termtext.Clean(d.ID)))
 	fmt.Fprintf(p.Out, "  build    %d\n", d.BuildNumber)
-	fmt.Fprintf(p.Out, "  state    %s, %d%% (%s)\n", p.state(d.State), d.RolloutPercentage, d.RolloutStrategy)
+	fmt.Fprintf(p.Out, "  state    %s, %d%% (%s)\n", p.state(d.State), d.RolloutPercentage, termtext.Clean(d.RolloutStrategy))
 	fmt.Fprintf(p.Out, "  devices  %s\n", p.counts(v.Devices))
 	for _, f := range v.Failures {
 		reason := f.Reason
 		if reason == "" {
 			reason = "no reason given"
 		}
-		fmt.Fprintf(p.Out, "  %s  device %s %s: %s\n", p.red("failure"), f.DeviceID, strings.ReplaceAll(f.Status, "_", " "), reason)
+		fmt.Fprintf(p.Out, "  %s  device %s %s: %s\n", p.red("failure"), termtext.Clean(f.DeviceID), termtext.Clean(strings.ReplaceAll(f.Status, "_", " ")), termtext.Clean(reason))
 	}
 	switch v.Outcome {
 	case deploy.OutcomeSucceeded:
@@ -175,7 +176,7 @@ func (p Printer) DeploymentStatus(v DeploymentStatusView) error {
 
 // Progress is the one-line update printed to Err while waiting.
 func (p Printer) Progress(s deploy.Summary) {
-	p.Notice("%s  %s, %d%%: %s", time.Now().Format("15:04:05"), s.Deployment.State, s.Deployment.RolloutPercentage, p.counts(s.Counts))
+	p.Notice("%s  %s, %d%%: %s", time.Now().Format("15:04:05"), termtext.Clean(s.Deployment.State), s.Deployment.RolloutPercentage, p.counts(s.Counts))
 }
 
 func (p Printer) counts(c deploy.Counts) string {
@@ -204,5 +205,5 @@ func (p Printer) state(s string) string {
 	case api.StateCancelled:
 		return p.red(s)
 	}
-	return s
+	return termtext.Clean(s)
 }

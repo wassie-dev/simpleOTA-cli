@@ -13,6 +13,7 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/config"
 	"github.com/wassie-dev/simpleOTA-cli/internal/credentials"
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 const projectEnv = "SIMPLEOTA_PROJECT"
@@ -124,7 +125,7 @@ func projectSlugs(ps []api.Project) string {
 	}
 	slugs := make([]string, len(ps))
 	for i, p := range ps {
-		slugs[i] = p.Slug
+		slugs[i] = termtext.Clean(p.Slug)
 	}
 	return strings.Join(slugs, ", ")
 }

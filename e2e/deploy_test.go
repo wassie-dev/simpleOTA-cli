@@ -218,3 +218,21 @@ func TestStatusWaitFailsWhenCompletedWithNoDevices(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+func TestDeviceTextCannotDriveTheTerminal(t *testing.T) {
+	c := ciCLI(t)
+	out := release(t, c)
+	d := newDevice(t)
+	id := d.check(out.BuildNumber)
+	reason := "e2e \x1b[31mRED\x1b]0;TITLE\x07\rOVERWRITE\xc2\x9b31m\n2nd-line"
+	d.post("/api/v1/ota/status/", map[string]any{"device_id": d.id, "deployment_id": id, "event": "failed", "reason": reason})
+	r := c.run("", "deployment", "show", id)
+	for _, b := range []string{"\x1b", "\x07", "\r", "\xc2\x9b", "\n2nd-line"} {
+		if strings.Contains(r.stdout, b) {
+			t.Fatalf("show printed %q: %q", b, r.stdout)
+		}
+	}
+	if !strings.Contains(r.stdout, `\x1b[31mRED`) {
+		t.Fatalf("reason not shown escaped: %q", r.stdout)
+	}
+}

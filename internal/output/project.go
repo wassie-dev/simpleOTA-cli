@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 // ProjectView is a project. Fields other than id, slug and name are empty
@@ -63,7 +64,7 @@ func (p Printer) ProjectUse(v ProjectUseView) error {
 	if p.JSON {
 		return p.WriteJSON(v)
 	}
-	fmt.Fprintf(p.Out, "Commands now act on %s (%s).\n", v.Project.Slug, v.Project.Name)
+	fmt.Fprintf(p.Out, "Commands now act on %s (%s).\n", termtext.Clean(v.Project.Slug), termtext.Clean(v.Project.Name))
 	return nil
 }
 
@@ -72,7 +73,7 @@ func (p Printer) ProjectShow(v ProjectView) error {
 	if p.JSON {
 		return p.WriteJSON(v)
 	}
-	fmt.Fprintf(p.Out, "Project %s\n", p.bold(v.Slug))
+	fmt.Fprintf(p.Out, "Project %s\n", p.bold(termtext.Clean(v.Slug)))
 	p.field("name", v.Name)
 	p.field("id", v.ID)
 	p.field("framework", v.DefaultFramework)
