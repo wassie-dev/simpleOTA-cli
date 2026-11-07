@@ -63,7 +63,7 @@ func (a *App) runLogin(ctx context.Context, noBrowser bool) error {
 	if err != nil {
 		return err
 	}
-	apiURL, cfg := st.apiURL, st.cfg
+	apiURL := st.apiURL
 	token, err := a.readToken(apiURL, noBrowser)
 	if err != nil {
 		return err
@@ -93,8 +93,11 @@ func (a *App) runLogin(ctx context.Context, noBrowser bool) error {
 	if err != nil {
 		return fmt.Errorf("storing the token: %w", err)
 	}
-	cfg.APIURL, cfg.ProjectID, cfg.ProjectSlug = apiURL, "", ""
-	if err := config.Save(st.configDir, cfg); err != nil {
+	_, err = config.Update(st.configDir, func(c *config.Config) bool {
+		c.APIURL, c.ProjectID, c.ProjectSlug = apiURL, "", ""
+		return true
+	})
+	if err != nil {
 		return err
 	}
 
@@ -205,19 +208,21 @@ SIMPLEOTA_TOKEN, if set, stays in effect.`,
 			if err != nil {
 				return err
 			}
-			dir, cfg, apiURL := st.configDir, st.cfg, st.apiURL
+			dir, apiURL := st.configDir, st.apiURL
 			store := a.store(dir)
 			_, err = store.Get(apiURL)
 			hadToken := err == nil
 			if err := store.Delete(apiURL); err != nil {
 				return fmt.Errorf("removing the stored token: %w", err)
 			}
-			hadProject := cfg.APIURL == apiURL
-			if hadProject {
-				cfg.APIURL, cfg.ProjectID, cfg.ProjectSlug = "", "", ""
-				if err := config.Save(dir, cfg); err != nil {
-					return err
+			hadProject := false
+			if _, err := config.Update(dir, func(c *config.Config) bool {
+				if hadProject = c.APIURL == apiURL; hadProject {
+					c.APIURL, c.ProjectID, c.ProjectSlug = "", "", ""
 				}
+				return hadProject
+			}); err != nil {
+				return err
 			}
 			loggedOut := hadToken || hadProject
 			p := a.printer()

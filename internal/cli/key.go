@@ -187,11 +187,15 @@ func newKeyPath(configDir, keyID, out string) (string, error) {
 // makeDefaultKey makes path the key release signs with when there is no
 // default yet, and reports whether it did.
 func (s *session) makeDefaultKey(path string) (bool, error) {
-	if s.cfg.SigningKeyFile != "" {
-		return false, nil
-	}
-	s.cfg.SigningKeyFile = path
-	return true, config.Save(s.configDir, s.cfg)
+	made := false
+	cfg, err := config.Update(s.configDir, func(c *config.Config) bool {
+		if made = c.SigningKeyFile == ""; made {
+			c.SigningKeyFile = path
+		}
+		return made
+	})
+	s.cfg = cfg
+	return made, err
 }
 
 // pinnedKeys returns the keys for the firmware snippet: the new key, then

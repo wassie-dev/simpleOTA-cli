@@ -120,31 +120,38 @@ func (f File) Get(apiURL string) (string, error) {
 	return t, nil
 }
 
+// Set stores the token under a lock shared by every simpleota process, so
+// that commands saving tokens for other servers at the same time keep them.
 func (f File) Set(apiURL, token string) error {
-	tokens, err := f.load()
-	if err != nil {
-		return err
-	}
-	tokens[apiURL] = token
-	return f.save(tokens)
-}
-
-func (f File) Delete(apiURL string) error {
-	tokens, err := f.load()
-	if err != nil {
-		return err
-	}
-	if _, ok := tokens[apiURL]; !ok {
-		return nil
-	}
-	delete(tokens, apiURL)
-	if len(tokens) == 0 {
-		if err := os.Remove(f.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	return config.WithLock(f.Path, func() error {
+		tokens, err := f.load()
+		if err != nil {
 			return err
 		}
-		return nil
-	}
-	return f.save(tokens)
+		tokens[apiURL] = token
+		return f.save(tokens)
+	})
+}
+
+// Delete removes the token under the same lock as Set.
+func (f File) Delete(apiURL string) error {
+	return config.WithLock(f.Path, func() error {
+		tokens, err := f.load()
+		if err != nil {
+			return err
+		}
+		if _, ok := tokens[apiURL]; !ok {
+			return nil
+		}
+		delete(tokens, apiURL)
+		if len(tokens) == 0 {
+			if err := os.Remove(f.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+			return nil
+		}
+		return f.save(tokens)
+	})
 }
 
 func (f File) save(tokens map[string]string) error {

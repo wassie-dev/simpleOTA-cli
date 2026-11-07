@@ -11,6 +11,11 @@ All notable changes to simpleota are documented here. The format follows
 - On Windows, two `simpleota` commands saving the config or the credentials
   file at the same moment could fail with "Access is denied". The save now
   retries for up to a second.
+- Commands running at the same time, such as `login`, `project use` and
+  `key generate`, could undo each other's changes to the config file, and
+  logins to different servers could drop each other's stored tokens. Each
+  change now reads the file afresh under a lock shared by every `simpleota`
+  process.
 
 ## [0.1.3] - 2026-11-06
 

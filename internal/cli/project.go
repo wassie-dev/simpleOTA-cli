@@ -250,8 +250,10 @@ tokens.`,
 			if err != nil {
 				return err
 			}
-			s.cfg.APIURL, s.cfg.ProjectID, s.cfg.ProjectSlug = s.apiURL, p.ID, p.Slug
-			if err := config.Save(s.configDir, s.cfg); err != nil {
+			if _, err := config.Update(s.configDir, func(c *config.Config) bool {
+				c.APIURL, c.ProjectID, c.ProjectSlug = s.apiURL, p.ID, p.Slug
+				return true
+			}); err != nil {
 				return err
 			}
 			return a.printer().ProjectUse(output.ProjectUseView{APIURL: s.apiURL, Project: output.NewProjectView(p)})
