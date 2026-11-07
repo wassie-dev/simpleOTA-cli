@@ -145,7 +145,8 @@ simpleota
 ├── deployment
 │   ├── list | show [id] | wait [id] [--timeout]
 │   ├── create --build <n> [--channel]... [--group]... [--all-devices] [--percent]
-│   └── ramp <id> --percent <n> | pause | resume | complete | cancel <id>
+│   ├── ramp <id> --percent <n> | pause | complete | cancel <id>
+│   └── resume <id> [--all-devices]
 ├── device    list [--channel] [--group] [--state] | show <device>
 │             events <device> | update <device> [--name] [--channel] [--state]
 ├── channel   list | create <name> [--default]
@@ -168,7 +169,7 @@ simpleota
 | `deployment list\|show` | List deployments, or show one's state and device progress |
 | `deployment create` | Deploy an uploaded build to channels (stable by default), groups, or every device, and start it |
 | `deployment wait` | Wait for a deployment to succeed or fail; gates CI |
-| `deployment ramp\|pause\|resume\|complete\|cancel` | Change a deployment's state |
+| `deployment ramp\|pause\|resume\|complete\|cancel` | Change a deployment's state. Resuming a deployment for every device in a project with two or more devices needs `--all-devices` |
 | `device list\|show` | List devices, filtered by channel, group or state, or show one |
 | `device events` | Show a device's recent update checks and why it was or was not offered a build |
 | `device update` | Rename a device, move it to a channel, or (de)activate it |

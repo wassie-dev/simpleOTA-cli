@@ -162,3 +162,43 @@ func TestGroupsRejectUnknownSubcommands(t *testing.T) {
 		t.Errorf("bare group should print help: %+v", r)
 	}
 }
+
+func TestResumeAllDevicesNeedsConfirmation(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.ProjectToken)
+	h.fake.Devices = []api.Device{{ID: "dddddddd-dddd-4ddd-8ddd-000000000001"}, {ID: "dddddddd-dddd-4ddd-8ddd-000000000002"}}
+	h.run("build", "upload", writeFirmware(t), "--version-label", "1", "--chip", "esp32")
+	if r := h.run("deployment", "create", "--build", "1", "--all-devices", "--percent", "50"); r.code != 0 {
+		t.Fatalf("create: %+v", r)
+	}
+	id := h.fake.Deployments[0].ID
+	if r := h.run("deployment", "pause", id); r.code != 0 {
+		t.Fatalf("pause: %+v", r)
+	}
+	r := h.run("deployment", "resume", id)
+	if r.code != ExitUsage || !strings.Contains(r.stderr, "resume "+id+" --all-devices") || h.fake.Deployments[0].State != api.StatePaused {
+		t.Fatalf("resume without confirmation: %+v", r)
+	}
+	if r := h.run("deployment", "resume", id, "--all-devices", "--json"); r.code != 0 || !strings.Contains(r.stdout, `"state": "active"`) {
+		t.Fatalf("confirmed resume: %+v", r)
+	}
+
+	h.fake.AddDeployment(depA, api.StatePaused, 1, 10)
+	if r := h.run("deployment", "resume", depA, "--all-devices"); r.code != ExitUsage || !strings.Contains(r.stderr, "channels or groups") {
+		t.Fatalf("--all-devices on a channel deployment: %+v", r)
+	}
+	if r := h.run("deployment", "resume", depA); r.code != 0 {
+		t.Fatalf("channel resume: %+v", r)
+	}
+}
+
+func TestResumeShowsOtherRefusalsAsTheyAre(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.ProjectToken)
+	h.fake.AddDeployment(depA, api.StatePaused, 1, 100)
+	h.fake.Deployments[0].TargetChannelIDs = nil
+	r := h.run("deployment", "resume", depA)
+	if r.code != ExitError || !strings.Contains(r.stderr, "with no devices") || strings.Contains(r.stderr, "--all-devices") {
+		t.Fatalf("%+v", r)
+	}
+}
