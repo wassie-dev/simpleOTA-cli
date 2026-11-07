@@ -51,8 +51,9 @@ func (s *session) currentProject(ctx context.Context) (api.Project, string, erro
 	}
 	if ref := strings.TrimSpace(s.app.Getenv(projectEnv)); ref != "" {
 		p, err := findProject(ctx, s.api, ref)
-		if err != nil {
-			err = fmt.Errorf("%s: %w", projectEnv, err)
+		var ee *exitError
+		if errors.As(err, &ee) && ee.code == ExitUsage {
+			err = usageErr("%s: %w", projectEnv, err)
 		}
 		return p, projectFromEnv, err
 	}

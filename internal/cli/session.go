@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
@@ -101,7 +102,35 @@ func (a *App) projectSession(ctx context.Context) (*session, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	a.opened = &openedProject{session: s, projectID: p.ID}
 	return s, p.ID, nil
+}
+
+// openedProject is the project a command resolved, for explaining its
+// errors afterwards.
+type openedProject struct {
+	session   *session
+	projectID string
+}
+
+// explainReadOnly explains a change refused because the token can read the
+// current project but not change it, as for a staff account on another
+// owner's project. The server answers such a change with the 404 it gives
+// for a project it cannot find, so this reads the project to tell the two
+// apart.
+func (a *App) explainReadOnly(ctx context.Context, err error) error {
+	var ae *api.Error
+	if a.opened == nil || !errors.As(err, &ae) || ae.StatusCode != http.StatusNotFound ||
+		ae.Method == http.MethodGet || !strings.Contains(ae.Detail, "No Project matches") {
+		return err
+	}
+	if _, getErr := a.opened.session.api.GetProject(ctx, a.opened.projectID); getErr != nil {
+		return err
+	}
+	return &exitError{code: ExitAuth, err: &explainedErr{
+		msg:   "this token can read the project but not change it\nA staff account can open any project, but only its owner can change it.",
+		cause: err,
+	}}
 }
 
 // requirePersonal refuses project tokens for commands that change who can

@@ -19,6 +19,16 @@ func usageErr(format string, args ...any) error {
 	return &exitError{code: ExitUsage, err: fmt.Errorf(format, args...)}
 }
 
+// explainedErr replaces an error's message and keeps the error itself for
+// errors.As.
+type explainedErr struct {
+	msg   string
+	cause error
+}
+
+func (e *explainedErr) Error() string { return e.msg }
+func (e *explainedErr) Unwrap() error { return e.cause }
+
 func authErr(format string, args ...any) error {
 	return &exitError{code: ExitAuth, err: fmt.Errorf(format, args...)}
 }

@@ -297,3 +297,17 @@ func TestDeviceTextCannotDriveTheTerminal(t *testing.T) {
 		t.Fatalf("reason not shown escaped: %q", r.stdout)
 	}
 }
+
+func TestHostileDeviceIDIsNotPrinted(t *testing.T) {
+	c := ciCLI(t)
+	out := release(t, c)
+	d := &device{t: t, id: "e2e-" + uid() + "\x1b[2J\x1b]0;PWNED\x07\rFORGED\nError: none"}
+	id := d.check(out.BuildNumber)
+	d.report(id, "failed", out.BuildNumber)
+	for _, args := range [][]string{{"deployment", "show", id}, {"deployment", "wait", id, "--timeout", "20s"}} {
+		r := c.run("", args...)
+		if strings.ContainsAny(r.stdout+r.stderr, "\x1b\x07\r") || strings.Contains(r.stdout+r.stderr, "FORGED") || !strings.Contains(r.stdout, "failure  device ") {
+			t.Errorf("%v: %q %q", args, r.stdout, r.stderr)
+		}
+	}
+}

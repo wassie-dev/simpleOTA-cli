@@ -92,6 +92,9 @@ func TestLoginWithStaffToken(t *testing.T) {
 		t.Fatalf("status: %+v", st)
 	}
 	c.mustRun("deployment", "list")
+	if r := c.run("", "channel", "create", "e2e-"+uid()); r.code != 3 || !strings.Contains(r.stderr, "can read the project but not change it") {
+		t.Fatalf("staff write to another account's project: %+v", r)
+	}
 	if r := c.run("", "--project", "does-not-exist-"+uid(), "status"); r.code != 2 || !strings.Contains(r.stdout, unknownSlug) {
 		t.Fatalf("status with an unknown project: %+v", r)
 	}

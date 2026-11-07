@@ -219,11 +219,12 @@ func notDeploymentID(ref string) error {
 	return usageErr("%q is not a deployment ID\nList deployments with:\n  simpleota deployment list", ref)
 }
 
-// deploymentErr turns a 404 into a message naming the likely cause.
+// deploymentErr turns a 404 into a usage error naming the likely cause.
 func deploymentErr(err error, id string) error {
 	var ae *api.Error
 	if errors.As(err, &ae) && ae.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("no deployment %s in this project\nCheck the ID and the current project.", id)
+		msg := fmt.Sprintf("no deployment %s in this project\nCheck the ID and the current project.", id)
+		return &exitError{code: ExitUsage, err: &explainedErr{msg: msg, cause: err}}
 	}
 	return err
 }
@@ -231,7 +232,7 @@ func deploymentErr(err error, id string) error {
 func failureText(s deploy.Summary) string {
 	parts := make([]string, 0, len(s.Failures))
 	for _, f := range s.Failures {
-		parts = append(parts, fmt.Sprintf("device %s %s", termtext.Clean(f.DeviceID), termtext.Clean(strings.ReplaceAll(f.Status, "_", " "))))
+		parts = append(parts, fmt.Sprintf("device %s %s", termtext.Clean(f.Name()), termtext.Clean(strings.ReplaceAll(f.Status, "_", " "))))
 	}
 	return strings.Join(parts, "; ")
 }

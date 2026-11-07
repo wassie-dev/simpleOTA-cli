@@ -357,14 +357,15 @@ An array of [deployment objects](#deployment-object), newest first.
 {
   "deployment": { … },
   "devices": { "offered": 3, "in_progress": 1, "confirmed": 1, "failed": 0, "rolled_back": 1 },
-  "failures": [ { "device_id": "…", "status": "rolled_back", "reason": "task_wdt" } ],
+  "failures": [ { "device_id": "…", "device": "lamp-kitchen", "status": "rolled_back", "reason": "task_wdt" } ],
   "outcome": "device_failed"
 }
 ```
 
 `devices.offered` counts devices that have been offered the build or have
 reported against the deployment; the other counts split it. `device_id` is
-the device's SimpleOTA UUID. `failures` is always an array.
+the device's SimpleOTA UUID, and `device` the ID the device reports, omitted
+when it could not be looked up. `failures` is always an array.
 
 `outcome` is one of:
 
