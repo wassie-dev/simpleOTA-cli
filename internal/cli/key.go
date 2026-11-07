@@ -169,6 +169,7 @@ func (a *App) runKeyGenerate(ctx context.Context, keyID, out string) error {
 	if err != nil {
 		return fmt.Errorf("key %q is registered and saved to %s\nMaking it the default failed: %w\nPass --key-file to sign with it.", keyID, out, err)
 	}
+	isDefault = isDefault || s.cfg.SigningKeyFile == out
 	if !isDefault && s.cfg.SigningKeyPublicPEM == "" && !slices.ContainsFunc(existing, s.isDefaultKey) {
 		a.recordDefaultPublicKey(s)
 	}

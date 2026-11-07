@@ -208,8 +208,8 @@ func TestKeysGenerateKeepsKeyWhenRegistrationIsUncertain(t *testing.T) {
 		t.Fatalf("keys %d, posts %d", len(h.fake.SigningKeys), h.fake.Count("POST "+keysPath))
 	}
 	r = h.run("keys", "generate", "--key-id", "prod", "--json")
-	if decodeKey(t, r); h.fake.Count("POST "+keysPath) != 2 {
-		t.Fatal("a registered key was registered again")
+	if kv := decodeKey(t, r); h.fake.Count("POST "+keysPath) != 2 || !kv.DefaultSigningKey {
+		t.Fatalf("a re-run must not register the key again, and the key stays the default: %+v", kv)
 	}
 }
 
