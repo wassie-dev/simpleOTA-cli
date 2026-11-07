@@ -293,12 +293,29 @@ func defaultKeyPath(configDir, keyID string) string {
 // makeDefaultKey makes path the key release signs with when there is no
 // default yet, and reports whether it did.
 func (s *session) makeDefaultKey(path, publicPEM string) (bool, error) {
-	if s.cfg.SigningKeyFile != "" {
-		return false, nil
+	made := false
+	err := s.updateConfig(func(c *config.Config) bool {
+		if made = c.SigningKeyFile == ""; made {
+			c.SigningKeyFile, c.SigningKeyPublicPEM = path, publicPEM
+		}
+		return made
+	})
+	return made, err
+}
+
+// updateConfig reads the config afresh, lets change edit it, and saves it if
+// change reports a change, so that a command waiting at a prompt does not
+// undo what another command saved meanwhile.
+func (s *session) updateConfig(change func(*config.Config) bool) error {
+	cfg, err := config.Load(s.configDir)
+	if err != nil {
+		return err
 	}
-	s.cfg.SigningKeyFile = path
-	s.cfg.SigningKeyPublicPEM = publicPEM
-	return true, config.Save(s.configDir, s.cfg)
+	if change(&cfg) {
+		err = config.Save(s.configDir, cfg)
+	}
+	s.cfg = cfg
+	return err
 }
 
 // recordDefaultPublicKey saves the public key of a default signing key set
@@ -333,8 +350,13 @@ func (a *App) recordDefaultPublicKey(s *session) {
 	if err != nil {
 		return
 	}
-	s.cfg.SigningKeyPublicPEM = publicPEM
-	if err := config.Save(s.configDir, s.cfg); err != nil {
+	if err := s.updateConfig(func(c *config.Config) bool {
+		if c.SigningKeyFile != path {
+			return false
+		}
+		c.SigningKeyPublicPEM = publicPEM
+		return true
+	}); err != nil {
 		a.printer().Notice("Recording the public key of your default signing key failed: %v", err)
 	}
 }

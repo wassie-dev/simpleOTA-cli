@@ -321,3 +321,33 @@ func TestKeysGenerateRecognisesALegacyDefaultKeyAtACustomPath(t *testing.T) {
 		}
 	})
 }
+
+func TestKeysGenerateKeepsConfigChangedWhileItWaits(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.PersonalToken)
+	h.env[passphraseEnv] = "correct horse battery"
+	decodeKey(t, h.run("keys", "generate", "--key-id", "prod", "--out", filepath.Join(t.TempDir(), "prod.key"), "--json"))
+	cfg, _ := config.Load(h.configDir)
+	cfg.SigningKeyPublicPEM = ""
+	if err := config.Save(h.configDir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	delete(h.env, passphraseEnv)
+	h.prompts = []string{"another passphrase", "another passphrase", "correct horse battery"}
+	h.onPrompt = func(label string) {
+		if strings.Contains(label, "default signing key") {
+			h.onPrompt = nil
+			saved := h.prompts
+			h.prompts = nil
+			if r := h.run("project", "use", "fleet"); r.code != 0 {
+				t.Errorf("project use: %+v", r)
+			}
+			h.prompts = saved
+		}
+	}
+	decodeKey(t, h.run("keys", "generate", "--key-id", "backup", "--out", filepath.Join(t.TempDir(), "backup.key"), "--json"))
+	cfg, _ = config.Load(h.configDir)
+	if cfg.ProjectID != fakeapi.ProjectID || cfg.SigningKeyPublicPEM == "" {
+		t.Fatalf("project use during the prompt was undone, or the key not recorded: %+v", cfg)
+	}
+}
