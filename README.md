@@ -258,6 +258,17 @@ passing `simpleota/backend-e2e` status for the tagged commit from the account
 named in the `BACKEND_E2E_REPORTER` repository variable. Without one, nothing
 is published.
 
+To release, tag the exact commit that passed:
+
+1. After the last merge, note the commit to release: `git rev-parse origin/main`.
+   A merge makes a new commit, so a result for the pull request's own head
+   does not count.
+2. In the server repository, run the "CLI e2e" workflow with that full SHA,
+   and approve it once you have reviewed that commit.
+3. Check that the commit has a `success` status for `simpleota/backend-e2e`.
+4. Tag that same SHA: `git tag vX.Y.Z <sha>` and push the tag. The release
+   workflow checks the status again and stops if it is not `success`.
+
 ## License
 
 MIT. Report security issues privately as described in [SECURITY.md](SECURITY.md).
