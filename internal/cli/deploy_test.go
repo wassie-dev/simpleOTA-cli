@@ -197,7 +197,11 @@ func TestStaffWriteToAnotherOwnersProjectIsExplained(t *testing.T) {
 
 func TestParseErrorsFollowJSON(t *testing.T) {
 	h := newHarness(t)
-	for _, args := range [][]string{{"build", "list", "--bogus", "--json"}, {"--json", "nonsense"}} {
+	for _, args := range [][]string{
+		{"build", "list", "--bogus", "--json"}, {"--json", "nonsense"},
+		{"build", "list", "--bogus", "--json=1"}, {"build", "list", "--bogus", "--json=t"}, {"build", "list", "--bogus", "--json=TRUE"},
+		{"build", "list", "--json=false", "--bogus", "--json"},
+	} {
 		r := h.run(args...)
 		var v struct {
 			Error    string `json:"error"`
@@ -219,5 +223,51 @@ func TestProjectEnvPrefixOnlyOnProjectErrors(t *testing.T) {
 	h.fake.FailNext["/api/v1/projects/"] = []int{500}
 	if r := h.run("build", "list"); r.code != ExitError || strings.Contains(r.stderr, "SIMPLEOTA_PROJECT") {
 		t.Fatalf("server error: %+v", r)
+	}
+}
+
+func TestFailuresDoNotPrintAHostileDeviceID(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.ProjectToken)
+	h.fake.AddDeployment(depA, api.StateActive, 5, 100)
+	uuid := "dddddddd-dddd-4ddd-8ddd-000000000001"
+	hostileID := "lamp\x1b[2J\x1b]0;PWNED\x07\rFORGED\nError: none"
+	h.fake.Devices = []api.Device{{ID: uuid, DeviceID: hostileID}}
+	h.fake.SetStates(depA, api.DeviceState{DeviceID: uuid, FinalStatus: api.DeviceFailed, AssignedToRollout: true})
+	for _, args := range [][]string{{"deployment", "wait", depA}, {"deployment", "show", depA}} {
+		r := h.run(args...)
+		if strings.ContainsAny(r.stdout+r.stderr, "\x1b\x07\r") || strings.Contains(r.stdout+r.stderr, "FORGED") || !strings.Contains(r.stdout, "device "+uuid) {
+			t.Errorf("%v: %q %q", args, r.stdout, r.stderr)
+		}
+	}
+	r := h.run("deployment", "show", depA, "--json")
+	var v struct {
+		Failures []struct {
+			Device string `json:"device"`
+		} `json:"failures"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &v); err != nil || len(v.Failures) != 1 || v.Failures[0].Device != hostileID {
+		t.Fatalf("JSON keeps the exact ID: %+v %v", v, err)
+	}
+}
+
+func TestStaffCanChangeTheirOwnProject(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.StaffToken)
+	h.fake.StaffProjects = []api.Project{h.fake.Projects[0]}
+	if r := h.run("channel", "create", "beta", "--project", fakeapi.ProjectID); r.code != 0 {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestParseErrorsStayTextWithoutJSON(t *testing.T) {
+	h := newHarness(t)
+	for _, args := range [][]string{
+		{"build", "list", "--bogus", "--json=false"}, {"build", "list", "--bogus", "--json=0"},
+		{"--json", "--json=f", "build", "list", "--bogus"}, {"build", "list", "--bogus", "--", "--json"},
+	} {
+		if r := h.run(args...); r.code != ExitUsage || r.stdout != "" || !strings.HasPrefix(r.stderr, "Error: ") {
+			t.Errorf("%v: %+v", args, r)
+		}
 	}
 }

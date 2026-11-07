@@ -13,8 +13,9 @@ All notable changes to simpleota are documented here. The format follows
 - A staff account's change to another owner's project, which the server
   refuses, is explained as read-only access, with exit code 3, instead of as
   a missing project or deployment.
-- A failure line names the device by the ID it reports, and the JSON failure
-  object adds `device`.
+- A failure line names the device by the ID it reports when that is plain
+  printable text, and by its UUID otherwise. The JSON failure object adds
+  `device`.
 - `SIMPLEOTA_PROJECT:` prefixes only errors about that project, not network
   errors.
 - A `go install` build reports its version without a leading `v`, as release

@@ -14,13 +14,18 @@ var Version = "dev"
 // version Go recorded in the binary, without its leading "v" so both read
 // the same.
 func Current() string {
-	if Version != "dev" {
-		return Version
+	bi, _ := debug.ReadBuildInfo()
+	return current(Version, bi)
+}
+
+func current(linked string, bi *debug.BuildInfo) string {
+	if linked != "dev" {
+		return linked
 	}
-	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+	if bi != nil && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
 		return strings.TrimPrefix(bi.Main.Version, "v")
 	}
-	return Version
+	return linked
 }
 
 // UserAgent identifies the CLI to the SimpleOTA API.

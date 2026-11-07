@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 )
@@ -196,9 +198,11 @@ func nameFailures(ctx context.Context, a API, projectID string, failures []Failu
 	}
 }
 
-// Name is how output names the device: its reported ID, or its UUID.
+// Name is how output names the device: its reported ID when that is plain
+// printable text, or else its UUID. A device chooses its own ID, so an ID
+// with control or formatting characters is not printed.
 func (f Failure) Name() string {
-	if f.Device != "" {
+	if f.Device != "" && !strings.ContainsFunc(f.Device, func(r rune) bool { return !unicode.IsPrint(r) }) {
 		return f.Device
 	}
 	return f.DeviceID

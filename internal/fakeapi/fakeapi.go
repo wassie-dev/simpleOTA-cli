@@ -209,7 +209,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		detail(w, http.StatusNotFound, "Not Found")
 		return
 	}
-	if token == StaffToken && r.Method != http.MethodGet {
+	if token == StaffToken && r.Method != http.MethodGet && !slices.ContainsFunc(s.StaffProjects, func(p api.Project) bool { return p.ID == ProjectID }) {
 		detail(w, http.StatusNotFound, "Not Found: No Project matches the given query.")
 		return
 	}

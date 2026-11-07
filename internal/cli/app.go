@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -253,15 +254,19 @@ func (a *App) rootCommand() *cobra.Command {
 }
 
 // jsonRequested reports whether args ask for --json, for errors raised
-// before the flags are parsed.
+// before the flags are parsed. As when parsing, the last --json wins, and it
+// takes the values strconv.ParseBool accepts.
 func jsonRequested(args []string) bool {
+	on := false
 	for _, arg := range args {
-		switch arg {
-		case "--":
-			return false
-		case "--json", "--json=true":
-			return true
+		if arg == "--" {
+			break
+		}
+		if arg == "--json" {
+			on = true
+		} else if v, ok := strings.CutPrefix(arg, "--json="); ok {
+			on, _ = strconv.ParseBool(v)
 		}
 	}
-	return false
+	return on
 }
