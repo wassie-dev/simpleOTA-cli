@@ -46,8 +46,10 @@ type Options struct {
 	Chip string
 	// Framework defaults to the project's default framework when empty.
 	Framework string
-	// Key signs the release when set; otherwise it is uploaded as basic.
-	Key ed25519.PrivateKey
+	// LoadKey returns the key to sign with, or nil to upload as basic. It
+	// is called once the binary has passed its local checks, so a wrong file
+	// is reported before a passphrase is asked for. Nil means basic.
+	LoadKey func() (ed25519.PrivateKey, error)
 	// AllowDuplicate uploads the binary even when the project already has
 	// a build with the same SHA-256.
 	AllowDuplicate bool
@@ -165,6 +167,12 @@ func (s Service) prepare(ctx context.Context, o Options) (prepared, error) {
 	if err != nil {
 		return p, err
 	}
+	var key ed25519.PrivateKey
+	if o.LoadKey != nil {
+		if key, err = o.LoadKey(); err != nil {
+			return p, err
+		}
+	}
 	sum := sha256.Sum256(binary)
 	p.res.Chip, p.res.SHA256, p.res.Size = chip, hex.EncodeToString(sum[:]), int64(len(binary))
 	if !o.AllowDuplicate {
@@ -188,8 +196,8 @@ func (s Service) prepare(ctx context.Context, o Options) (prepared, error) {
 		SecurityMode: manifest.SecurityBasic,
 		SHA256:       p.res.SHA256,
 	}
-	if o.Key != nil {
-		keyID, err := s.registeredKeyID(ctx, o.Key.Public().(ed25519.PublicKey))
+	if key != nil {
+		keyID, err := s.registeredKeyID(ctx, key.Public().(ed25519.PublicKey))
 		if err != nil {
 			return p, err
 		}
@@ -197,7 +205,7 @@ func (s Service) prepare(ctx context.Context, o Options) (prepared, error) {
 		m.SigningMetadata = &manifest.SigningMetadata{
 			KeyID:     keyID,
 			Algorithm: manifest.AlgorithmEd25519,
-			Signature: signing.Sign(o.Key, binary),
+			Signature: signing.Sign(key, binary),
 		}
 		p.res.KeyID = keyID
 	}
