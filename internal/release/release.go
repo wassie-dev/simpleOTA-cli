@@ -277,7 +277,7 @@ func (s Service) deploymentsOf(ctx context.Context, a api.Artifact) string {
 	var b strings.Builder
 	for _, d := range deps {
 		if d.ArtifactID == a.ID && (d.State == api.StateActive || d.State == api.StatePaused) {
-			fmt.Fprintf(&b, "\n  deployment %s is %s at %d%%", d.ID, d.State, d.RolloutPercentage)
+			fmt.Fprintf(&b, "\n  deployment %s is %s at %d%%", termtext.Clean(d.ID), termtext.Clean(d.State), d.RolloutPercentage)
 		}
 	}
 	if b.Len() == 0 {

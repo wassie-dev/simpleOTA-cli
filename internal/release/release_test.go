@@ -502,3 +502,31 @@ func TestDuplicateRefusalNamesRunningDeployments(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestUploadMessagesShowServerIDsEscaped(t *testing.T) {
+	const hostileID, hostileState = "dep\x1b]0;PWNED\x07\nError: forged", "draft\x1b[2J\nError: forged"
+	fake := fakeapi.New(t)
+	sum := sha256.Sum256(firmware)
+	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method+" "+r.URL.Path != releasePath {
+			fake.Config.Handler.ServeHTTP(w, r)
+			return
+		}
+		fake.Mu.Lock()
+		fake.Artifacts = append(fake.Artifacts, api.Artifact{ID: "b", BuildNumber: 9, VersionLabel: "1", ChecksumSHA256: hex.EncodeToString(sum[:]), SecurityMode: "basic", ChipFamily: "esp32", Framework: "esp_idf"})
+		fake.Deployments = append(fake.Deployments, api.Deployment{ID: hostileID, ArtifactID: "b", State: hostileState, RolloutPercentage: 100, TargetChannelIDs: []string{fakeapi.StableChannelID}})
+		fake.Mu.Unlock()
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	t.Cleanup(front.Close)
+	svc := release.Service{API: api.New(front.URL, fakeapi.ProjectToken, "test", api.WithSleep(func(context.Context, time.Duration) error { return nil })), ProjectID: fakeapi.ProjectID}
+	opts := release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32"}
+	_, lost := svc.Release(context.Background(), opts, everyone)
+	fake.Deployments[0].State = api.StateActive
+	_, dup := svc.Release(context.Background(), opts, everyone)
+	for name, err := range map[string]error{"lost reply": lost, "duplicate": dup} {
+		if err == nil || !strings.Contains(err.Error(), "deployment dep") || strings.ContainsAny(err.Error(), "\x1b\x07") || strings.Contains(err.Error(), "\nError: forged") {
+			t.Errorf("%s: %q", name, err)
+		}
+	}
+}

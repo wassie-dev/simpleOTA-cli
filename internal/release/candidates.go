@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 // request is what an upload asked the server to create.
@@ -67,7 +68,7 @@ func (s Service) candidates(ctx context.Context, req request) (string, error) {
 				continue
 			}
 			n++
-			fmt.Fprintf(&b, "\n    deployment %s, %s at %d%% to %s: %s", d.ID, d.State, d.RolloutPercentage,
+			fmt.Fprintf(&b, "\n    deployment %s, %s at %d%% to %s: %s", termtext.Clean(d.ID), termtext.Clean(d.State), d.RolloutPercentage,
 				targetText(d, channels), verdict(deploymentDiffs(d, channels, *req.target)))
 		}
 		if n == 0 {
@@ -115,7 +116,7 @@ func buildDiffs(a api.Artifact, req request) []string {
 func deploymentDiffs(dep api.Deployment, channels map[string]string, t Target) []string {
 	var d []string
 	if dep.State != api.StateActive {
-		d = append(d, fmt.Sprintf("%s, not active", dep.State))
+		d = append(d, fmt.Sprintf("%s, not active", termtext.Clean(dep.State)))
 	}
 	if dep.RolloutPercentage != t.Percent {
 		d = append(d, fmt.Sprintf("%d%%, not %d%%", dep.RolloutPercentage, t.Percent))
