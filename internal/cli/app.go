@@ -20,6 +20,7 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/browser"
 	"github.com/wassie-dev/simpleOTA-cli/internal/credentials"
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 	"github.com/wassie-dev/simpleOTA-cli/internal/update"
 	"github.com/wassie-dev/simpleOTA-cli/internal/version"
 )
@@ -162,7 +163,7 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	if a.flags.json {
 		_ = a.printer().WriteJSON(output.ErrorView{Error: msg, ExitCode: code})
 	} else {
-		fmt.Fprintln(a.Err, "Error: "+msg)
+		fmt.Fprintln(a.Err, "Error: "+termtext.CleanLines(msg))
 	}
 	return code
 }

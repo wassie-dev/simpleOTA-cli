@@ -18,6 +18,7 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/manifest"
 	"github.com/wassie-dev/simpleOTA-cli/internal/signing"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 var (
@@ -259,7 +260,7 @@ func (s Service) refuseDuplicate(ctx context.Context, sha string) error {
 	for _, a := range artifacts {
 		if strings.EqualFold(a.ChecksumSHA256, sha) {
 			return fmt.Errorf("%w: build %d (version %s) has the same SHA-256%s\nTo upload it again as a new build, pass --allow-duplicate.",
-				ErrDuplicate, a.BuildNumber, a.VersionLabel, s.deploymentsOf(ctx, a))
+				ErrDuplicate, a.BuildNumber, termtext.Clean(a.VersionLabel), s.deploymentsOf(ctx, a))
 		}
 	}
 	return nil
@@ -294,7 +295,7 @@ func (s Service) uploadErr(ctx context.Context, err error, allowDuplicate bool, 
 	case errors.Is(err, context.Canceled):
 		return err
 	case errors.As(err, &ae) && ae.StatusCode == http.StatusBadRequest && strings.HasPrefix(ae.Detail, "sha256 mismatch"):
-		return fmt.Errorf("%w: the server received different bytes than were sent (%s)\nNothing was created, so it is safe to run the command again.", ErrChecksumMismatch, ae.Detail)
+		return fmt.Errorf("%w: the server received different bytes than were sent (%s)\nNothing was created, so it is safe to run the command again.", ErrChecksumMismatch, termtext.Clean(ae.Detail))
 	case errors.As(err, &ae) && ae.StatusCode < http.StatusInternalServerError:
 		return err
 	case allowDuplicate:

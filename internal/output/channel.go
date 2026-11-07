@@ -3,6 +3,7 @@ package output
 import (
 	"fmt"
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 // ChannelView is a release channel.
@@ -23,7 +24,7 @@ func (p Printer) ChannelShow(c ChannelView) error {
 	if p.JSON {
 		return p.WriteJSON(c)
 	}
-	fmt.Fprintf(p.Out, "Channel %s\n", p.bold(c.Name))
+	fmt.Fprintf(p.Out, "Channel %s\n", p.bold(termtext.Clean(c.Name)))
 	p.field("id", c.ID)
 	if c.IsDefault {
 		p.field("default", "yes; new devices join it")

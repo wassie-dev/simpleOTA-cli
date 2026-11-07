@@ -34,6 +34,12 @@ All notable changes to simpleota are documented here. The format follows
   again.
 - When `release` stops because the project already has the binary, it lists
   that build's running deployments.
+- Text from the server, such as a failure reason a device reported or a device
+  ID, could carry terminal control sequences that recoloured, retitled or
+  overwrote the terminal, or forged output lines. Text output now shows
+  control characters as escapes such as `\x1b`, and doubles backslashes. JSON
+  keeps the exact values, and now escapes C1 control characters too; a tool
+  that decodes them, such as `jq -r`, still prints them raw.
 
 ## [0.1.3] - 2026-11-06
 

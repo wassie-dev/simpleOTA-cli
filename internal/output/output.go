@@ -3,6 +3,7 @@
 package output
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,9 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode/utf8"
+
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 // Printer writes results to Out and notices to Err.
@@ -20,12 +24,39 @@ type Printer struct {
 	Color bool
 }
 
-// WriteJSON writes v as indented JSON followed by a newline.
+// WriteJSON writes v as indented JSON followed by a newline. C1 control
+// characters are escaped as well as C0, so the encoded output itself holds
+// no raw control characters. A tool that decodes the strings, such as
+// jq -r, gets the exact values back, control characters included.
 func (p Printer) WriteJSON(v any) error {
-	enc := json.NewEncoder(p.Out)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	enc.SetIndent("", "  ")
 	enc.SetEscapeHTML(false)
-	return enc.Encode(v)
+	if err := enc.Encode(v); err != nil {
+		return err
+	}
+	_, err := p.Out.Write(escapeC1(buf.Bytes()))
+	return err
+}
+
+// escapeC1 replaces U+0080 to U+009F in encoded JSON with \u escapes. They
+// can only occur inside strings, so the JSON keeps its meaning.
+func escapeC1(data []byte) []byte {
+	if !bytes.Contains(data, []byte{0xc2}) {
+		return data
+	}
+	var out bytes.Buffer
+	for len(data) > 0 {
+		r, n := utf8.DecodeRune(data)
+		if r >= 0x80 && r <= 0x9f {
+			fmt.Fprintf(&out, "\\u%04x", r)
+		} else {
+			out.Write(data[:n])
+		}
+		data = data[n:]
+	}
+	return out.Bytes()
 }
 
 // Notice writes a line to Err. Notices never go to Out, so --json output
@@ -48,7 +79,7 @@ func (p Printer) table(header []string, rows [][]string) error {
 	for _, row := range rows {
 		cells := make([]string, len(row))
 		for i, c := range row {
-			cells[i] = c
+			cells[i] = termtext.Clean(c)
 			if c == "" {
 				cells[i] = "-"
 			}
@@ -60,10 +91,15 @@ func (p Printer) table(header []string, rows [][]string) error {
 
 // field prints one indented "label  value" line, skipping empty values.
 func (p Printer) field(label, value string) {
+	p.paintedField(label, value, func(s string) string { return s })
+}
+
+// paintedField is field with the value in a colour.
+func (p Printer) paintedField(label, value string, paint func(string) string) {
 	if value == "" {
 		return
 	}
-	fmt.Fprintf(p.Out, "  %-12s %s\n", label, value)
+	fmt.Fprintf(p.Out, "  %-12s %s\n", label, paint(termtext.Clean(value)))
 }
 
 // nextStep prints a suggested command after a blank line, on its own line so

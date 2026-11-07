@@ -13,6 +13,7 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/config"
 	"github.com/wassie-dev/simpleOTA-cli/internal/credentials"
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 const projectEnv = "SIMPLEOTA_PROJECT"
@@ -88,7 +89,7 @@ func (s *session) fullProject(ctx context.Context) (api.Project, string, error) 
 	full, err := s.api.GetProject(ctx, p.ID)
 	var ae *api.Error
 	if errors.As(err, &ae) && ae.StatusCode == http.StatusNotFound {
-		return api.Project{}, source, usageErr("the chosen project (%s) does not exist, or this token cannot see it\nChoose another with:\n  simpleota project use <slug>", p.Slug)
+		return api.Project{}, source, usageErr("the chosen project (%s) does not exist, or this token cannot see it\nChoose another with:\n  simpleota project use <slug>", termtext.Clean(p.Slug))
 	}
 	return full, source, err
 }
@@ -124,7 +125,7 @@ func projectSlugs(ps []api.Project) string {
 	}
 	slugs := make([]string, len(ps))
 	for i, p := range ps {
-		slugs[i] = p.Slug
+		slugs[i] = termtext.Clean(p.Slug)
 	}
 	return strings.Join(slugs, ", ")
 }
