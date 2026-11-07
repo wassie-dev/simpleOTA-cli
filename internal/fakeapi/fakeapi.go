@@ -123,6 +123,7 @@ func (s *Server) AddDeployment(id, state string, build, percent int) api.Deploym
 	d := api.Deployment{
 		ID: id, ProjectID: ProjectID, ArtifactID: "a-" + id, ArtifactBuildNumber: build,
 		RolloutStrategy: "immediate", RolloutPercentage: percent, State: state, CreatedAt: s.next(),
+		TargetChannelIDs: []string{StableChannelID},
 	}
 	s.Deployments = append(s.Deployments, d)
 	return d
