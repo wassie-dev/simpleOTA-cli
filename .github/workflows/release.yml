@@ -8,7 +8,31 @@ permissions:
   contents: write
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  # The end-to-end suite runs against the private server in the server's own
+  # CI, on a CLI commit a maintainer approved, and reports its result as a
+  # commit status. This job only reads that status for the tagged commit.
+  backend-e2e:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require a passing backend e2e result for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORTER: ${{ vars.BACKEND_E2E_REPORTER }}
+        run: gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/statuses" | jq -s add | scripts/check-backend-e2e.sh "$REPORTER"
+
   goreleaser:
+    needs: [ci, backend-e2e]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -17,8 +41,6 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - name: Unit tests
-        run: go test -race ./...
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           version: "~> v2"
