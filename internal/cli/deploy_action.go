@@ -112,12 +112,17 @@ func (a *App) runRollout(ctx context.Context, action, deploymentID string, perce
 }
 
 // needsAllDevices reports whether a refused resume was refused for want of
-// the confirmation a deployment for every device needs.
+// the confirmation the server asks for: the deployment is paused, targets
+// every device, and the project has two or more devices.
 func needsAllDevices(ctx context.Context, s *session, projectID, deploymentID string, err error) bool {
 	var ae *api.Error
 	if !errors.As(err, &ae) || ae.StatusCode != http.StatusBadRequest {
 		return false
 	}
 	d, getErr := s.api.GetDeployment(ctx, projectID, deploymentID)
-	return getErr == nil && d.State == api.StatePaused && deploy.TargetsAllDevices(d)
+	if getErr != nil || d.State != api.StatePaused || !deploy.TargetsAllDevices(d) {
+		return false
+	}
+	devices, listErr := s.api.ListDevices(ctx, projectID, api.DeviceFilter{})
+	return listErr == nil && len(devices) >= 2
 }

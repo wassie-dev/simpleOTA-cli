@@ -191,3 +191,14 @@ func TestResumeAllDevicesNeedsConfirmation(t *testing.T) {
 		t.Fatalf("channel resume: %+v", r)
 	}
 }
+
+func TestResumeShowsOtherRefusalsAsTheyAre(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.ProjectToken)
+	h.fake.AddDeployment(depA, api.StatePaused, 1, 100)
+	h.fake.Deployments[0].TargetChannelIDs = nil
+	r := h.run("deployment", "resume", depA)
+	if r.code != ExitError || !strings.Contains(r.stderr, "with no devices") || strings.Contains(r.stderr, "--all-devices") {
+		t.Fatalf("%+v", r)
+	}
+}

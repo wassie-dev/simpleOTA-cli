@@ -250,3 +250,32 @@ func TestResumeAllDevicesDeployment(t *testing.T) {
 		t.Fatalf("resume: %+v", r)
 	}
 }
+
+func TestResumeAllDevicesDeploymentAfterAutoPause(t *testing.T) {
+	c := ciCLI(t)
+	d, other := newDevice(t), newDevice(t)
+	other.post("/api/v1/ota/check/", map[string]any{"device_id": other.id, "current_build_number": 0, "framework": "esp_idf", "chip_family": "esp32"})
+	build := decode[struct {
+		BuildNumber int `json:"build_number"`
+	}](t, c.mustRun("build", "upload", firmware(t), "--version-label", "e2e-"+uid(), "--chip", "esp32", "--json").stdout)
+	created := decode[struct {
+		Deployment struct {
+			ID string `json:"id"`
+		} `json:"deployment"`
+	}](t, c.mustRun("deployment", "create", "--build", strconv.Itoa(build.BuildNumber), "--all-devices", "--json").stdout)
+	id := created.Deployment.ID
+	t.Cleanup(func() { cancelDeployment(t, id) })
+	if got := d.check(build.BuildNumber); got != id {
+		t.Fatalf("offered deployment %s, want %s", got, id)
+	}
+	d.report(id, "rolled_back", build.BuildNumber)
+	if st := c.mustRun("deployment", "show", id, "--json"); !strings.Contains(st.stdout, `"state": "paused"`) {
+		t.Fatalf("the rollback should auto-pause the deployment: %s", st.stdout)
+	}
+	if r := c.run("", "deployment", "resume", id); r.code != 2 || !strings.Contains(r.stderr, "--all-devices") {
+		t.Fatalf("resume without confirmation: %+v", r)
+	}
+	if r := c.mustRun("deployment", "resume", id, "--all-devices", "--json"); !strings.Contains(r.stdout, `"state": "active"`) {
+		t.Fatalf("resume: %+v", r)
+	}
+}
