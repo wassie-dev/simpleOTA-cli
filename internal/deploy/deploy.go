@@ -56,6 +56,12 @@ func BuildTransition(action string, percent *int) (api.Transition, error) {
 	return t, nil
 }
 
+// TargetsAllDevices reports whether a deployment targets every device in
+// the project, having no channel or group targets.
+func TargetsAllDevices(d api.Deployment) bool {
+	return len(d.TargetChannelIDs) == 0 && len(d.TargetGroupIDs) == 0
+}
+
 // Latest returns the project's most recently created deployment.
 func Latest(ctx context.Context, a API, projectID string) (api.Deployment, error) {
 	deps, err := a.ListDeployments(ctx, projectID)

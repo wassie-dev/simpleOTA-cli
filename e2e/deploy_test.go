@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -216,5 +217,36 @@ func TestStatusWaitFailsWhenCompletedWithNoDevices(t *testing.T) {
 	r := <-waitAsync(c, out.DeploymentID, "30s")
 	if r.code != 4 || outcome(t, r) != "no_devices" || !strings.Contains(r.stdout+r.stderr, "so none updated") {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestResumeAllDevicesDeployment(t *testing.T) {
+	c := ciCLI(t)
+	for range 2 {
+		d := newDevice(t)
+		d.post("/api/v1/ota/check/", map[string]any{"device_id": d.id, "current_build_number": 0, "framework": "esp_idf", "chip_family": "esp32"})
+	}
+	build := decode[struct {
+		BuildNumber int `json:"build_number"`
+	}](t, c.mustRun("build", "upload", firmware(t), "--version-label", "e2e-"+uid(), "--chip", "esp32", "--json").stdout)
+	created := decode[struct {
+		Deployment struct {
+			ID string `json:"id"`
+		} `json:"deployment"`
+	}](t, c.mustRun("deployment", "create", "--build", strconv.Itoa(build.BuildNumber), "--all-devices", "--percent", "50", "--json").stdout)
+	id := created.Deployment.ID
+	t.Cleanup(func() { cancelDeployment(t, id) })
+	c.mustRun("deployment", "pause", id)
+
+	if r := c.run("", "deployment", "resume", id); r.code != 2 || !strings.Contains(r.stderr, "--all-devices") {
+		t.Fatalf("resume without confirmation: %+v", r)
+	}
+	r := decode[struct {
+		Deployment struct {
+			State string `json:"state"`
+		} `json:"deployment"`
+	}](t, c.mustRun("deployment", "resume", id, "--all-devices", "--json").stdout)
+	if r.Deployment.State != "active" {
+		t.Fatalf("resume: %+v", r)
 	}
 }

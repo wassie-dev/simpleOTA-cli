@@ -6,6 +6,12 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `deployment resume` can resume a paused deployment that targets every
+  device: pass `--all-devices` to confirm, as for `deployment create`. Without
+  it, the command stops with exit code 2 and shows the command to run.
+
 ## [0.1.3] - 2026-11-06
 
 ### Added

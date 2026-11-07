@@ -258,7 +258,7 @@ func (s *Server) createDeployment(w http.ResponseWriter, r *http.Request) {
 	d := api.Deployment{
 		ID: fmt.Sprintf("cccccccc-0000-4000-8000-%012d", len(s.Deployments)+1), ProjectID: ProjectID, ArtifactID: art.ID,
 		ArtifactBuildNumber: art.BuildNumber, RolloutStrategy: in.RolloutStrategy, RolloutPercentage: in.RolloutPercentage,
-		TargetChannelIDs: in.TargetChannelIDs, State: api.StateDraft, CreatedAt: s.next(),
+		TargetChannelIDs: in.TargetChannelIDs, TargetGroupIDs: in.TargetGroupIDs, State: api.StateDraft, CreatedAt: s.next(),
 	}
 	s.Deployments = append([]api.Deployment{d}, s.Deployments...)
 	writeJSON(w, http.StatusCreated, d)
@@ -286,25 +286,59 @@ func (s *Server) transition(w http.ResponseWriter, r *http.Request, id string) {
 			return
 		}
 		d.RolloutPercentage = *t.RolloutPercentage
-	case "start":
-		if len(d.TargetChannelIDs) == 0 && len(s.Devices) >= 2 && !t.ConfirmAll {
-			detail(w, http.StatusBadRequest, fmt.Sprintf("starting this deployment requires confirm_all=true because it targets all %d project devices", len(s.Devices)))
+	case "start", "resume":
+		from := []string{api.StateDraft, api.StatePaused}
+		if t.Action == "resume" {
+			from = []string{api.StatePaused}
+		}
+		if d.State == api.StateActive {
+			break
+		}
+		if !slices.Contains(from, d.State) {
+			detail(w, http.StatusBadRequest, fmt.Sprintf("cannot %s deployment in state '%s'", t.Action, d.State))
+			return
+		}
+		if msg := s.startRefusal(d, t.ConfirmAll); msg != "" {
+			detail(w, http.StatusBadRequest, msg)
 			return
 		}
 		d.State = api.StateActive
 	case "pause":
+		if d.State != api.StatePaused && d.State != api.StateActive {
+			detail(w, http.StatusBadRequest, fmt.Sprintf("cannot pause deployment in state '%s'", d.State))
+			return
+		}
 		d.State = api.StatePaused
-	case "resume":
-		d.State = api.StateActive
 	case "complete":
+		if d.State != api.StateCompleted && d.State != api.StateActive && d.State != api.StatePaused {
+			detail(w, http.StatusBadRequest, fmt.Sprintf("cannot complete deployment in state '%s'", d.State))
+			return
+		}
 		d.State = api.StateCompleted
 	case "cancel":
-		d.State = api.StateCancelled
+		if d.State != api.StateCompleted {
+			d.State = api.StateCancelled
+		}
 	default:
 		detail(w, http.StatusBadRequest, fmt.Sprintf("unknown action '%s'", t.Action))
 		return
 	}
 	writeJSON(w, http.StatusOK, d)
+}
+
+// startRefusal is the server's reason not to activate a deployment for every
+// device in the project, or "".
+func (s *Server) startRefusal(d *api.Deployment, confirmAll bool) string {
+	if len(d.TargetChannelIDs) > 0 || len(d.TargetGroupIDs) > 0 {
+		return ""
+	}
+	switch {
+	case len(s.Devices) == 0:
+		return "cannot start a whole-project deployment with no devices"
+	case len(s.Devices) >= 2 && !confirmAll:
+		return fmt.Sprintf("starting this deployment requires confirm_all=true because it targets all %d project devices", len(s.Devices))
+	}
+	return ""
 }
 
 func (s *Server) updateDevice(w http.ResponseWriter, r *http.Request, id string) {
