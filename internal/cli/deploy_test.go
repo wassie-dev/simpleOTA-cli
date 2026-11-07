@@ -203,3 +203,13 @@ func TestServerTextCannotDriveTheTerminal(t *testing.T) {
 		t.Fatalf("JSON must keep the exact reason: %+v %v", v, err)
 	}
 }
+
+func TestWaitErrorShowsServerIDsEscaped(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.ProjectToken)
+	h.fake.AddDeployment("dep\x1b]0;PWNED\x07\nError: forged", api.StatePaused, 5, 100)
+	r := h.run("deployment", "wait")
+	if r.code != ExitDeployment || hasTerminalControl(r.stdout+r.stderr) || strings.Contains(r.stderr, "\nError: forged") {
+		t.Fatalf("%+v", r)
+	}
+}

@@ -196,15 +196,15 @@ func waitErr(sum deploy.Summary, outcome deploy.Outcome, timeout time.Duration) 
 	d := sum.Deployment
 	switch outcome {
 	case deploy.OutcomeDeviceFailed:
-		return &exitError{code: ExitDeployment, err: fmt.Errorf("deployment %s: %s", d.ID, failureText(sum))}
+		return &exitError{code: ExitDeployment, err: fmt.Errorf("deployment %s: %s", termtext.Clean(d.ID), failureText(sum))}
 	case deploy.OutcomeStopped:
-		msg := fmt.Sprintf("deployment %s is %s", d.ID, d.State)
+		msg := fmt.Sprintf("deployment %s is %s", termtext.Clean(d.ID), termtext.Clean(d.State))
 		if next := output.NextStep(d); next != "" {
 			msg += "\n" + next
 		}
 		return &exitError{code: ExitDeployment, err: errors.New(msg)}
 	case deploy.OutcomeNoDevices:
-		return &exitError{code: ExitDeployment, err: fmt.Errorf("deployment %s was completed too early\nNo device was offered build %d, so none updated.", d.ID, d.ArtifactBuildNumber)}
+		return &exitError{code: ExitDeployment, err: fmt.Errorf("deployment %s was completed too early\nNo device was offered build %d, so none updated.", termtext.Clean(d.ID), d.ArtifactBuildNumber)}
 	case deploy.OutcomeTimedOut:
 		if sum.Counts.Offered == 0 {
 			return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s: no device has been offered build %d yet\nA device is offered it when it checks in, if it is targeted, inside the\nrollout and compatible. To see why one was not:\n  simpleota device events <device>", timeout, d.ArtifactBuildNumber)}

@@ -10,8 +10,9 @@ import (
 
 // Clean shows each control character in s as an escape such as \x1b, so
 // that text from the server cannot move the cursor, recolour or retitle the
-// terminal, reorder text, or start a line of its own. Invalid UTF-8 becomes
-// U+FFFD.
+// terminal, reorder text, or start a line of its own. A backslash is doubled,
+// so text cannot pass itself off as one of these escapes. Invalid UTF-8
+// becomes U+FFFD.
 func Clean(s string) string {
 	return clean(s, false)
 }
@@ -23,14 +24,16 @@ func CleanLines(s string) string {
 }
 
 func clean(s string, keepNewlines bool) string {
-	if utf8.ValidString(s) && !strings.ContainsFunc(s, func(r rune) bool { return unsafe(r, keepNewlines) }) {
+	if utf8.ValidString(s) && !strings.ContainsFunc(s, func(r rune) bool { return needsEscape(r, keepNewlines) }) {
 		return s
 	}
 	var b strings.Builder
 	for _, r := range s {
 		switch {
-		case !unsafe(r, keepNewlines):
+		case !needsEscape(r, keepNewlines):
 			b.WriteRune(r)
+		case r == '\\':
+			b.WriteString(`\\`)
 		case r < 0x100:
 			fmt.Fprintf(&b, `\x%02x`, r)
 		default:
@@ -40,8 +43,11 @@ func clean(s string, keepNewlines bool) string {
 	return b.String()
 }
 
-func unsafe(r rune, keepNewlines bool) bool {
-	if r == '\n' {
+// needsEscape reports the characters Clean escapes. CleanLines keeps
+// newlines and backslashes, since it is for the CLI's own messages, in which
+// server text is already cleaned.
+func needsEscape(r rune, keepNewlines bool) bool {
+	if r == '\n' || r == '\\' {
 		return !keepNewlines
 	}
 	return unicode.IsControl(r) || isBidiControl(r)

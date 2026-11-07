@@ -14,6 +14,7 @@ func TestClean(t *testing.T) {
 		"abc\xe2\x80\xaedcba": "abc" + `\` + "u202edcba",
 		"bad\xffbyte":         "bad\xef\xbf\xbdbyte",
 		"del\x7f":             `del\x7f`,
+		"fake \\x1b escape":   `fake \\x1b escape`,
 	}
 	for in, want := range tests {
 		if got := Clean(in); got != want {
@@ -22,5 +23,8 @@ func TestClean(t *testing.T) {
 	}
 	if got := CleanLines("one\ntwo\x1b[2J"); got != "one\n"+`two\x1b[2J` {
 		t.Errorf("CleanLines: %q", got)
+	}
+	if got := CleanLines(`C:\keys`); got != `C:\keys` {
+		t.Errorf("CleanLines changed a backslash: %q", got)
 	}
 }

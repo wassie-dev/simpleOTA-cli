@@ -50,6 +50,6 @@ func (p Printer) Release(r ReleaseView) error {
 	fmt.Fprintf(p.Out, "  deployment  %s (%s, channel %s)\n", termtext.Clean(r.DeploymentID), termtext.Clean(r.State), termtext.Clean(r.Channel))
 	fmt.Fprintf(p.Out, "  sha256      %s\n  size        %d bytes\n", r.SHA256, r.Size)
 	p.alsoActive(r.AlsoActive, r.BuildNumber)
-	p.nextStep("Watch it", "simpleota deployment wait "+r.DeploymentID)
+	p.nextStep("Watch it", "simpleota deployment wait "+termtext.Clean(r.DeploymentID))
 	return nil
 }

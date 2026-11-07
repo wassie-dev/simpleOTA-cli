@@ -89,7 +89,7 @@ func (s *session) fullProject(ctx context.Context) (api.Project, string, error) 
 	full, err := s.api.GetProject(ctx, p.ID)
 	var ae *api.Error
 	if errors.As(err, &ae) && ae.StatusCode == http.StatusNotFound {
-		return api.Project{}, source, usageErr("the chosen project (%s) does not exist, or this token cannot see it\nChoose another with:\n  simpleota project use <slug>", p.Slug)
+		return api.Project{}, source, usageErr("the chosen project (%s) does not exist, or this token cannot see it\nChoose another with:\n  simpleota project use <slug>", termtext.Clean(p.Slug))
 	}
 	return full, source, err
 }

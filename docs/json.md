@@ -6,9 +6,11 @@ otherwise. Notices and warnings go to stderr. Fields are added over time; existi
 their names and types. Times are RFC 3339 in UTC.
 
 Strings hold the values exactly as the server sent them, including text a
-device reported. Control characters, C1 included, are written as `\u` escapes.
-In text output they are shown as escapes such as `\x1b` instead, so they
-cannot change what a terminal or CI log shows.
+device reported. Control characters, C1 included, are written as `\u` escapes,
+so the JSON itself holds none raw. A tool that decodes the strings, such as
+`jq -r`, prints them raw, so treat device-reported values as untrusted there.
+Text output shows them as escapes such as `\x1b`, and doubles a backslash, so
+they cannot change what a terminal or CI log shows.
 
 ## Errors
 

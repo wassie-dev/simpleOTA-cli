@@ -25,8 +25,9 @@ type Printer struct {
 }
 
 // WriteJSON writes v as indented JSON followed by a newline. C1 control
-// characters are escaped as well as C0, so that a raw value printed by a
-// tool such as jq -r cannot drive a terminal.
+// characters are escaped as well as C0, so the encoded output itself holds
+// no raw control characters. A tool that decodes the strings, such as
+// jq -r, gets the exact values back, control characters included.
 func (p Printer) WriteJSON(v any) error {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

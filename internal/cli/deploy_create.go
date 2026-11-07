@@ -8,6 +8,7 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/deploy"
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 type createFlags struct {
@@ -118,7 +119,7 @@ func (a *App) runCreateDeployment(ctx context.Context, f createFlags) error {
 	}
 	d, err := s.api.TransitionDeployment(ctx, projectID, draft.ID, api.Transition{Action: deploy.ActionStart, ConfirmAll: f.allDevices})
 	if err != nil {
-		return fmt.Errorf("deployment %s was created but did not start: %w\nCancel it with:\n  simpleota deployment cancel %s", draft.ID, err, draft.ID)
+		return fmt.Errorf("deployment %s was created but did not start: %w\nCancel it with:\n  simpleota deployment cancel %s", termtext.Clean(draft.ID), err, termtext.Clean(draft.ID))
 	}
 	p := a.printer()
 	return p.Created(output.CreatedView{
