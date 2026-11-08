@@ -14,8 +14,9 @@ jobs:
       contents: read
 
   # The end-to-end suite runs against the private server in the server's own
-  # CI, on a CLI commit a maintainer approved, and reports its result as a
-  # commit status. This job only reads that status for the tagged commit.
+  # CI, started by hand for a CLI commit a maintainer reviewed, and reports its
+  # result as a commit status. This job only reads that status for the tagged
+  # commit.
   backend-e2e:
     runs-on: ubuntu-latest
     permissions:
