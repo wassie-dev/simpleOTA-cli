@@ -251,20 +251,21 @@ local storage. It needs Python 3.12+. Plain `http` is accepted only for
 localhost.
 
 Public CI runs the unit tests, lint and install tests. The e2e suite needs the
-private server, so it runs only in the server's own CI, on a CLI commit a
-maintainer approved, and reports the result as the `simpleota/backend-e2e`
-commit status. A release tag runs the whole CI workflow and also needs a
-passing `simpleota/backend-e2e` status for the tagged commit from the account
-named in the `BACKEND_E2E_REPORTER` repository variable. Without one, nothing
-is published.
+private server, so it runs only in the server's own CI, started by hand for a
+CLI commit a maintainer reviewed, and reports the result as the
+`simpleota/backend-e2e` commit status. A release tag runs the whole CI
+workflow and also needs a passing `simpleota/backend-e2e` status for the
+tagged commit from the account named in the `BACKEND_E2E_REPORTER` repository
+variable. Without one, nothing is published.
 
 To release, tag the exact commit that passed:
 
-1. After the last merge, note the commit to release: `git rev-parse origin/main`.
-   A merge makes a new commit, so a result for the pull request's own head
-   does not count.
-2. In the server repository, run the "CLI e2e" workflow with that full SHA,
-   and approve it once you have reviewed that commit.
+1. After the last merge, note the commit to release:
+   `git rev-parse origin/main`. A merge makes a new commit, so a result for
+   the pull request's own head does not count.
+2. Review that commit, its tests included: they run beside the server's
+   source. Then, in the server repository, run the "CLI e2e" workflow on main
+   with that full SHA. Starting the run is the approval.
 3. Check that the commit has a `success` status for `simpleota/backend-e2e`.
 4. Tag that same SHA: `git tag vX.Y.Z <sha>` and push the tag. The release
    workflow checks the status again and stops if it is not `success`.
