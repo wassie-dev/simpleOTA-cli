@@ -13,6 +13,7 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/deploy"
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 func (a *App) deploymentCommand() *cobra.Command {
@@ -104,8 +105,8 @@ Exit codes:
 
 A device counts once it has checked in and been offered the build, so the
 wait cannot finish until devices check in. Network and gateway errors are
-retried until the timeout. Progress goes to stderr, and the final state to
-stdout.`,
+retried until the timeout, which also cuts short a request in flight.
+Progress goes to stderr, and the final state to stdout.`,
 		Example: `  simpleota deployment wait
   simpleota deployment wait 5f0c2b1e-... --timeout 30m
 
@@ -163,8 +164,13 @@ func (a *App) runDeploymentWait(ctx context.Context, ref string, timeout, interv
 	if interval < time.Second {
 		return usageErr("--interval must be at least 1s")
 	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	s, projectID, id, err := a.deploymentTarget(ctx, ref)
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s before the deployment could be found: %w", timeout, err)}
+		}
 		return err
 	}
 	p := a.printer()
@@ -181,6 +187,9 @@ func (a *App) runDeploymentWait(ctx context.Context, ref string, timeout, interv
 		w.OnProgress = p.Progress
 	}
 	sum, outcome, err := w.Wait(ctx, id)
+	if errors.Is(err, deploy.ErrNoStatus) {
+		return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s: %w", timeout, err)}
+	}
 	if err != nil {
 		return deploymentErr(err, id)
 	}
@@ -195,15 +204,15 @@ func waitErr(sum deploy.Summary, outcome deploy.Outcome, timeout time.Duration) 
 	d := sum.Deployment
 	switch outcome {
 	case deploy.OutcomeDeviceFailed:
-		return &exitError{code: ExitDeployment, err: fmt.Errorf("deployment %s: %s", d.ID, failureText(sum))}
+		return &exitError{code: ExitDeployment, err: fmt.Errorf("deployment %s: %s", termtext.Clean(d.ID), failureText(sum))}
 	case deploy.OutcomeStopped:
-		msg := fmt.Sprintf("deployment %s is %s", d.ID, d.State)
+		msg := fmt.Sprintf("deployment %s is %s", termtext.Clean(d.ID), termtext.Clean(d.State))
 		if next := output.NextStep(d); next != "" {
 			msg += "\n" + next
 		}
 		return &exitError{code: ExitDeployment, err: errors.New(msg)}
 	case deploy.OutcomeNoDevices:
-		return &exitError{code: ExitDeployment, err: fmt.Errorf("deployment %s was completed too early\nNo device was offered build %d, so none updated.", d.ID, d.ArtifactBuildNumber)}
+		return &exitError{code: ExitDeployment, err: fmt.Errorf("deployment %s was completed too early\nNo device was offered build %d, so none updated.", termtext.Clean(d.ID), d.ArtifactBuildNumber)}
 	case deploy.OutcomeTimedOut:
 		if sum.Counts.Offered == 0 {
 			return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s: no device has been offered build %d yet\nA device is offered it when it checks in, if it is targeted, inside the\nrollout and compatible. To see why one was not:\n  simpleota device events <device>", timeout, d.ArtifactBuildNumber)}
@@ -218,11 +227,12 @@ func notDeploymentID(ref string) error {
 	return usageErr("%q is not a deployment ID\nList deployments with:\n  simpleota deployment list", ref)
 }
 
-// deploymentErr turns a 404 into a message naming the likely cause.
+// deploymentErr turns a 404 into a usage error naming the likely cause.
 func deploymentErr(err error, id string) error {
 	var ae *api.Error
 	if errors.As(err, &ae) && ae.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("no deployment %s in this project\nCheck the ID and the current project.", id)
+		msg := fmt.Sprintf("no deployment %s in this project\nCheck the ID and the current project.", id)
+		return &exitError{code: ExitUsage, err: &explainedErr{msg: msg, cause: err}}
 	}
 	return err
 }
@@ -230,7 +240,7 @@ func deploymentErr(err error, id string) error {
 func failureText(s deploy.Summary) string {
 	parts := make([]string, 0, len(s.Failures))
 	for _, f := range s.Failures {
-		parts = append(parts, fmt.Sprintf("device %s %s", f.DeviceID, strings.ReplaceAll(f.Status, "_", " ")))
+		parts = append(parts, fmt.Sprintf("device %s %s", termtext.Clean(f.Name()), termtext.Clean(strings.ReplaceAll(f.Status, "_", " "))))
 	}
 	return strings.Join(parts, "; ")
 }

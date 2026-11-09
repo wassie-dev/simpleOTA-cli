@@ -10,9 +10,13 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/signing"
@@ -222,5 +226,104 @@ func TestReleaseChipComesFromImage(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("also_active = %+v, want it to name %s", second.AlsoActive, first.DeploymentID)
+	}
+}
+
+func TestReleaseWithLostReplyFailsAndListsWhatItFinds(t *testing.T) {
+	c := ciCLI(t)
+	bin := firmware(t)
+	label := "e2e-" + uid()
+	args := []string{"release", bin, "--version-label", label, "--json"}
+	c.extra["SIMPLEOTA_API_URL"] = lossyProxy(t, http.MethodPost, "/release/")
+	r := c.run("", args...)
+	delete(c.extra, "SIMPLEOTA_API_URL")
+	deps := decode[[]struct {
+		ID          string `json:"id"`
+		BuildNumber int    `json:"build_number"`
+	}](t, c.mustRun("deployment", "list", "--json").stdout)
+	id := deps[0].ID
+	t.Cleanup(func() { cancelDeployment(t, id) })
+	e := decode[struct {
+		Error    string `json:"error"`
+		ExitCode int    `json:"exit_code"`
+	}](t, r.stdout)
+	if r.code != 1 || e.ExitCode != 1 || !strings.Contains(e.Error, "It is not known whether the upload created anything") ||
+		!strings.Contains(e.Error, "deployment "+id+", active at 100% to channel \"stable\": matches the request") {
+		t.Fatalf("lost reply: %+v", r)
+	}
+	again := c.run("", args...)
+	if again.code != 1 || !strings.Contains(again.stdout, "deployment "+id+" is active") {
+		t.Fatalf("re-run: %+v", again)
+	}
+}
+
+// The release request never reaches the server. Meanwhile another job, a
+// second CLI process, uploads the same binary under another label and
+// creates a draft deployment at 7%.
+func TestReleaseDoesNotClaimAnotherJobsBuild(t *testing.T) {
+	c, other := ciCLI(t), ciCLI(t)
+	bin := firmware(t)
+	target, _ := url.Parse(env["SIMPLEOTA_DEV_API_URL"])
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	var fired atomic.Bool
+	var draftID string
+	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/release/") || !fired.CompareAndSwap(false, true) {
+			proxy.ServeHTTP(w, r)
+			return
+		}
+		up := decode[struct {
+			ArtifactID string `json:"artifact_id"`
+		}](t, other.mustRun("build", "upload", bin, "--version-label", "other-"+uid(), "--json").stdout)
+		draftID = draftDeployment(t, up.ArtifactID, 7)
+		if conn, _, err := http.NewResponseController(w).Hijack(); err == nil {
+			_ = conn.Close()
+		}
+	}))
+	t.Cleanup(front.Close)
+	c.extra["SIMPLEOTA_API_URL"] = front.URL
+	r := c.run("", "release", bin, "--version-label", "mine-"+uid(), "--percent", "100")
+	t.Cleanup(func() { cancelDeployment(t, draftID) })
+	if r.code != 1 || strings.Contains(r.stderr, "matches the request") ||
+		!strings.Contains(r.stderr, "deployment "+draftID+", draft at 7% to channel \"stable\": differs: draft, not active; 7%, not 100%") {
+		t.Fatalf("%+v", r)
+	}
+}
+
+// draftDeployment creates a deployment of a build to the stable channel
+// through the API, without starting it.
+func draftDeployment(t *testing.T, artifactID string, percent int) string {
+	t.Helper()
+	base := env["SIMPLEOTA_DEV_API_URL"] + "/api/v1/projects/" + env["SIMPLEOTA_DEV_PROJECT_ID"]
+	get, _ := http.NewRequest(http.MethodGet, base+"/channels/", nil)
+	var channels []struct{ ID, Name string }
+	projectRequest(t, get, &channels)
+	stable := ""
+	for _, ch := range channels {
+		if ch.Name == "stable" {
+			stable = ch.ID
+		}
+	}
+	body := fmt.Sprintf(`{"artifact_id":%q,"target_channel_ids":[%q],"rollout_percentage":%d}`, artifactID, stable, percent)
+	post, _ := http.NewRequest(http.MethodPost, base+"/deployments/", strings.NewReader(body))
+	var dep struct{ ID string }
+	projectRequest(t, post, &dep)
+	return dep.ID
+}
+
+func projectRequest(t *testing.T, req *http.Request, out any) {
+	t.Helper()
+	req.Header.Set("Authorization", "Bearer "+env["SIMPLEOTA_DEV_PROJECT_TOKEN"])
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		t.Fatalf("%s %s: %d", req.Method, req.URL.Path, resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		t.Fatal(err)
 	}
 }

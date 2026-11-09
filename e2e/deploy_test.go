@@ -7,6 +7,10 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -216,5 +220,118 @@ func TestStatusWaitFailsWhenCompletedWithNoDevices(t *testing.T) {
 	r := <-waitAsync(c, out.DeploymentID, "30s")
 	if r.code != 4 || outcome(t, r) != "no_devices" || !strings.Contains(r.stdout+r.stderr, "so none updated") {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestResumeAllDevicesDeployment(t *testing.T) {
+	c := ciCLI(t)
+	for range 2 {
+		d := newDevice(t)
+		d.post("/api/v1/ota/check/", map[string]any{"device_id": d.id, "current_build_number": 0, "framework": "esp_idf", "chip_family": "esp32"})
+	}
+	build := decode[struct {
+		BuildNumber int `json:"build_number"`
+	}](t, c.mustRun("build", "upload", firmware(t), "--version-label", "e2e-"+uid(), "--chip", "esp32", "--json").stdout)
+	created := decode[struct {
+		Deployment struct {
+			ID string `json:"id"`
+		} `json:"deployment"`
+	}](t, c.mustRun("deployment", "create", "--build", strconv.Itoa(build.BuildNumber), "--all-devices", "--percent", "50", "--json").stdout)
+	id := created.Deployment.ID
+	t.Cleanup(func() { cancelDeployment(t, id) })
+	c.mustRun("deployment", "pause", id)
+
+	if r := c.run("", "deployment", "resume", id); r.code != 2 || !strings.Contains(r.stderr, "--all-devices") {
+		t.Fatalf("resume without confirmation: %+v", r)
+	}
+	r := decode[struct {
+		Deployment struct {
+			State string `json:"state"`
+		} `json:"deployment"`
+	}](t, c.mustRun("deployment", "resume", id, "--all-devices", "--json").stdout)
+	if r.Deployment.State != "active" {
+		t.Fatalf("resume: %+v", r)
+	}
+}
+
+func TestResumeAllDevicesDeploymentAfterAutoPause(t *testing.T) {
+	c := ciCLI(t)
+	d, other := newDevice(t), newDevice(t)
+	other.post("/api/v1/ota/check/", map[string]any{"device_id": other.id, "current_build_number": 0, "framework": "esp_idf", "chip_family": "esp32"})
+	build := decode[struct {
+		BuildNumber int `json:"build_number"`
+	}](t, c.mustRun("build", "upload", firmware(t), "--version-label", "e2e-"+uid(), "--chip", "esp32", "--json").stdout)
+	created := decode[struct {
+		Deployment struct {
+			ID string `json:"id"`
+		} `json:"deployment"`
+	}](t, c.mustRun("deployment", "create", "--build", strconv.Itoa(build.BuildNumber), "--all-devices", "--json").stdout)
+	id := created.Deployment.ID
+	t.Cleanup(func() { cancelDeployment(t, id) })
+	if got := d.check(build.BuildNumber); got != id {
+		t.Fatalf("offered deployment %s, want %s", got, id)
+	}
+	d.report(id, "rolled_back", build.BuildNumber)
+	if st := c.mustRun("deployment", "show", id, "--json"); !strings.Contains(st.stdout, `"state": "paused"`) {
+		t.Fatalf("the rollback should auto-pause the deployment: %s", st.stdout)
+	}
+	if r := c.run("", "deployment", "resume", id); r.code != 2 || !strings.Contains(r.stderr, "--all-devices") {
+		t.Fatalf("resume without confirmation: %+v", r)
+	}
+	if r := c.mustRun("deployment", "resume", id, "--all-devices", "--json"); !strings.Contains(r.stdout, `"state": "active"`) {
+		t.Fatalf("resume: %+v", r)
+	}
+}
+
+func TestDeviceTextCannotDriveTheTerminal(t *testing.T) {
+	c := ciCLI(t)
+	out := release(t, c)
+	d := newDevice(t)
+	id := d.check(out.BuildNumber)
+	reason := "e2e \x1b[31mRED\x1b]0;TITLE\x07\rOVERWRITE\xc2\x9b31m\n2nd-line"
+	d.post("/api/v1/ota/status/", map[string]any{"device_id": d.id, "deployment_id": id, "event": "failed", "reason": reason})
+	r := c.run("", "deployment", "show", id)
+	for _, b := range []string{"\x1b", "\x07", "\r", "\xc2\x9b", "\n2nd-line"} {
+		if strings.Contains(r.stdout, b) {
+			t.Fatalf("show printed %q: %q", b, r.stdout)
+		}
+	}
+	if !strings.Contains(r.stdout, `\x1b[31mRED`) {
+		t.Fatalf("reason not shown escaped: %q", r.stdout)
+	}
+}
+
+func TestHostileDeviceIDIsNotPrinted(t *testing.T) {
+	c := ciCLI(t)
+	out := release(t, c)
+	d := &device{t: t, id: "e2e-" + uid() + "\x1b[2J\x1b]0;PWNED\x07\rFORGED\nError: none"}
+	id := d.check(out.BuildNumber)
+	d.report(id, "failed", out.BuildNumber)
+	for _, args := range [][]string{{"deployment", "show", id}, {"deployment", "wait", id, "--timeout", "20s"}} {
+		r := c.run("", args...)
+		if strings.ContainsAny(r.stdout+r.stderr, "\x1b\x07\r") || strings.Contains(r.stdout+r.stderr, "FORGED") || !strings.Contains(r.stdout, "failure  device ") {
+			t.Errorf("%v: %q %q", args, r.stdout, r.stderr)
+		}
+	}
+}
+
+func TestStatusWaitTimeoutBoundsAHungServer(t *testing.T) {
+	c := ciCLI(t)
+	out := release(t, c)
+	target, _ := url.Parse(env["SIMPLEOTA_DEV_API_URL"])
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/states/") {
+			<-r.Context().Done()
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(hung.Close)
+	c.extra["SIMPLEOTA_API_URL"] = hung.URL
+	start := time.Now()
+	r := c.run("", "deployment", "wait", out.DeploymentID, "--timeout", "3s", "--interval", "1s")
+	if elapsed := time.Since(start); r.code != 5 || elapsed > 10*time.Second {
+		t.Fatalf("exit %d after %s: %+v", r.code, elapsed, r)
 	}
 }

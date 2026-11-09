@@ -97,8 +97,10 @@ A staff account sees its own projects, and opens any other project by ID.
 Run `simpleota key generate` a second time for a backup key, keep that one
 offline, and pin both keys in your first signed firmware. Devices pin at most
 two keys and cannot change them over the air. Each `key generate` prints a
-snippet that pins the new key and the project's newest other active key, so
-the second run's snippet holds both.
+snippet that pins the new key and your default signing key, so the second
+run's snippet holds both. If registering the public key fails without a clear
+refusal from the server, the encrypted key is kept: run the same command again
+to finish.
 
 `release` reads the chip family from the image header, which names the chip
 the image was built for. It refuses a `--chip` that differs from the header
@@ -125,8 +127,13 @@ The manifest carries the binary's SHA-256, so if the bytes change on the way,
 the server rejects the upload and nothing is created.
 
 If the connection drops or a gateway answers 5xx mid-upload, the build may
-exist anyway. Run the same `release` again: it checks the project's builds
-first and stops with the existing build number if the binary is already
+exist anyway. `release` then reads the project and lists each build of the
+binary with its deployments, and how each differs from what you asked for:
+version, security mode, chip, state, percentage and channel. It exits 1 and
+sends nothing more, because another upload of the same binary, or a release
+the server did not finish, looks the same. Run the same `release` again: it
+checks the project's builds first and stops with the existing build number
+and its running deployments if the binary is already
 there, so it cannot create a second build.
 
 ## Commands
@@ -145,7 +152,8 @@ simpleota
 ├── deployment
 │   ├── list | show [id] | wait [id] [--timeout]
 │   ├── create --build <n> [--channel]... [--group]... [--all-devices] [--percent]
-│   └── ramp <id> --percent <n> | pause | resume | complete | cancel <id>
+│   ├── ramp <id> --percent <n> | pause | complete | cancel <id>
+│   └── resume <id> [--all-devices]
 ├── device    list [--channel] [--group] [--state] | show <device>
 │             events <device> | update <device> [--name] [--channel] [--state]
 ├── channel   list | create <name> [--default]
@@ -168,7 +176,7 @@ simpleota
 | `deployment list\|show` | List deployments, or show one's state and device progress |
 | `deployment create` | Deploy an uploaded build to channels (stable by default), groups, or every device, and start it |
 | `deployment wait` | Wait for a deployment to succeed or fail; gates CI |
-| `deployment ramp\|pause\|resume\|complete\|cancel` | Change a deployment's state |
+| `deployment ramp\|pause\|resume\|complete\|cancel` | Change a deployment's state. Resuming a deployment for every device in a project with two or more devices needs `--all-devices` |
 | `device list\|show` | List devices, filtered by channel, group or state, or show one |
 | `device events` | Show a device's recent update checks and why it was or was not offered a build |
 | `device update` | Rename a device, move it to a channel, or (de)activate it |
@@ -190,11 +198,11 @@ build. A deployment completed before any device was offered the build exits
 | Exit code | Meaning |
 | --- | --- |
 | 0 | OK |
-| 1 | Error (for `status`: the API could not be reached) |
+| 1 | Error, or the command was interrupted (for `status`: the API could not be reached) |
 | 2 | Usage error, including no current project when the token sees several (for `status`: the chosen project cannot be found) |
 | 3 | Not logged in, or the token was rejected (`status` too) |
 | 4 | A device failed or rolled back, the deployment is paused, cancelled or not started, or it was completed before any device was offered the build |
-| 5 | `deployment wait` timed out |
+| 5 | `deployment wait` timed out, including when the server did not answer in time |
 
 | Variable | Use |
 | --- | --- |
@@ -249,6 +257,26 @@ make e2e         # end-to-end suite against that server
 into `.devserver/` and runs it on `http://127.0.0.1:8765` with SQLite and
 local storage. It needs Python 3.12+. Plain `http` is accepted only for
 localhost.
+
+Public CI runs the unit tests, lint and install tests. The e2e suite needs the
+private server, so it runs only in the server's own CI, started by hand for a
+CLI commit a maintainer reviewed, and reports the result as the
+`simpleota/backend-e2e` commit status. A release tag runs the whole CI
+workflow and also needs a passing `simpleota/backend-e2e` status for the
+tagged commit from the account named in the `BACKEND_E2E_REPORTER` repository
+variable. Without one, nothing is published.
+
+To release, tag the exact commit that passed:
+
+1. After the last merge, note the commit to release:
+   `git rev-parse origin/main`. A merge makes a new commit, so a result for
+   the pull request's own head does not count.
+2. Review that commit, its tests included: they run beside the server's
+   source. Then, in the server repository, run the "CLI e2e" workflow on main
+   with that full SHA. Starting the run is the approval.
+3. Check that the commit has a `success` status for `simpleota/backend-e2e`.
+4. Tag that same SHA: `git tag vX.Y.Z <sha>` and push the tag. The release
+   workflow checks the status again and stops if it is not `success`.
 
 ## License
 

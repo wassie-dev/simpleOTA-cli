@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 // DeviceView is a device, with its channel's name resolved.
@@ -90,7 +91,7 @@ func (p Printer) DeviceShow(d DeviceView) error {
 	if p.JSON {
 		return p.WriteJSON(d)
 	}
-	fmt.Fprintf(p.Out, "Device %s\n", p.bold(d.DeviceID))
+	fmt.Fprintf(p.Out, "Device %s\n", p.bold(termtext.Clean(d.DeviceID)))
 	p.field("name", d.Name)
 	p.field("id", d.ID)
 	p.field("build", d.build())

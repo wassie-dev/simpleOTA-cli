@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 // AccountView is the account a personal token belongs to.
@@ -43,11 +44,11 @@ func (p Printer) Login(v LoginView) error {
 	}
 	switch {
 	case v.TokenType == "project" && v.Project != nil:
-		fmt.Fprintf(p.Out, "Logged in to %s with a project token for %s.\n", v.APIURL, v.Project.Slug)
+		fmt.Fprintf(p.Out, "Logged in to %s with a project token for %s.\n", v.APIURL, termtext.Clean(v.Project.Slug))
 	case v.Account != nil:
-		fmt.Fprintf(p.Out, "Logged in to %s as %s (%s token).\n", v.APIURL, v.Account.Email, v.TokenType)
+		fmt.Fprintf(p.Out, "Logged in to %s as %s (%s token).\n", v.APIURL, termtext.Clean(v.Account.Email), termtext.Clean(v.TokenType))
 	default:
-		fmt.Fprintf(p.Out, "Logged in to %s with a %s token.\n", v.APIURL, v.TokenType)
+		fmt.Fprintf(p.Out, "Logged in to %s with a %s token.\n", v.APIURL, termtext.Clean(v.TokenType))
 	}
 	fmt.Fprintf(p.Out, "Token stored in %s.\n", v.CredentialStore)
 	if v.TokenType == "project" {
@@ -56,7 +57,7 @@ func (p Printer) Login(v LoginView) error {
 	fmt.Fprintln(p.Out)
 	switch {
 	case v.ProjectCount == 1 && v.Project != nil:
-		fmt.Fprintf(p.Out, "Commands act on %s, the only project this account has.\n", v.Project.Slug)
+		fmt.Fprintf(p.Out, "Commands act on %s, the only project this account has.\n", termtext.Clean(v.Project.Slug))
 	case v.ProjectCount == 0:
 		fmt.Fprintln(p.Out, "This account has no projects yet; create one in the dashboard.")
 	case v.ProjectCount < 0:

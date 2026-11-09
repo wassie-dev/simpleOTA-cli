@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/browser"
 	"github.com/wassie-dev/simpleOTA-cli/internal/credentials"
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 	"github.com/wassie-dev/simpleOTA-cli/internal/update"
 	"github.com/wassie-dev/simpleOTA-cli/internal/version"
 )
@@ -83,7 +85,8 @@ type App struct {
 	Executable     func() (string, error)
 	UpdateSource   *update.Source
 
-	flags globalFlags
+	flags  globalFlags
+	opened *openedProject
 }
 
 type globalFlags struct {
@@ -153,16 +156,17 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	if err == nil {
 		return ExitOK
 	}
+	err = a.explainReadOnly(ctx, err)
 	code := exitCode(err)
 	var ee *exitError
 	if errors.As(err, &ee) && ee.quiet {
 		return code
 	}
 	msg := message(err)
-	if a.flags.json {
+	if a.flags.json || jsonRequested(args) {
 		_ = a.printer().WriteJSON(output.ErrorView{Error: msg, ExitCode: code})
 	} else {
-		fmt.Fprintln(a.Err, "Error: "+msg)
+		fmt.Fprintln(a.Err, "Error: "+termtext.CleanLines(msg))
 	}
 	return code
 }
@@ -248,4 +252,22 @@ func (a *App) rootCommand() *cobra.Command {
 	}
 	setupHelp(root)
 	return root
+}
+
+// jsonRequested reports whether args ask for --json, for errors raised
+// before the flags are parsed. As when parsing, the last --json wins, and it
+// takes the values strconv.ParseBool accepts.
+func jsonRequested(args []string) bool {
+	on := false
+	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
+		if arg == "--json" {
+			on = true
+		} else if v, ok := strings.CutPrefix(arg, "--json="); ok {
+			on, _ = strconv.ParseBool(v)
+		}
+	}
+	return on
 }

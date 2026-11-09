@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/release"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 // ReleaseView is the result of release.
@@ -46,9 +47,9 @@ func (p Printer) Release(r ReleaseView) error {
 		return p.WriteJSON(r)
 	}
 	fmt.Fprintf(p.Out, "%s build %d for %s (%s)\n", p.green("Released"), r.BuildNumber, r.Chip, securityText(r.SecurityMode, r.KeyID))
-	fmt.Fprintf(p.Out, "  deployment  %s (%s, channel %s)\n", r.DeploymentID, r.State, r.Channel)
+	fmt.Fprintf(p.Out, "  deployment  %s (%s, channel %s)\n", termtext.Clean(r.DeploymentID), termtext.Clean(r.State), termtext.Clean(r.Channel))
 	fmt.Fprintf(p.Out, "  sha256      %s\n  size        %d bytes\n", r.SHA256, r.Size)
 	p.alsoActive(r.AlsoActive, r.BuildNumber)
-	p.nextStep("Watch it", "simpleota deployment wait "+r.DeploymentID)
+	p.nextStep("Watch it", "simpleota deployment wait "+termtext.Clean(r.DeploymentID))
 	return nil
 }

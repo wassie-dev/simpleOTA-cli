@@ -18,6 +18,7 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/manifest"
 	"github.com/wassie-dev/simpleOTA-cli/internal/signing"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 var (
@@ -46,8 +47,10 @@ type Options struct {
 	Chip string
 	// Framework defaults to the project's default framework when empty.
 	Framework string
-	// Key signs the release when set; otherwise it is uploaded as basic.
-	Key ed25519.PrivateKey
+	// LoadKey returns the key to sign with, or nil to upload as basic. It
+	// is called once the binary has passed its local checks, so a wrong file
+	// is reported before a passphrase is asked for. Nil means basic.
+	LoadKey func() (ed25519.PrivateKey, error)
 	// AllowDuplicate uploads the binary even when the project already has
 	// a build with the same SHA-256.
 	AllowDuplicate bool
@@ -79,6 +82,8 @@ type API interface {
 	GetProject(ctx context.Context, projectID string) (api.Project, error)
 	ListSigningKeys(ctx context.Context, projectID string) ([]api.SigningKey, error)
 	ListArtifacts(ctx context.Context, projectID string) ([]api.Artifact, error)
+	ListDeployments(ctx context.Context, projectID string) ([]api.Deployment, error)
+	ListChannels(ctx context.Context, projectID string) ([]api.Channel, error)
 	ListDevices(ctx context.Context, projectID string, f api.DeviceFilter) ([]api.Device, error)
 	UploadArtifact(ctx context.Context, projectID string, req api.UploadRequest) (api.Artifact, error)
 	Release(ctx context.Context, projectID string, req api.ReleaseRequest) (api.ReleaseResult, error)
@@ -99,7 +104,7 @@ func (s Service) Upload(ctx context.Context, o Options) (Result, error) {
 	}
 	art, err := s.API.UploadArtifact(ctx, s.ProjectID, api.UploadRequest{ManifestJSON: p.manifest, FileName: p.fileName, Binary: p.binary})
 	if err != nil {
-		return p.res, uploadErr(err, o.AllowDuplicate)
+		return p.res, s.uploadErr(ctx, err, o.AllowDuplicate, p.req)
 	}
 	p.res.BuildNumber = art.BuildNumber
 	p.res.ArtifactID = art.ID
@@ -129,7 +134,8 @@ func (s Service) Release(ctx context.Context, o Options, t Target) (Result, erro
 		ChannelName:       t.Channel,
 	})
 	if err != nil {
-		return p.res, uploadErr(err, o.AllowDuplicate)
+		p.req.target = &t
+		return p.res, s.uploadErr(ctx, err, o.AllowDuplicate, p.req)
 	}
 	p.res.BuildNumber = out.BuildNumber
 	p.res.ArtifactID = out.ArtifactID
@@ -145,6 +151,7 @@ type prepared struct {
 	fileName string
 	manifest []byte
 	res      Result
+	req      request
 }
 
 // prepare reads the binary, settles its chip, refuses a duplicate, and
@@ -164,6 +171,12 @@ func (s Service) prepare(ctx context.Context, o Options) (prepared, error) {
 	chip, err := s.chooseChip(ctx, o.Chip, ImageChip(binary), o.BinaryPath)
 	if err != nil {
 		return p, err
+	}
+	var key ed25519.PrivateKey
+	if o.LoadKey != nil {
+		if key, err = o.LoadKey(); err != nil {
+			return p, err
+		}
 	}
 	sum := sha256.Sum256(binary)
 	p.res.Chip, p.res.SHA256, p.res.Size = chip, hex.EncodeToString(sum[:]), int64(len(binary))
@@ -188,8 +201,8 @@ func (s Service) prepare(ctx context.Context, o Options) (prepared, error) {
 		SecurityMode: manifest.SecurityBasic,
 		SHA256:       p.res.SHA256,
 	}
-	if o.Key != nil {
-		keyID, err := s.registeredKeyID(ctx, o.Key.Public().(ed25519.PublicKey))
+	if key != nil {
+		keyID, err := s.registeredKeyID(ctx, key.Public().(ed25519.PublicKey))
 		if err != nil {
 			return p, err
 		}
@@ -197,7 +210,7 @@ func (s Service) prepare(ctx context.Context, o Options) (prepared, error) {
 		m.SigningMetadata = &manifest.SigningMetadata{
 			KeyID:     keyID,
 			Algorithm: manifest.AlgorithmEd25519,
-			Signature: signing.Sign(o.Key, binary),
+			Signature: signing.Sign(key, binary),
 		}
 		p.res.KeyID = keyID
 	}
@@ -205,6 +218,7 @@ func (s Service) prepare(ctx context.Context, o Options) (prepared, error) {
 		return p, err
 	}
 	p.res.SecurityMode = m.SecurityMode
+	p.req = request{sha: m.SHA256, label: m.VersionLabel, framework: m.Framework, chip: m.ChipFamily, security: m.SecurityMode}
 	p.manifest, err = json.Marshal(m)
 	return p, err
 }
@@ -245,29 +259,49 @@ func (s Service) refuseDuplicate(ctx context.Context, sha string) error {
 	}
 	for _, a := range artifacts {
 		if strings.EqualFold(a.ChecksumSHA256, sha) {
-			return fmt.Errorf("%w: build %d (version %s) has the same SHA-256\nTo upload it again as a new build, pass --allow-duplicate.",
-				ErrDuplicate, a.BuildNumber, a.VersionLabel)
+			return fmt.Errorf("%w: build %d (version %s) has the same SHA-256%s\nTo upload it again as a new build, pass --allow-duplicate.",
+				ErrDuplicate, a.BuildNumber, termtext.Clean(a.VersionLabel), s.deploymentsOf(ctx, a))
 		}
 	}
 	return nil
 }
 
+// deploymentsOf describes the deployments of a build that are still
+// running, for the duplicate refusal, or returns "" when there are none or
+// they cannot be listed.
+func (s Service) deploymentsOf(ctx context.Context, a api.Artifact) string {
+	deps, err := s.API.ListDeployments(ctx, s.ProjectID)
+	if err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, d := range deps {
+		if d.ArtifactID == a.ID && (d.State == api.StateActive || d.State == api.StatePaused) {
+			fmt.Fprintf(&b, "\n  deployment %s is %s at %d%%", termtext.Clean(d.ID), termtext.Clean(d.State), d.RolloutPercentage)
+		}
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return fmt.Sprintf("\nIt is already deployed:%s\nWatch a deployment with:\n  simpleota deployment wait <deployment-id>", b.String())
+}
+
 // uploadErr explains a failed upload. When the connection failed or the
-// server answered 5xx, the build may exist anyway.
-func uploadErr(err error, allowDuplicate bool) error {
+// server answered 5xx, the build may exist anyway, so the project is read to
+// show what it now has.
+func (s Service) uploadErr(ctx context.Context, err error, allowDuplicate bool, req request) error {
 	var ae *api.Error
 	switch {
 	case errors.Is(err, context.Canceled):
 		return err
 	case errors.As(err, &ae) && ae.StatusCode == http.StatusBadRequest && strings.HasPrefix(ae.Detail, "sha256 mismatch"):
-		return fmt.Errorf("%w: the server received different bytes than were sent (%s)\nNothing was created, so it is safe to run the command again.", ErrChecksumMismatch, ae.Detail)
+		return fmt.Errorf("%w: the server received different bytes than were sent (%s)\nNothing was created, so it is safe to run the command again.", ErrChecksumMismatch, termtext.Clean(ae.Detail))
 	case errors.As(err, &ae) && ae.StatusCode < http.StatusInternalServerError:
 		return err
 	case allowDuplicate:
 		return fmt.Errorf("%w\nThe upload may still have created a build. Check before uploading again:\n  simpleota build list", err)
-	default:
-		return fmt.Errorf("%w\nThe upload may still have created a build. Run the same command again to\nfind out: it stops if the project already has this binary.", err)
 	}
+	return s.uncertainErr(ctx, err, req)
 }
 
 // registeredKeyID finds the active project key matching pub, so a release

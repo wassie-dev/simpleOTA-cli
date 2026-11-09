@@ -123,6 +123,7 @@ type Deployment struct {
 	RolloutStrategy     string     `json:"rollout_strategy"`
 	RolloutPercentage   int        `json:"rollout_percentage"`
 	TargetChannelIDs    []string   `json:"target_channel_ids"`
+	TargetGroupIDs      []string   `json:"target_group_ids"`
 	State               string     `json:"state"`
 	StartedAt           *time.Time `json:"started_at"`
 	CompletedAt         *time.Time `json:"completed_at"`
@@ -247,7 +248,7 @@ type ReleaseResult struct {
 type Transition struct {
 	Action            string `json:"action"`
 	RolloutPercentage *int   `json:"rollout_percentage,omitempty"`
-	// ConfirmAll is needed to start a deployment that targets every device
-	// in a project with two or more devices.
+	// ConfirmAll is needed to start or resume a deployment that targets
+	// every device in a project with two or more devices.
 	ConfirmAll bool `json:"confirm_all,omitempty"`
 }

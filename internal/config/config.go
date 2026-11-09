@@ -11,7 +11,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 )
 
 // DefaultAPIURL is the hosted SimpleOTA service.
@@ -25,6 +27,9 @@ type Config struct {
 	ProjectID      string `json:"project_id,omitempty"`
 	ProjectSlug    string `json:"project_slug,omitempty"`
 	SigningKeyFile string `json:"signing_key_file,omitempty"`
+	// SigningKeyPublicPEM is the public key of SigningKeyFile, so the key
+	// can be recognised among the project's keys without its passphrase.
+	SigningKeyPublicPEM string `json:"signing_key_public_pem,omitempty"`
 }
 
 // Dir returns the directory holding config, the token fallback file and
@@ -89,10 +94,23 @@ func WriteFileAtomic(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := renameOver(tmpName, path); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return nil
+}
+
+// renameOver renames tmp onto path. On Windows, renaming onto a file that
+// another process is replacing at the same moment fails with access denied
+// for a short while, so there it is retried for up to a second.
+func renameOver(tmp, path string) error {
+	err := os.Rename(tmp, path)
+	deadline := time.Now().Add(time.Second)
+	for wait := 5 * time.Millisecond; err != nil && runtime.GOOS == "windows" && errors.Is(err, fs.ErrPermission) && time.Now().Before(deadline); wait = min(2*wait, 100*time.Millisecond) {
+		time.Sleep(wait)
+		err = os.Rename(tmp, path)
+	}
+	return err
 }
 
 // NormalizeAPIURL validates an API base URL and returns it as scheme://host[:port].

@@ -80,13 +80,13 @@ func (p Printer) BuildShow(b BuildView) error {
 	p.field("sha256", b.SHA256)
 	p.field("size", fmt.Sprintf("%d bytes", b.Size))
 	if b.Archived {
-		p.field("state", p.yellow("archived"))
+		p.paintedField("state", "archived", p.yellow)
 	} else {
 		p.field("state", "ready")
 	}
 	p.field("created", when(b.CreatedAt))
 	for _, w := range b.Warnings {
-		p.field("warning", p.yellow(w))
+		p.paintedField("warning", w, p.yellow)
 	}
 	return nil
 }

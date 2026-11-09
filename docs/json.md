@@ -5,6 +5,13 @@ With `--json`, each command prints one JSON value to stdout: an array for
 otherwise. Notices and warnings go to stderr. Fields are added over time; existing fields keep
 their names and types. Times are RFC 3339 in UTC.
 
+Strings hold the values exactly as the server sent them, including text a
+device reported. Control characters, C1 included, are written as `\u` escapes,
+so the JSON itself holds none raw. A tool that decodes the strings, such as
+`jq -r`, prints them raw, so treat device-reported values as untrusted there.
+Text output shows them as escapes such as `\x1b`, and doubles a backslash, so
+they cannot change what a terminal or CI log shows.
+
 ## Errors
 
 A failed command prints this object to stdout and exits with the code it
@@ -125,7 +132,8 @@ token can see, or -1 when the server would not list them.
 ```
 
 `pinned_key_ids` names the keys `firmware_snippet` pins: the new key, then
-the project's newest other active key.
+your default signing key, or the project's newest other active key when the
+default is not one of them.
 
 ## key export
 
@@ -349,14 +357,15 @@ An array of [deployment objects](#deployment-object), newest first.
 {
   "deployment": { … },
   "devices": { "offered": 3, "in_progress": 1, "confirmed": 1, "failed": 0, "rolled_back": 1 },
-  "failures": [ { "device_id": "…", "status": "rolled_back", "reason": "task_wdt" } ],
+  "failures": [ { "device_id": "…", "device": "lamp-kitchen", "status": "rolled_back", "reason": "task_wdt" } ],
   "outcome": "device_failed"
 }
 ```
 
 `devices.offered` counts devices that have been offered the build or have
 reported against the deployment; the other counts split it. `device_id` is
-the device's SimpleOTA UUID. `failures` is always an array.
+the device's SimpleOTA UUID, and `device` the ID the device reports, omitted
+when it could not be looked up. `failures` is always an array.
 
 `outcome` is one of:
 

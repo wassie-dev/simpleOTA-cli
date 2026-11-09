@@ -6,6 +6,70 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `deployment resume` can resume a paused deployment that targets every
+  device: pass `--all-devices` to confirm, as for `deployment create`. Without
+  it, the command stops with exit code 2 and shows the command to run.
+- `key generate` no longer deletes the new private key when the server's reply
+  to the registration is lost or is a server error. It checks the project's
+  keys and finishes if the key was registered. Otherwise it keeps the
+  encrypted key, and running the same command again finishes the job.
+- The `key generate` snippet pins your default signing key next to the new
+  key, instead of the project's newest other key. A default key set by an
+  older version at a custom path is read once, with its passphrase, to
+  recognise it.
+- `release` and `build upload` refuse ESP-IDF's `bootloader.bin`,
+  `partition-table.bin` and `ota_data_initial.bin`, which are not OTA app
+  images. The content check is still only the image header's first byte and
+  chip ID.
+- A device whose ID is a MAC address can be named in any case, with colons or
+  dashes, as the server stores it in one form.
+- `release` and `build upload` check the binary before loading the signing
+  key, so a wrong file is reported as such instead of as a missing passphrase.
+- When a `release` or `build upload` fails without showing whether the server
+  created anything, the command reads the project and lists each build of the
+  binary, and for `release` its deployments, with how they differ from what
+  was asked for. It still exits 1, claims none of them, and sends nothing
+  again.
+- When `release` stops because the project already has the binary, it lists
+  that build's running deployments.
+- Text from the server, such as a failure reason a device reported or a device
+  ID, could carry terminal control sequences that recoloured, retitled or
+  overwrote the terminal, or forged output lines. Text output now shows
+  control characters as escapes such as `\x1b`, and doubles backslashes. JSON
+  keeps the exact values, and now escapes C1 control characters too; a tool
+  that decodes them, such as `jq -r`, still prints them raw.
+- With `--json`, an unknown flag or command now prints the JSON error object
+  to stdout, as for other errors.
+- A staff account's change to another owner's project, which the server
+  refuses, is explained as read-only access, with exit code 3, instead of as
+  a missing project or deployment.
+- A failure line names the device by the ID it reports when that is plain
+  printable text, and by its UUID otherwise. The JSON failure object adds
+  `device`.
+- `SIMPLEOTA_PROJECT:` prefixes only errors about that project, not network
+  errors.
+- A `go install` build reports its version without a leading `v`, as release
+  builds do.
+
+### Changed
+
+- An unknown deployment ID exits with code 2, like an unknown build or
+  device, instead of 1.
+- `deployment wait --timeout` now bounds the whole command, including a
+  request or retry in flight, and exits 5 when it passes. Against a server that
+  did not answer, it ran about 90 seconds past the timeout and exited 1.
+- On Windows, two `simpleota` commands saving the config or the credentials
+  file at the same moment could fail with "Access is denied". The save now
+  retries for up to a second.
+- Commands running at the same time, such as `login`, `project use` and
+  `key generate`, could undo each other's changes to the config file, and
+  logins to different servers could drop each other's stored tokens. Each
+  change now reads the file afresh under an operating system lock shared by
+  every `simpleota` process, which ends with the process. `login` and
+  `logout` change the stored token and the config in one step.
+
 ## [0.1.3] - 2026-11-06
 
 ### Added

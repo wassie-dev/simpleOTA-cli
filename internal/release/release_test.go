@@ -54,6 +54,10 @@ func registerKey(t *testing.T, fake *fakeapi.Server, keyID string, revoked bool)
 	return priv
 }
 
+func keyLoader(k ed25519.PrivateKey) func() (ed25519.PrivateKey, error) {
+	return func() (ed25519.PrivateKey, error) { return k, nil }
+}
+
 // everyone targets every device on the stable channel.
 var everyone = release.Target{Channel: "stable", Percent: 100}
 
@@ -98,7 +102,7 @@ func TestSignedReleaseUsesRegisteredKeyID(t *testing.T) {
 	registerKey(t, fake, "other", false)
 	priv := registerKey(t, fake, "prod-2026", false)
 	res, err := svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1.0.0", Chip: "esp32", Key: priv,
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1.0.0", Chip: "esp32", LoadKey: keyLoader(priv),
 	}, everyone)
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +120,7 @@ func TestUnregisteredKeyIsRefusedBeforeUpload(t *testing.T) {
 	registerKey(t, fake, "prod-2026", false)
 	stranger, _ := signing.Generate()
 	_, err := svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Key: stranger,
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", LoadKey: keyLoader(stranger),
 	}, everyone)
 	if err == nil || !strings.Contains(err.Error(), "not registered") {
 		t.Fatalf("err = %v", err)
@@ -130,7 +134,7 @@ func TestRevokedKeyIsRefused(t *testing.T) {
 	fake, svc := service(t)
 	priv := registerKey(t, fake, "old", true)
 	_, err := svc.Release(context.Background(), release.Options{
-		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", Key: priv,
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", LoadKey: keyLoader(priv),
 	}, everyone)
 	if err == nil || !strings.Contains(err.Error(), "revoked") {
 		t.Fatalf("err = %v", err)
@@ -217,6 +221,10 @@ func TestReadBinary(t *testing.T) {
 		{name: "elf", file: "app.elf", data: []byte("\x7fELF"), wantErr: "not the .elf"},
 		{name: "merged", file: "sketch.ino.merged.bin", data: firmware, wantErr: "not an OTA app image"},
 		{name: "partitions", file: "x.partitions.bin", data: firmware, wantErr: "not an OTA app image"},
+		{name: "esp-idf bootloader", file: "bootloader.bin", data: firmware, wantErr: "ESP-IDF bootloader"},
+		{name: "esp-idf partition table", file: "Partition-Table.bin", data: firmware, wantErr: "not an OTA app image"},
+		{name: "esp-idf ota data", file: "ota_data_initial.bin", data: firmware, wantErr: "not an OTA app image"},
+		{name: "app named after its project", file: "bootloader-tool.bin", data: firmware},
 		{name: "too big", file: "app.bin", data: big, wantErr: "limit"},
 	}
 	for _, tt := range tests {
@@ -372,5 +380,153 @@ func TestChipMismatchIsRefusedUnlessADeviceReportsIt(t *testing.T) {
 	opts.Chip, opts.AllowDuplicate = "esp32s3", true
 	if _, err := svc.Release(context.Background(), opts, everyone); err != nil {
 		t.Fatalf("a matching --chip: %v", err)
+	}
+}
+
+const (
+	releasePath = "POST /api/v1/projects/" + fakeapi.ProjectID + "/release/"
+	uploadPath  = "POST /api/v1/projects/" + fakeapi.ProjectID + "/artifacts/"
+)
+
+func TestReleaseWithLostReplyListsWhatItFindsAndFails(t *testing.T) {
+	for name, status := range map[string]int{"dropped": 0, "bad gateway": 502} {
+		t.Run(name, func(t *testing.T) {
+			fake, svc := service(t)
+			fake.LoseReply[releasePath] = []int{status}
+			opts := release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32"}
+			_, err := svc.Release(context.Background(), opts, everyone)
+			if err == nil || !strings.Contains(err.Error(), "It is not known whether the upload created anything") {
+				t.Fatalf("err = %v", err)
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, `build 1, version "1": matches the request`) ||
+				!strings.Contains(msg, "deployment "+fake.Deployments[0].ID+", active at 100% to channel \"stable\": matches the request") {
+				t.Fatalf("candidates missing: %s", msg)
+			}
+			if fake.Count(releasePath) != 1 || len(fake.Artifacts) != 1 {
+				t.Fatalf("%d release requests, %d builds", fake.Count(releasePath), len(fake.Artifacts))
+			}
+		})
+	}
+}
+
+// concurrentJob serves the fake API, but the first release request instead
+// finds that another job uploaded the same binary under another label and
+// created a draft deployment at 7%. With forward set, the request then
+// reaches the fake and only its reply is lost.
+func concurrentJob(t *testing.T, fake *fakeapi.Server, forward bool) release.Service {
+	sum := sha256.Sum256(firmware)
+	var fired atomic.Bool
+	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method+" "+r.URL.Path != releasePath || !fired.CompareAndSwap(false, true) {
+			fake.Config.Handler.ServeHTTP(w, r)
+			return
+		}
+		fake.Mu.Lock()
+		fake.Artifacts = append(fake.Artifacts, api.Artifact{ID: "other-build", BuildNumber: 41, VersionLabel: "other", ChecksumSHA256: hex.EncodeToString(sum[:]), SecurityMode: "basic", ChipFamily: "esp32", Framework: "esp_idf"})
+		fake.Deployments = append(fake.Deployments, api.Deployment{ID: "other-deployment", ArtifactID: "other-build", State: api.StateDraft, RolloutPercentage: 7, TargetChannelIDs: []string{fakeapi.StableChannelID}})
+		fake.Mu.Unlock()
+		if forward {
+			fake.Config.Handler.ServeHTTP(httptest.NewRecorder(), r)
+		}
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	t.Cleanup(front.Close)
+	c := api.New(front.URL, fakeapi.ProjectToken, "test", api.WithSleep(func(context.Context, time.Duration) error { return nil }))
+	return release.Service{API: c, ProjectID: fakeapi.ProjectID}
+}
+
+func TestReleaseDoesNotClaimAnotherJobsBuild(t *testing.T) {
+	for name, forward := range map[string]bool{"request lost": false, "reply lost": true} {
+		t.Run(name, func(t *testing.T) {
+			fake := fakeapi.New(t)
+			svc := concurrentJob(t, fake, forward)
+			_, err := svc.Release(context.Background(), release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32"}, everyone)
+			if err == nil {
+				t.Fatal("a release whose outcome is unknown must fail")
+			}
+			msg := err.Error()
+			for _, want := range []string{
+				`build 41, version "other": differs: version "other", not "1"`,
+				`deployment other-deployment, draft at 7% to channel "stable": differs: draft, not active; 7%, not 100%`,
+			} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("missing %q in:\n%s", want, msg)
+				}
+			}
+			if strings.Contains(msg, "matches the request") != forward {
+				t.Errorf("forward=%v, message:\n%s", forward, msg)
+			}
+		})
+	}
+}
+
+func TestUploadWithLostReplyListsTheBuildAndFails(t *testing.T) {
+	fake, svc := service(t)
+	fake.LoseReply[uploadPath] = []int{0}
+	_, err := svc.Upload(context.Background(), release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32"})
+	if err == nil || !strings.Contains(err.Error(), `build 1, version "1": matches the request`) || strings.Contains(err.Error(), "deployment") || fake.Count(uploadPath) != 1 {
+		t.Fatalf("err = %v, %d uploads", err, fake.Count(uploadPath))
+	}
+}
+
+func TestReleaseStaysUncertainWhenNothingIsFound(t *testing.T) {
+	fake, svc := service(t)
+	fake.FailNext[releasePath] = []int{503}
+	_, err := svc.Release(context.Background(), release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32"}, everyone)
+	if err == nil || !strings.Contains(err.Error(), "shows none of\nthis binary yet") || fake.Count(releasePath) != 1 {
+		t.Fatalf("err = %v, %d requests", err, fake.Count(releasePath))
+	}
+}
+
+func TestReleaseWithAllowDuplicateDoesNotLookAfterLostReply(t *testing.T) {
+	fake, svc := service(t)
+	opts := release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32", AllowDuplicate: true}
+	if _, err := svc.Release(context.Background(), opts, everyone); err != nil {
+		t.Fatal(err)
+	}
+	fake.LoseReply[releasePath] = []int{0}
+	if _, err := svc.Release(context.Background(), opts, everyone); err == nil || !strings.Contains(err.Error(), "simpleota build list") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDuplicateRefusalNamesRunningDeployments(t *testing.T) {
+	fake, svc := service(t)
+	opts := release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32"}
+	if _, err := svc.Release(context.Background(), opts, everyone); err != nil {
+		t.Fatal(err)
+	}
+	_, err := svc.Release(context.Background(), opts, everyone)
+	if !errors.Is(err, release.ErrDuplicate) || !strings.Contains(err.Error(), "deployment "+fake.Deployments[0].ID+" is active at 100%") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestUploadMessagesShowServerIDsEscaped(t *testing.T) {
+	const hostileID, hostileState = "dep\x1b]0;PWNED\x07\nError: forged", "draft\x1b[2J\nError: forged"
+	fake := fakeapi.New(t)
+	sum := sha256.Sum256(firmware)
+	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method+" "+r.URL.Path != releasePath {
+			fake.Config.Handler.ServeHTTP(w, r)
+			return
+		}
+		fake.Mu.Lock()
+		fake.Artifacts = append(fake.Artifacts, api.Artifact{ID: "b", BuildNumber: 9, VersionLabel: "1", ChecksumSHA256: hex.EncodeToString(sum[:]), SecurityMode: "basic", ChipFamily: "esp32", Framework: "esp_idf"})
+		fake.Deployments = append(fake.Deployments, api.Deployment{ID: hostileID, ArtifactID: "b", State: hostileState, RolloutPercentage: 100, TargetChannelIDs: []string{fakeapi.StableChannelID}})
+		fake.Mu.Unlock()
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	t.Cleanup(front.Close)
+	svc := release.Service{API: api.New(front.URL, fakeapi.ProjectToken, "test", api.WithSleep(func(context.Context, time.Duration) error { return nil })), ProjectID: fakeapi.ProjectID}
+	opts := release.Options{BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1", Chip: "esp32"}
+	_, lost := svc.Release(context.Background(), opts, everyone)
+	fake.Deployments[0].State = api.StateActive
+	_, dup := svc.Release(context.Background(), opts, everyone)
+	for name, err := range map[string]error{"lost reply": lost, "duplicate": dup} {
+		if err == nil || !strings.Contains(err.Error(), "deployment dep") || strings.ContainsAny(err.Error(), "\x1b\x07") || strings.Contains(err.Error(), "\nError: forged") {
+			t.Errorf("%s: %q", name, err)
+		}
 	}
 }

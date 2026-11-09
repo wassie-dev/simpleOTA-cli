@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -35,19 +36,31 @@ var espChipIDs = map[uint16]string{
 	0x001C: "esp32h4",
 }
 
-// nonAppSuffixes are toolchain outputs that are not OTA app images; the
-// server keeps the same list.
+// nonAppSuffixes are Arduino toolchain outputs that are not OTA app
+// images; the server warns on the same list.
 var nonAppSuffixes = []string{
 	".merged.bin", ".bootloader.bin", ".partitions.bin", ".partitions_flashed.bin",
 	".spiffs.bin", ".littlefs.bin", ".fatfs.bin",
 }
 
-// ReadBinary loads and checks a firmware image.
+// nonAppNames are the ESP-IDF build outputs, by file name, that are not OTA
+// app images. A bootloader image has the same header as an app, so only its
+// name tells them apart.
+var nonAppNames = []string{"bootloader.bin", "partition-table.bin", "ota_data_initial.bin"}
+
+const appImageHint = "\nPass the application .bin:\n  Arduino: build/<sketch>.ino.bin\n  ESP-IDF: build/<project>.bin"
+
+// ReadBinary loads and checks a firmware image. The checks are the file
+// name, the size, the first byte of the image header and, in ImageChip, its
+// chip ID. They do not prove the file is an app image.
 func ReadBinary(path string) ([]byte, error) {
 	lower := strings.ToLower(filepath.Base(path))
+	if slices.Contains(nonAppNames, lower) {
+		return nil, fmt.Errorf("%s is an ESP-IDF %s, not an OTA app image%s", path, strings.TrimSuffix(lower, ".bin"), appImageHint)
+	}
 	for _, s := range nonAppSuffixes {
 		if strings.HasSuffix(lower, s) {
-			return nil, fmt.Errorf("%s is a %s file, not an OTA app image\nPass the application .bin:\n  Arduino: build/<sketch>.ino.bin\n  ESP-IDF: build/<project>.bin", path, s)
+			return nil, fmt.Errorf("%s is a %s file, not an OTA app image%s", path, s, appImageHint)
 		}
 	}
 	f, err := os.Open(path) // #nosec G304 -- the user names the firmware to upload

@@ -1,6 +1,9 @@
 package output
 
 import (
+	"bytes"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/release"
@@ -17,4 +20,15 @@ func TestReleaseGolden(t *testing.T) {
 	r.AlsoActive = []DeploymentView{{ID: "0d8e7a14-3b5c-4f2a-8e1d-abcdef012345", BuildNumber: 41, State: "active", RolloutStrategy: "immediate", RolloutPercentage: 100}}
 	golden(t, "release_also_active.json", render(t, true, func(p Printer) error { return p.Release(r) }))
 	golden(t, "release_also_active.txt", render(t, false, func(p Printer) error { return p.Release(r) }))
+}
+
+func TestReleaseTextShowsServerIDsEscaped(t *testing.T) {
+	var out bytes.Buffer
+	p := Printer{Out: &out, Err: io.Discard}
+	if err := p.Release(ReleaseView{DeploymentID: "d\x1b[2J\nError: forged", State: "active", Channel: "stable"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.ContainsAny(out.String(), "\x1b") || strings.Contains(out.String(), "\nError: forged") {
+		t.Fatalf("%q", out.String())
+	}
 }

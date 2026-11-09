@@ -1,9 +1,12 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -90,5 +93,33 @@ func TestDirOverride(t *testing.T) {
 	})
 	if err != nil || got != filepath.Clean("/tmp/x") {
 		t.Fatalf("Dir = %q, %v", got, err)
+	}
+}
+
+func TestConcurrentSavesLeaveOneWholeConfig(t *testing.T) {
+	dir := t.TempDir()
+	var wg sync.WaitGroup
+	errs := make(chan error, 16)
+	for i := range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- Save(dir, Config{ProjectID: fmt.Sprintf("project-%02d", i), ProjectSlug: strings.Repeat("s", 4096)})
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Errorf("save: %v", err)
+		}
+	}
+	c, err := Load(dir)
+	if err != nil || !strings.HasPrefix(c.ProjectID, "project-") || len(c.ProjectSlug) != 4096 {
+		t.Fatalf("config after concurrent saves: %+v %v", c.ProjectID, err)
+	}
+	left, _ := filepath.Glob(filepath.Join(dir, ".tmp-*"))
+	if len(left) != 0 {
+		t.Fatalf("temp files left: %v", left)
 	}
 }

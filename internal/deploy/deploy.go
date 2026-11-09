@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 )
@@ -16,6 +18,7 @@ type API interface {
 	ListDeployments(ctx context.Context, projectID string) ([]api.Deployment, error)
 	GetDeployment(ctx context.Context, projectID, deploymentID string) (api.Deployment, error)
 	ListDeploymentStates(ctx context.Context, projectID, deploymentID string) ([]api.DeviceState, error)
+	ListDevices(ctx context.Context, projectID string, f api.DeviceFilter) ([]api.Device, error)
 }
 
 // ActionStart starts a draft deployment. deployment create sends it; it is
@@ -56,6 +59,12 @@ func BuildTransition(action string, percent *int) (api.Transition, error) {
 	return t, nil
 }
 
+// TargetsAllDevices reports whether a deployment targets every device in
+// the project, having no channel or group targets.
+func TargetsAllDevices(d api.Deployment) bool {
+	return len(d.TargetChannelIDs) == 0 && len(d.TargetGroupIDs) == 0
+}
+
 // Latest returns the project's most recently created deployment.
 func Latest(ctx context.Context, a API, projectID string) (api.Deployment, error) {
 	deps, err := a.ListDeployments(ctx, projectID)
@@ -85,9 +94,12 @@ type Counts struct {
 
 // Failure is one device that failed or rolled back.
 type Failure struct {
+	// DeviceID is the device's SimpleOTA UUID.
 	DeviceID string `json:"device_id"`
-	Status   string `json:"status"`
-	Reason   string `json:"reason"`
+	// Device is the ID the device reports, when it could be looked up.
+	Device string `json:"device,omitempty"`
+	Status string `json:"status"`
+	Reason string `json:"reason"`
 }
 
 // Summary is a deployment with its device progress.
@@ -168,7 +180,38 @@ func Status(ctx context.Context, a API, projectID, deploymentID string) (Summary
 	if err != nil {
 		return Summary{}, err
 	}
-	return Summarize(d, states), nil
+	s := Summarize(d, states)
+	nameFailures(ctx, a, projectID, s.Failures)
+	return s, nil
+}
+
+// nameFailures fills in the ID each failed device reports. A failed lookup
+// leaves the UUIDs alone.
+func nameFailures(ctx context.Context, a API, projectID string, failures []Failure) {
+	if len(failures) == 0 {
+		return
+	}
+	devices, err := a.ListDevices(ctx, projectID, api.DeviceFilter{})
+	if err != nil {
+		return
+	}
+	reported := make(map[string]string, len(devices))
+	for _, d := range devices {
+		reported[d.ID] = d.DeviceID
+	}
+	for i := range failures {
+		failures[i].Device = reported[failures[i].DeviceID]
+	}
+}
+
+// Name is how output names the device: its reported ID when that is plain
+// printable text, or else its UUID. A device chooses its own ID, so an ID
+// with control or formatting characters is not printed.
+func (f Failure) Name() string {
+	if f.Device != "" && !strings.ContainsFunc(f.Device, func(r rune) bool { return !unicode.IsPrint(r) }) {
+		return f.Device
+	}
+	return f.DeviceID
 }
 
 // Waiter polls a deployment until Evaluate reaches a verdict or the timeout
@@ -185,20 +228,40 @@ type Waiter struct {
 	OnPollError func(error)
 }
 
+// ErrNoStatus means the timeout passed before any poll succeeded. It wraps
+// the last poll error.
+var ErrNoStatus = errors.New("the deployment could not be read before the timeout")
+
 // Wait returns the last summary and its outcome. The outcome is
-// OutcomeTimedOut when the timeout passes first. A transient poll failure
-// (network, 429, 5xx gateway errors) does not end the wait; any other error
-// does.
+// OutcomeTimedOut when the timeout, or a deadline on ctx, passes first; the
+// timeout also cuts short a request or retry in flight. A transient poll
+// failure (network, 429, 5xx gateway errors) does not end the wait; any
+// other error does. When the timeout passes before any poll succeeded, the
+// error wraps ErrNoStatus and the last poll error.
 func (w Waiter) Wait(ctx context.Context, deploymentID string) (Summary, Outcome, error) {
 	deadline := w.Now().Add(w.Timeout)
+	ctx, cancel := context.WithTimeout(ctx, w.Timeout)
+	defer cancel()
 	var last Summary
 	var lastCounts *Counts
 	var lastErr error
+	read := false
+	timedOut := func() (Summary, Outcome, error) {
+		if !read {
+			return last, OutcomeTimedOut, fmt.Errorf("%w: %w", ErrNoStatus, lastErr)
+		}
+		return last, OutcomeTimedOut, nil
+	}
 	for {
 		s, err := Status(ctx, w.API, w.ProjectID, deploymentID)
 		switch {
+		case err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
+			if lastErr == nil {
+				lastErr = err
+			}
+			return timedOut()
 		case err == nil:
-			last, lastErr = s, nil
+			last, lastErr, read = s, nil, true
 			if w.OnProgress != nil && (lastCounts == nil || *lastCounts != s.Counts) {
 				c := s.Counts
 				lastCounts = &c
@@ -217,12 +280,12 @@ func (w Waiter) Wait(ctx context.Context, deploymentID string) (Summary, Outcome
 		}
 		remaining := deadline.Sub(w.Now())
 		if remaining <= 0 {
-			if lastCounts == nil && lastErr != nil {
-				return last, OutcomeInProgress, lastErr
-			}
-			return last, OutcomeTimedOut, nil
+			return timedOut()
 		}
 		if err := w.Sleep(ctx, min(w.Interval, remaining)); err != nil {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return timedOut()
+			}
 			return last, OutcomeInProgress, err
 		}
 	}

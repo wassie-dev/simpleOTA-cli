@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 // Error is a non-2xx response from the API.
@@ -29,7 +31,7 @@ func (e *Error) Error() string {
 	if e.Detail == "" {
 		return fmt.Sprintf("%s %s: server returned %d", e.Method, e.Path, e.StatusCode)
 	}
-	return fmt.Sprintf("server returned %d: %s", e.StatusCode, e.Detail)
+	return fmt.Sprintf("server returned %d: %s", e.StatusCode, termtext.Clean(e.Detail))
 }
 
 // IsAuth reports whether the server rejected the token or its permissions.

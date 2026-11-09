@@ -13,6 +13,7 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/config"
 	"github.com/wassie-dev/simpleOTA-cli/internal/credentials"
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 const projectEnv = "SIMPLEOTA_PROJECT"
@@ -50,8 +51,9 @@ func (s *session) currentProject(ctx context.Context) (api.Project, string, erro
 	}
 	if ref := strings.TrimSpace(s.app.Getenv(projectEnv)); ref != "" {
 		p, err := findProject(ctx, s.api, ref)
-		if err != nil {
-			err = fmt.Errorf("%s: %w", projectEnv, err)
+		var ee *exitError
+		if errors.As(err, &ee) && ee.code == ExitUsage {
+			err = usageErr("%s: %w", projectEnv, err)
 		}
 		return p, projectFromEnv, err
 	}
@@ -88,7 +90,7 @@ func (s *session) fullProject(ctx context.Context) (api.Project, string, error) 
 	full, err := s.api.GetProject(ctx, p.ID)
 	var ae *api.Error
 	if errors.As(err, &ae) && ae.StatusCode == http.StatusNotFound {
-		return api.Project{}, source, usageErr("the chosen project (%s) does not exist, or this token cannot see it\nChoose another with:\n  simpleota project use <slug>", p.Slug)
+		return api.Project{}, source, usageErr("the chosen project (%s) does not exist, or this token cannot see it\nChoose another with:\n  simpleota project use <slug>", termtext.Clean(p.Slug))
 	}
 	return full, source, err
 }
@@ -124,7 +126,7 @@ func projectSlugs(ps []api.Project) string {
 	}
 	slugs := make([]string, len(ps))
 	for i, p := range ps {
-		slugs[i] = p.Slug
+		slugs[i] = termtext.Clean(p.Slug)
 	}
 	return strings.Join(slugs, ", ")
 }
@@ -250,8 +252,10 @@ tokens.`,
 			if err != nil {
 				return err
 			}
-			s.cfg.APIURL, s.cfg.ProjectID, s.cfg.ProjectSlug = s.apiURL, p.ID, p.Slug
-			if err := config.Save(s.configDir, s.cfg); err != nil {
+			if _, err := config.Update(s.configDir, func(c *config.Config) bool {
+				c.APIURL, c.ProjectID, c.ProjectSlug = s.apiURL, p.ID, p.Slug
+				return true
+			}); err != nil {
 				return err
 			}
 			return a.printer().ProjectUse(output.ProjectUseView{APIURL: s.apiURL, Project: output.NewProjectView(p)})
