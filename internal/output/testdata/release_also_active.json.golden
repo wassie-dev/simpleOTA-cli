@@ -21,5 +21,6 @@
       "started_at": null,
       "completed_at": null
     }
-  ]
+  ],
+  "targeted_devices": 0
 }

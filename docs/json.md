@@ -16,8 +16,10 @@ they cannot change what a terminal or CI log shows.
 
 A failed command prints this object to stdout and exits with the code it
 contains. `error` can run over several lines: the first says what is wrong,
-and the rest say what to do. `deployment wait` prints its status object first, then the
-error. `status` prints only its status object and sets the exit code.
+and the rest say what to do. `release` and `deployment create` with
+`--require-devices` print their result object first, then the error, because
+the deployment exists and is active. `status` prints only its status object
+and sets the exit code.
 
 ```json
 { "error": "not logged in to https://simpleota.com\nLog in with:\n  simpleota login\nOr set SIMPLEOTA_TOKEN.", "exit_code": 3 }
@@ -165,7 +167,8 @@ Newest first, revoked keys included.
   "chip": "esp32s3",
   "sha256": "…",
   "size": 1048576,
-  "also_active": [ { … } ]
+  "also_active": [ { … } ],
+  "targeted_devices": 12
 }
 ```
 
@@ -174,6 +177,11 @@ Newest first, revoked keys included.
 active deployments for the same chip on the channel as
 [deployment objects](#deployment-object), highest build first; it is always
 an array.
+`targeted_devices` counts the project's active devices in the deployment's
+audience: on its channels, if it has any, and in its groups, if it has any.
+The rollout percentage and the build's compatibility then decide which of
+them are offered the build when they check in. It is `null` when the devices
+could not be counted, and a notice on stderr says why.
 `sha256` is the SHA-256 of the local file. It was sent in the manifest, and
 the server accepts an upload only when the bytes it received hash the same,
 so it is also the checksum the server stored.
@@ -344,14 +352,14 @@ An array of [deployment objects](#deployment-object), newest first.
 ## deployment create
 
 ```json
-{ "deployment": { … }, "targets": ["channel stable"], "also_active": [ { … } ] }
+{ "deployment": { … }, "targets": ["channel stable"], "targeted_devices": 12, "also_active": [ { … } ] }
 ```
 
 `targets` names the channels and groups the deployment reaches, such as
 `channel beta` or `group kitchen`; it is empty for `--all-devices`.
-`also_active` is as in [release](#release).
+`targeted_devices` and `also_active` are as in [release](#release).
 
-## deployment show, deployment wait
+## deployment show
 
 ```json
 {
@@ -369,11 +377,10 @@ when it could not be looked up. `failures` is always an array.
 
 `outcome` is one of:
 
-| Outcome | Meaning | `wait` exit code |
-| --- | --- | --- |
-| `succeeded` | Every offered device confirmed, or the deployment is completed after at least one device was offered the build | 0 |
-| `in_progress` | Still rolling out (only from `show`) | |
-| `device_failed` | A device reported `failed` or `rolled_back` | 4 |
-| `stopped` | The deployment is paused, cancelled or draft | 4 |
-| `no_devices` | The deployment was completed before any device was offered the build | 4 |
-| `timed_out` | `--timeout` passed first | 5 |
+| Outcome | Meaning |
+| --- | --- |
+| `succeeded` | Every offered device confirmed, or the deployment is completed after at least one device was offered the build |
+| `in_progress` | Still rolling out |
+| `device_failed` | A device reported `failed` or `rolled_back` |
+| `stopped` | The deployment is paused, cancelled or draft |
+| `no_devices` | The deployment was completed before any device was offered the build |

@@ -7,13 +7,9 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
-	"net/http/httputil"
-	"net/url"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 // device simulates an ESP32 checking in through the dev server's OTA API
@@ -109,28 +105,15 @@ func TestRolloutLifecycle(t *testing.T) {
 	}
 }
 
-// waitAsync starts deployment wait and returns a channel with its result.
-func waitAsync(c *cli, id string, timeout string) <-chan result {
-	ch := make(chan result, 1)
-	go func() {
-		ch <- c.run("", "deployment", "wait", id, "--timeout", timeout, "--interval", "1s", "--json")
-	}()
-	return ch
-}
-
-// outcome reads the status object, which comes before any error object.
-func outcome(t *testing.T, r result) string {
+// outcome reads the outcome deployment show gives.
+func outcome(t *testing.T, c *cli, id string) string {
 	t.Helper()
-	var v struct {
+	return decode[struct {
 		Outcome string `json:"outcome"`
-	}
-	if err := json.NewDecoder(strings.NewReader(r.stdout)).Decode(&v); err != nil {
-		t.Fatalf("bad JSON %q: %v", r.stdout, err)
-	}
-	return v.Outcome
+	}](t, c.mustRun("deployment", "show", id, "--json").stdout).Outcome
 }
 
-func TestStatusWaitSucceedsWhenDevicesConfirm(t *testing.T) {
+func TestShowSucceedsWhenDevicesConfirm(t *testing.T) {
 	c := ciCLI(t)
 	out := release(t, c)
 	devices := []*device{newDevice(t), newDevice(t)}
@@ -139,39 +122,37 @@ func TestStatusWaitSucceedsWhenDevicesConfirm(t *testing.T) {
 			t.Fatalf("offered deployment %s, want %s", got, out.DeploymentID)
 		}
 	}
-	done := waitAsync(c, out.DeploymentID, "60s")
-	time.Sleep(1500 * time.Millisecond)
+	if got := outcome(t, c, out.DeploymentID); got != "in_progress" {
+		t.Fatalf("before confirming: %s", got)
+	}
 	for _, d := range devices {
 		d.report(out.DeploymentID, "downloaded", out.BuildNumber)
 		d.report(out.DeploymentID, "confirmed", out.BuildNumber)
 	}
-	r := <-done
-	if r.code != 0 || outcome(t, r) != "succeeded" {
-		t.Fatalf("%+v", r)
+	if got := outcome(t, c, out.DeploymentID); got != "succeeded" {
+		t.Fatalf("after confirming: %s", got)
 	}
 }
 
-func TestStatusWaitFailsOnFailedDevice(t *testing.T) {
+func TestShowReportsAFailedDevice(t *testing.T) {
 	c := ciCLI(t)
 	out := release(t, c)
 	d := newDevice(t)
 	d.check(out.BuildNumber)
 	d.report(out.DeploymentID, "failed", out.BuildNumber)
-	r := <-waitAsync(c, out.DeploymentID, "30s")
-	if r.code != 4 || outcome(t, r) != "device_failed" {
-		t.Fatalf("%+v", r)
+	if got := outcome(t, c, out.DeploymentID); got != "device_failed" {
+		t.Fatal(got)
 	}
 }
 
-func TestStatusWaitFailsWhenRollbackAutoPauses(t *testing.T) {
+func TestShowReportsARollbackAndTheAutoPause(t *testing.T) {
 	c := ciCLI(t)
 	out := release(t, c)
 	d := newDevice(t)
 	d.check(out.BuildNumber)
 	d.report(out.DeploymentID, "rolled_back", out.BuildNumber)
-	r := <-waitAsync(c, out.DeploymentID, "30s")
-	if r.code != 4 || outcome(t, r) != "device_failed" {
-		t.Fatalf("%+v", r)
+	if got := outcome(t, c, out.DeploymentID); got != "device_failed" {
+		t.Fatal(got)
 	}
 	st := c.mustRun("deployment", "show", out.DeploymentID, "--json")
 	if !strings.Contains(st.stdout, `"state": "paused"`) {
@@ -179,26 +160,12 @@ func TestStatusWaitFailsWhenRollbackAutoPauses(t *testing.T) {
 	}
 }
 
-func TestStatusWaitFailsWhenPaused(t *testing.T) {
+func TestShowReportsAPausedDeployment(t *testing.T) {
 	c := ciCLI(t)
 	out := release(t, c)
 	c.mustRun("deployment", "pause", out.DeploymentID)
-	r := <-waitAsync(c, out.DeploymentID, "30s")
-	if r.code != 4 || outcome(t, r) != "stopped" {
-		t.Fatalf("%+v", r)
-	}
-}
-
-func TestStatusWaitTimesOut(t *testing.T) {
-	c := ciCLI(t)
-	out := release(t, c)
-	start := time.Now()
-	r := <-waitAsync(c, out.DeploymentID, "3s")
-	if r.code != 5 || outcome(t, r) != "timed_out" {
-		t.Fatalf("%+v", r)
-	}
-	if time.Since(start) > 20*time.Second {
-		t.Fatalf("timeout took %s", time.Since(start))
+	if got := outcome(t, c, out.DeploymentID); got != "stopped" {
+		t.Fatal(got)
 	}
 }
 
@@ -213,13 +180,12 @@ func TestDeploymentStatusAfterLogoutIsAuthError(t *testing.T) {
 	}
 }
 
-func TestStatusWaitFailsWhenCompletedWithNoDevices(t *testing.T) {
+func TestShowReportsACompletionBeforeAnyDevice(t *testing.T) {
 	c := ciCLI(t)
 	out := release(t, c)
 	c.mustRun("deployment", "complete", out.DeploymentID)
-	r := <-waitAsync(c, out.DeploymentID, "30s")
-	if r.code != 4 || outcome(t, r) != "no_devices" || !strings.Contains(r.stdout+r.stderr, "so none updated") {
-		t.Fatalf("%+v", r)
+	if got := outcome(t, c, out.DeploymentID); got != "no_devices" {
+		t.Fatal(got)
 	}
 }
 
@@ -307,31 +273,65 @@ func TestHostileDeviceIDIsNotPrinted(t *testing.T) {
 	d := &device{t: t, id: "e2e-" + uid() + "\x1b[2J\x1b]0;PWNED\x07\rFORGED\nError: none"}
 	id := d.check(out.BuildNumber)
 	d.report(id, "failed", out.BuildNumber)
-	for _, args := range [][]string{{"deployment", "show", id}, {"deployment", "wait", id, "--timeout", "20s"}} {
-		r := c.run("", args...)
-		if strings.ContainsAny(r.stdout+r.stderr, "\x1b\x07\r") || strings.Contains(r.stdout+r.stderr, "FORGED") || !strings.Contains(r.stdout, "failure  device ") {
-			t.Errorf("%v: %q %q", args, r.stdout, r.stderr)
-		}
+	r := c.run("", "deployment", "show", id)
+	if strings.ContainsAny(r.stdout+r.stderr, "\x1b\x07\r") || strings.Contains(r.stdout+r.stderr, "FORGED") || !strings.Contains(r.stdout, "failure  device ") {
+		t.Errorf("%q %q", r.stdout, r.stderr)
 	}
 }
 
-func TestStatusWaitTimeoutBoundsAHungServer(t *testing.T) {
-	c := ciCLI(t)
-	out := release(t, c)
-	target, _ := url.Parse(env["SIMPLEOTA_DEV_API_URL"])
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/states/") {
-			<-r.Context().Done()
-			return
+// jsonObjects decodes each JSON object on stdout in turn.
+func jsonObjects(t *testing.T, stdout string) []map[string]any {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(stdout))
+	var out []map[string]any
+	for dec.More() {
+		var v map[string]any
+		if err := dec.Decode(&v); err != nil {
+			t.Fatalf("bad JSON %q: %v", stdout, err)
 		}
-		proxy.ServeHTTP(w, r)
-	}))
-	t.Cleanup(hung.Close)
-	c.extra["SIMPLEOTA_API_URL"] = hung.URL
-	start := time.Now()
-	r := c.run("", "deployment", "wait", out.DeploymentID, "--timeout", "3s", "--interval", "1s")
-	if elapsed := time.Since(start); r.code != 5 || elapsed > 10*time.Second {
-		t.Fatalf("exit %d after %s: %+v", r.code, elapsed, r)
+		out = append(out, v)
+	}
+	return out
+}
+
+func TestRequireDevicesCountsTheTargetedDevices(t *testing.T) {
+	c := ciCLI(t)
+	channel := "e2e-" + uid()
+	c.mustRun("channel", "create", channel)
+
+	r := c.run("", "release", firmware(t), "--version-label", "e2e-"+uid(), "--chip", "esp32", "--channel", channel, "--require-devices", "--json")
+	objs := jsonObjects(t, r.stdout)
+	if len(objs) > 0 {
+		if id, ok := objs[0]["deployment_id"].(string); ok {
+			t.Cleanup(func() { cancelDeployment(t, id) })
+		}
+	}
+	if r.code != 4 || len(objs) != 2 || objs[0]["targeted_devices"] != 0.0 || objs[0]["state"] != "active" || objs[1]["exit_code"] != 4.0 {
+		t.Fatalf("empty channel: %+v", r)
+	}
+
+	d := newDevice(t)
+	d.post("/api/v1/ota/check/", map[string]any{"device_id": d.id, "current_build_number": 0, "framework": "esp_idf", "chip_family": "esp32"})
+	c.mustRun("device", "update", d.id, "--channel", channel)
+	out := release(t, c, "--channel", channel, "--require-devices")
+	if out.TargetedDevices == nil || *out.TargetedDevices != 1 {
+		t.Fatalf("one device on the channel: %+v", out)
+	}
+	if got := d.check(out.BuildNumber); got != out.DeploymentID {
+		t.Fatalf("the counted device was offered %s, want %s", got, out.DeploymentID)
+	}
+
+	c.mustRun("device", "update", d.id, "--state", "inactive")
+	build := strconv.Itoa(out.BuildNumber)
+	r = c.run("", "deployment", "create", "--build", build, "--channel", channel, "--require-devices", "--json")
+	objs = jsonObjects(t, r.stdout)
+	if len(objs) > 0 {
+		if dep, ok := objs[0]["deployment"].(map[string]any); ok {
+			id, _ := dep["id"].(string)
+			t.Cleanup(func() { cancelDeployment(t, id) })
+		}
+	}
+	if r.code != 4 || len(objs) != 2 || objs[0]["targeted_devices"] != 0.0 {
+		t.Fatalf("inactive device: %+v", r)
 	}
 }

@@ -22,6 +22,9 @@ type ReleaseView struct {
 	// AlsoActive lists the other active deployments for the same chip on
 	// the channel, highest build first.
 	AlsoActive []DeploymentView `json:"also_active"`
+	// TargetedDevices counts the active devices on the channel, or is nil
+	// when they could not be counted.
+	TargetedDevices *int `json:"targeted_devices"`
 }
 
 // NewReleaseView converts a release result.
@@ -48,8 +51,11 @@ func (p Printer) Release(r ReleaseView) error {
 	}
 	fmt.Fprintf(p.Out, "%s build %d for %s (%s)\n", p.green("Released"), r.BuildNumber, r.Chip, securityText(r.SecurityMode, r.KeyID))
 	fmt.Fprintf(p.Out, "  deployment  %s (%s, channel %s)\n", termtext.Clean(r.DeploymentID), termtext.Clean(r.State), termtext.Clean(r.Channel))
+	if r.TargetedDevices != nil {
+		fmt.Fprintf(p.Out, "  devices     %s\n", p.targeted(*r.TargetedDevices))
+	}
 	fmt.Fprintf(p.Out, "  sha256      %s\n  size        %d bytes\n", r.SHA256, r.Size)
 	p.alsoActive(r.AlsoActive, r.BuildNumber)
-	p.nextStep("Watch it", "simpleota deployment wait "+termtext.Clean(r.DeploymentID))
+	p.nextStep("Check on it", "simpleota deployment show "+termtext.Clean(r.DeploymentID))
 	return nil
 }

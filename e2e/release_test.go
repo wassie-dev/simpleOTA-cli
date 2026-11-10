@@ -33,6 +33,7 @@ type releaseOut struct {
 	AlsoActive   []struct {
 		ID string `json:"id"`
 	} `json:"also_active"`
+	TargetedDevices *int `json:"targeted_devices"`
 }
 
 // firmware writes a unique fake ESP32 app image.

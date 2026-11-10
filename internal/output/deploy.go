@@ -60,8 +60,11 @@ type CreatedView struct {
 	Deployment DeploymentView `json:"deployment"`
 	// Targets names the channels and groups the deployment reaches; empty
 	// means every device in the project.
-	Targets    []string         `json:"targets"`
-	AlsoActive []DeploymentView `json:"also_active"`
+	Targets []string `json:"targets"`
+	// TargetedDevices counts the active devices in the deployment's
+	// audience, or is nil when they could not be counted.
+	TargetedDevices *int             `json:"targeted_devices"`
+	AlsoActive      []DeploymentView `json:"also_active"`
 }
 
 // Created prints the result of deployment create.
@@ -76,9 +79,23 @@ func (p Printer) Created(v CreatedView) error {
 	}
 	fmt.Fprintf(p.Out, "%s deployment %s\n", p.green("Started"), termtext.Clean(d.ID))
 	fmt.Fprintf(p.Out, "  build    %d, offered to %d%% of %s\n", d.BuildNumber, d.RolloutPercentage, audience)
+	if v.TargetedDevices != nil {
+		fmt.Fprintf(p.Out, "  devices  %s\n", p.targeted(*v.TargetedDevices))
+	}
 	p.alsoActive(v.AlsoActive, d.BuildNumber)
-	p.nextStep("Watch it", "simpleota deployment wait "+termtext.Clean(d.ID))
+	p.nextStep("Check on it", "simpleota deployment show "+termtext.Clean(d.ID))
 	return nil
+}
+
+// targeted describes a count of targeted devices.
+func (p Printer) targeted(n int) string {
+	switch n {
+	case 0:
+		return p.yellow("no active device is targeted")
+	case 1:
+		return "1 active device targeted"
+	}
+	return fmt.Sprintf("%d active devices targeted", n)
 }
 
 // alsoActive explains the other active deployments that still reach some
@@ -125,7 +142,7 @@ func NextStep(d api.Deployment) string {
 	return ""
 }
 
-// DeploymentStatusView is the result of deployment show and deployment wait.
+// DeploymentStatusView is the result of deployment show.
 type DeploymentStatusView struct {
 	Deployment DeploymentView   `json:"deployment"`
 	Devices    deploy.Counts    `json:"devices"`
@@ -168,15 +185,8 @@ func (p Printer) DeploymentStatus(v DeploymentStatusView) error {
 		fmt.Fprintln(p.Out, p.yellow("The deployment is not running."))
 	case deploy.OutcomeNoDevices:
 		fmt.Fprintln(p.Out, p.yellow("The deployment was completed before any device was offered the build."))
-	case deploy.OutcomeTimedOut:
-		fmt.Fprintln(p.Out, p.yellow("Timed out before every device confirmed."))
 	}
 	return nil
-}
-
-// Progress is the one-line update printed to Err while waiting.
-func (p Printer) Progress(s deploy.Summary) {
-	p.Notice("%s  %s, %d%%: %s", time.Now().Format("15:04:05"), termtext.Clean(s.Deployment.State), s.Deployment.RolloutPercentage, p.counts(s.Counts))
 }
 
 func (p Printer) counts(c deploy.Counts) string {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")
@@ -42,4 +43,11 @@ func render(t *testing.T, json bool, f func(Printer) error) []byte {
 func TestErrorGolden(t *testing.T) {
 	v := ErrorView{Error: "not logged in", ExitCode: 3}
 	golden(t, "error.json", render(t, true, func(p Printer) error { return p.WriteJSON(v) }))
+}
+
+func TestTimesAreShownInUTCWithTheZone(t *testing.T) {
+	at := time.Date(2026, 10, 1, 14, 30, 0, 0, time.FixedZone("CEST", 2*60*60))
+	if got := when(at); got != "2026-10-01 12:30 UTC" {
+		t.Fatalf("when = %q", got)
+	}
 }

@@ -2,11 +2,7 @@ package deploy
 
 import (
 	"context"
-	"errors"
-	"net/http"
-	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/fakeapi"
@@ -90,87 +86,6 @@ func TestBuildTransition(t *testing.T) {
 	}
 }
 
-type fakeClock struct{ now time.Time }
-
-func (c *fakeClock) Now() time.Time { return c.now }
-func (c *fakeClock) Sleep(_ context.Context, d time.Duration) error {
-	c.now = c.now.Add(d)
-	return nil
-}
-
-func newWaiter(t *testing.T, fake *fakeapi.Server, clock *fakeClock, onSleep func(n int)) Waiter {
-	c := api.New(fake.URL, fakeapi.ProjectToken, "test", api.WithSleep(func(context.Context, time.Duration) error { return nil }))
-	n := 0
-	return Waiter{
-		API: c, ProjectID: fakeapi.ProjectID, Interval: 10 * time.Second, Timeout: time.Minute,
-		Now: clock.Now,
-		Sleep: func(ctx context.Context, d time.Duration) error {
-			n++
-			if onSleep != nil {
-				onSleep(n)
-			}
-			return clock.Sleep(ctx, d)
-		},
-	}
-}
-
-const depID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-
-func TestWaitSucceedsWhenDevicesConfirm(t *testing.T) {
-	fake := fakeapi.New(t)
-	fake.AddDeployment(depID, api.StateActive, 3, 100)
-	fake.SetStates(depID, st("offered"))
-	clock := &fakeClock{now: time.Unix(0, 0)}
-	var progress int
-	w := newWaiter(t, fake, clock, func(n int) {
-		if n == 2 {
-			fake.SetStates(depID, st("confirmed"))
-		}
-	})
-	w.OnProgress = func(Summary) { progress++ }
-	s, o, err := w.Wait(context.Background(), depID)
-	if err != nil || o != OutcomeSucceeded || s.Counts.Confirmed != 1 {
-		t.Fatalf("o=%s err=%v counts=%+v", o, err, s.Counts)
-	}
-	if progress != 2 {
-		t.Fatalf("progress callbacks = %d, want 2 (only on change)", progress)
-	}
-}
-
-func TestWaitFailsOnDeviceFailure(t *testing.T) {
-	fake := fakeapi.New(t)
-	fake.AddDeployment(depID, api.StateActive, 3, 100)
-	fake.SetStates(depID, st("failed"))
-	_, o, err := newWaiter(t, fake, &fakeClock{}, nil).Wait(context.Background(), depID)
-	if err != nil || o != OutcomeDeviceFailed {
-		t.Fatalf("o=%s err=%v", o, err)
-	}
-}
-
-func TestWaitStopsWhenPaused(t *testing.T) {
-	fake := fakeapi.New(t)
-	fake.AddDeployment(depID, api.StateActive, 3, 100)
-	w := newWaiter(t, fake, &fakeClock{}, func(int) { fake.SetDeploymentState(depID, api.StatePaused) })
-	_, o, err := w.Wait(context.Background(), depID)
-	if err != nil || o != OutcomeStopped {
-		t.Fatalf("o=%s err=%v", o, err)
-	}
-}
-
-func TestWaitTimesOut(t *testing.T) {
-	fake := fakeapi.New(t)
-	fake.AddDeployment(depID, api.StateActive, 3, 100)
-	clock := &fakeClock{now: time.Unix(0, 0)}
-	w := newWaiter(t, fake, clock, nil)
-	_, o, err := w.Wait(context.Background(), depID)
-	if err != nil || o != OutcomeTimedOut {
-		t.Fatalf("o=%s err=%v", o, err)
-	}
-	if got := clock.now.Sub(time.Unix(0, 0)); got != time.Minute {
-		t.Fatalf("waited %s, want exactly the timeout", got)
-	}
-}
-
 func TestLatest(t *testing.T) {
 	fake := fakeapi.New(t)
 	if _, err := Latest(context.Background(), api.New(fake.URL, fakeapi.ProjectToken, "t"), fakeapi.ProjectID); err == nil {
@@ -184,79 +99,38 @@ func TestLatest(t *testing.T) {
 	}
 }
 
-func TestWaitSurvivesTransientPollFailures(t *testing.T) {
+func TestTargeted(t *testing.T) {
+	const beta, kitchen, hall = "beta-id", "kitchen-id", "hall-id"
+	stable, betaID := fakeapi.StableChannelID, beta
 	fake := fakeapi.New(t)
-	fake.AddDeployment(depID, api.StateActive, 3, 100)
-	fake.SetStates(depID, st("confirmed"))
-	fake.FailNext["/api/v1/projects/"+fakeapi.ProjectID+"/deployments/"+depID+"/"] = []int{503, 503, 503}
-	var pollErrors int
-	w := newWaiter(t, fake, &fakeClock{}, nil)
-	w.OnPollError = func(error) { pollErrors++ }
-	_, o, err := w.Wait(context.Background(), depID)
-	if err != nil || o != OutcomeSucceeded || pollErrors != 1 {
-		t.Fatalf("o=%s err=%v pollErrors=%d", o, err, pollErrors)
+	fake.Devices = []api.Device{
+		{ID: "d1", Active: true, ChannelID: &stable, GroupIDs: []string{kitchen}},
+		{ID: "d2", Active: true, ChannelID: &stable},
+		{ID: "d3", Active: false, ChannelID: &stable, GroupIDs: []string{kitchen}},
+		{ID: "d4", Active: true, ChannelID: &betaID, GroupIDs: []string{hall}},
+		{ID: "d5", Active: true, GroupIDs: []string{kitchen}},
 	}
-}
-
-func TestWaitStopsOnPermanentError(t *testing.T) {
-	fake := fakeapi.New(t)
-	_, _, err := newWaiter(t, fake, &fakeClock{}, nil).Wait(context.Background(), depID)
-	var ae *api.Error
-	if !errors.As(err, &ae) || ae.StatusCode != 404 {
-		t.Fatalf("err = %v, want the 404", err)
+	tests := []struct {
+		name     string
+		channels []string
+		groups   []string
+		want     int
+	}{
+		{name: "one channel", channels: []string{stable}, want: 2},
+		{name: "two channels", channels: []string{stable, beta}, want: 3},
+		{name: "a channel no device is on", channels: []string{"empty-id"}, want: 0},
+		{name: "one group", groups: []string{kitchen}, want: 2},
+		{name: "two groups", groups: []string{kitchen, hall}, want: 3},
+		{name: "channel and group", channels: []string{stable}, groups: []string{kitchen}, want: 1},
+		{name: "every device", want: 4},
 	}
-}
-
-func TestWaitReturnsErrorWhenNoPollEverSucceeded(t *testing.T) {
-	fake := fakeapi.New(t)
-	fake.AddDeployment(depID, api.StateActive, 3, 100)
-	path := "/api/v1/projects/" + fakeapi.ProjectID + "/deployments/" + depID + "/"
-	for i := 0; i < 30; i++ {
-		fake.FailNext[path] = append(fake.FailNext[path], 503)
-	}
-	_, o, err := newWaiter(t, fake, &fakeClock{now: time.Unix(0, 0)}, nil).Wait(context.Background(), depID)
-	var ae *api.Error
-	if o != OutcomeTimedOut || !errors.Is(err, ErrNoStatus) || !errors.As(err, &ae) || ae.StatusCode != 503 {
-		t.Fatalf("o=%s err=%v, want a timeout wrapping the poll error", o, err)
-	}
-}
-
-// hangingWaiter waits on a server that never answers, with the real
-// transport, its retries and the real clock.
-func hangingWaiter(t *testing.T, timeout time.Duration) Waiter {
-	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
-	t.Cleanup(srv.Close)
-	return Waiter{
-		API: api.New(srv.URL, fakeapi.ProjectToken, "test"), ProjectID: fakeapi.ProjectID,
-		Interval: time.Second, Timeout: timeout, Now: time.Now,
-		Sleep: func(ctx context.Context, d time.Duration) error {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(d):
-				return nil
+	c := api.New(fake.URL, fakeapi.ProjectToken, "t")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			n, err := Targeted(context.Background(), c, fakeapi.ProjectID, api.Deployment{TargetChannelIDs: tt.channels, TargetGroupIDs: tt.groups})
+			if err != nil || n != tt.want {
+				t.Fatalf("Targeted = %d, %v; want %d", n, err, tt.want)
 			}
-		},
-	}
-}
-
-func TestWaitTimeoutCutsShortAHungRequest(t *testing.T) {
-	start := time.Now()
-	_, o, err := hangingWaiter(t, 300*time.Millisecond).Wait(context.Background(), depID)
-	if o != OutcomeTimedOut || !errors.Is(err, ErrNoStatus) {
-		t.Fatalf("o=%s err=%v", o, err)
-	}
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Fatalf("waited %s for a 300ms timeout", elapsed)
-	}
-}
-
-func TestWaitStopsPromptlyWhenCancelled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	time.AfterFunc(200*time.Millisecond, cancel)
-	start := time.Now()
-	_, o, err := hangingWaiter(t, time.Hour).Wait(ctx, depID)
-	if o != OutcomeInProgress || !errors.Is(err, context.Canceled) || time.Since(start) > 5*time.Second {
-		t.Fatalf("o=%s err=%v after %s", o, err, time.Since(start))
+		})
 	}
 }

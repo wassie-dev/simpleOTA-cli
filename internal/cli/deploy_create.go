@@ -18,6 +18,7 @@ type createFlags struct {
 	allDevices bool
 	percent    int
 	notes      string
+	require    bool
 }
 
 func (a *App) deploymentCreateCommand() *cobra.Command {
@@ -39,11 +40,14 @@ a share of those devices, and only devices able to run it are offered it.
 
 If another deployment for the same chip is still active for the same
 devices, it is listed. A device installs the highest build offered to it, so
-the older deployment keeps reaching the devices this one does not.`,
+the older deployment keeps reaching the devices this one does not.
+
+` + targetedHelp,
 		Example: `  simpleota deployment create --build 42
   simpleota deployment create --build 42 --channel beta --percent 10
   simpleota deployment create --build 42 --group kitchen --group hall
-  simpleota deployment create --build 42 --all-devices`,
+  simpleota deployment create --build 42 --all-devices
+  simpleota deployment create --build 42 --channel beta --require-devices`,
 		Args: exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.runCreateDeployment(cmd.Context(), f)
@@ -56,6 +60,7 @@ the older deployment keeps reaching the devices this one does not.`,
 	fl.BoolVar(&f.allDevices, "all-devices", false, "target every device in the project")
 	fl.IntVar(&f.percent, "percent", 100, "offer the build to `n` percent of the targeted devices")
 	fl.StringVar(&f.notes, "notes", "", "a `note` to keep with the deployment")
+	requireDevicesFlag(cmd, &f.require)
 	return cmd
 }
 
@@ -122,9 +127,16 @@ func (a *App) runCreateDeployment(ctx context.Context, f createFlags) error {
 		return fmt.Errorf("deployment %s was created but did not start: %w\nCancel it with:\n  simpleota deployment cancel %s", termtext.Clean(draft.ID), err, termtext.Clean(draft.ID))
 	}
 	p := a.printer()
-	return p.Created(output.CreatedView{
+	view := output.CreatedView{
 		Deployment: output.NewDeploymentView(d),
 		Targets:    targets,
 		AlsoActive: alsoActive(ctx, p, s, projectID, d.ID, art.ChipFamily),
-	})
+	}
+	var countErr error
+	view.TargetedDevices, countErr = countTargeted(ctx, s, projectID, d)
+	requireErr := targetedErr(p, f.require, d.ID, view.TargetedDevices, countErr)
+	if err := p.Created(view); err != nil {
+		return err
+	}
+	return requireErr
 }

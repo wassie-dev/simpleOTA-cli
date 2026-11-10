@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"fmt"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -14,9 +15,18 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
 	"github.com/wassie-dev/simpleOTA-cli/internal/release"
 	"github.com/wassie-dev/simpleOTA-cli/internal/signing"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 const signingKeyEnv = "SIMPLEOTA_SIGNING_KEY"
+
+// targetedHelp describes the targeted device count that release and
+// deployment create report.
+const targetedHelp = `Targeted devices:
+  The result counts the project's active devices on the targeted channels
+  and groups. The rollout percentage and the build's compatibility then
+  decide which of them are offered it when they check in. With
+  --require-devices, a count of 0 exits 4; the deployment stays active.`
 
 // uploadHelp describes how release and build upload check, sign and send a
 // build.
@@ -139,6 +149,39 @@ func noticeUnsigned(p output.Printer, res release.Result) {
 	}
 }
 
+// requireDevicesFlag registers --require-devices.
+func requireDevicesFlag(cmd *cobra.Command, require *bool) {
+	cmd.Flags().BoolVar(require, "require-devices", false, "exit 4 if the deployment targets no active device")
+}
+
+// countTargeted counts the active devices a deployment targets, or returns
+// nil and the error when they cannot be counted.
+func countTargeted(ctx context.Context, s *session, projectID string, d api.Deployment) (*int, error) {
+	n, err := deploy.Targeted(ctx, s.api, projectID, d)
+	if err != nil {
+		return nil, err
+	}
+	return &n, nil
+}
+
+// targetedErr is what --require-devices does with a count. Without the flag
+// a failed count is only a notice, printed before the result.
+func targetedErr(p output.Printer, require bool, deploymentID string, n *int, err error) error {
+	id := termtext.Clean(deploymentID)
+	switch {
+	case !require:
+		if err != nil {
+			p.Notice("Counting the targeted devices failed: %v", err)
+		}
+		return nil
+	case err != nil:
+		return fmt.Errorf("could not count the devices deployment %s targets: %w\nIt is active. Check it with:\n  simpleota deployment show %s", id, err, id)
+	case *n == 0:
+		return &exitError{code: ExitNoDevices, err: fmt.Errorf("deployment %s targets no active device\nIt stays active, and no device is offered the build until one joins its\naudience. Cancel it with:\n  simpleota deployment cancel %s", id, id)}
+	}
+	return nil
+}
+
 // alsoActive lists the other active deployments reaching the same devices,
 // printing a notice instead of failing when the check itself fails.
 func alsoActive(ctx context.Context, p output.Printer, s *session, projectID, deploymentID, chip string) []output.DeploymentView {
@@ -153,6 +196,7 @@ func (a *App) releaseCommand() *cobra.Command {
 	var f buildFlags
 	var percent int
 	var channel string
+	var requireDevices bool
 	cmd := &cobra.Command{
 		Use:   "release <bin> --version-label <label>",
 		Short: "Sign, upload and deploy a firmware binary in one step",
@@ -167,10 +211,15 @@ If another deployment for the same chip is still active on the channel, it
 is listed. A device installs the highest build offered to it, so the older
 deployment keeps reaching the devices this one does not.
 
+` + targetedHelp + `
+
 ` + uploadHelp,
 		Example: `  simpleota release build/app.bin --version-label 1.4.0
   simpleota release build/app.bin --version-label 1.4.1 --percent 10
-  simpleota release build/app.bin --version-label 1.4.2 --channel beta`,
+  simpleota release build/app.bin --version-label 1.4.2 --channel beta
+
+  # In CI: fail the job if the channel has no active device
+  simpleota release build/app.bin --version-label 1.4.3 --require-devices`,
 		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if percent < 0 || percent > 100 {
@@ -189,10 +238,22 @@ deployment keeps reaching the devices this one does not.
 			noticeUnsigned(p, res)
 			view := output.NewReleaseView(res)
 			view.AlsoActive = alsoActive(ctx, p, job.session, job.projectID, res.DeploymentID, res.Chip)
-			return p.Release(view)
+			var countErr error
+			d, err := job.session.api.GetDeployment(ctx, job.projectID, res.DeploymentID)
+			if err != nil {
+				countErr = err
+			} else {
+				view.TargetedDevices, countErr = countTargeted(ctx, job.session, job.projectID, d)
+			}
+			requireErr := targetedErr(p, requireDevices, res.DeploymentID, view.TargetedDevices, countErr)
+			if err := p.Release(view); err != nil {
+				return err
+			}
+			return requireErr
 		},
 	}
 	f.register(cmd.Flags())
+	requireDevicesFlag(cmd, &requireDevices)
 	cmd.Flags().IntVar(&percent, "percent", 100, "offer the build to `n` percent of the channel's devices")
 	cmd.Flags().StringVar(&channel, "channel", api.DefaultChannel, "`name` of the channel to deploy to; it must already exist")
 	return cmd

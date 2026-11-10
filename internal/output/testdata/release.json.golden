@@ -9,5 +9,6 @@
   "chip": "esp32s3",
   "sha256": "ab12",
   "size": 1024,
-  "also_active": []
+  "also_active": [],
+  "targeted_devices": 3
 }

@@ -283,7 +283,7 @@ func (s Service) deploymentsOf(ctx context.Context, a api.Artifact) string {
 	if b.Len() == 0 {
 		return ""
 	}
-	return fmt.Sprintf("\nIt is already deployed:%s\nWatch a deployment with:\n  simpleota deployment wait <deployment-id>", b.String())
+	return fmt.Sprintf("\nIt is already deployed:%s\nCheck on a deployment with:\n  simpleota deployment show <deployment-id>", b.String())
 }
 
 // uploadErr explains a failed upload. When the connection failed or the
