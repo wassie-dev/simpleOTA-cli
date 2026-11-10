@@ -108,12 +108,12 @@ func (a *App) buildMakeStrictCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "make-strict <build-number> <bin>",
 		Short: "Make a signed build uploaded earlier strict-ready",
-		Long: `Sign and attach the manifest of a signed build: its project, key, build
-number and SHA-256, signed with the key that signed the image. This makes
-the build strict-ready: devices in strict mode are offered only such builds.
-Release and build upload do this for signed builds themselves; use this when
-that step failed after
-the upload, or for a build uploaded by an older CLI.
+		Long: `Make a signed build strict-ready, so that devices in strict mode are
+offered it. Release and build upload do this themselves; use this when that
+step failed after the upload, or for a build uploaded by an older CLI.
+
+This signs the build's project, key, build number and SHA-256 with the key
+that signed the image, and attaches that strict signature.
 
 The file must be the build's own binary, and the key the one that signed it.
 Only the signature is sent. Running it again for a build changes nothing.

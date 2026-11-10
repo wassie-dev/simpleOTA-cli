@@ -197,7 +197,7 @@ func TestBuildMakeStrict(t *testing.T) {
 	h.env["SIMPLEOTA_TOKEN"] = fakeapi.ProjectToken
 	h.env[signingKeyEnv] = string(plain)
 	bin := writeFirmware(t)
-	manifest := "POST /api/v1/projects/" + fakeapi.ProjectID + "/artifacts/aaaaaaaa-0000-4000-8000-000000000001/manifest/"
+	manifest := "POST /api/v1/projects/" + fakeapi.ProjectID + "/artifacts/aaaaaaaa-0000-4000-8000-000000000001/strict-signature/"
 	h.fake.FailNext[manifest] = []int{503}
 
 	r := h.run("build", "upload", bin, "--version-label", "1", "--chip", "esp32")

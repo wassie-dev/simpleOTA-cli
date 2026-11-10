@@ -102,10 +102,11 @@ run's snippet holds both. If registering the public key fails without a clear
 refusal from the server, the encrypted key is kept: run the same command again
 to finish.
 
-A signed `release` or `build upload` also makes the build strict-ready: once the server
-has given the upload its build number, the CLI signs a short manifest with the
-same key, naming the project, the key, that build number and the image's
-SHA-256, and attaches the signature. A device configured with its project ID
+A signed `release` or `build upload` also makes the build strict-ready,
+with nothing extra to run: once the server has given the upload its build
+number, the CLI signs a short text with the same key, naming the project,
+the key, that build number and the image's SHA-256, and attaches that
+strict signature. A device configured with its project ID
 checks it, so a server that has been taken over cannot offer an old signed
 image as a newer build, or another project's image signed with the same key.
 Devices in strict mode (`SIMPLEOTA_SECURITY_STRICT`) take strict-ready builds
@@ -184,7 +185,7 @@ simpleota
 | `project list\|show\|use` | List projects, show one, or choose the current project |
 | `build list\|show` | List the project's builds (the API calls them artifacts) or show one by build number |
 | `build upload` | Sign and upload a build without deploying it; checked like `release` |
-| `build make-strict` | Sign the manifest of a signed build uploaded earlier, with the key that signed it |
+| `build make-strict` | Make a signed build uploaded earlier strict-ready, with the key that signed it |
 | `build archive\|unarchive` | Take a build out of service, or return it |
 | `deployment list\|show` | List deployments, or show one's state and device progress |
 | `deployment create` | Deploy an uploaded build to channels (stable by default), groups, or every device, and start it |

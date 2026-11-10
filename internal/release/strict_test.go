@@ -54,7 +54,7 @@ func TestBasicUploadIsNotStrictReady(t *testing.T) {
 	if err != nil || res.StrictReady {
 		t.Fatalf("res = %+v, err = %v", res, err)
 	}
-	if n := fake.Count("POST " + projectPath + "artifacts/" + res.ArtifactID + "/manifest/"); n != 0 {
+	if n := fake.Count("POST " + projectPath + "artifacts/" + res.ArtifactID + "/strict-signature/"); n != 0 {
 		t.Fatalf("manifest calls = %d", n)
 	}
 }
@@ -62,7 +62,7 @@ func TestBasicUploadIsNotStrictReady(t *testing.T) {
 func TestFailedManifestNamesTheCommandToFinish(t *testing.T) {
 	fake, svc := service(t)
 	priv := registerKey(t, fake, "prod-2026", false)
-	fake.FailNext["POST "+projectPath+"artifacts/aaaaaaaa-0000-4000-8000-000000000001/manifest/"] = []int{503}
+	fake.FailNext["POST "+projectPath+"artifacts/aaaaaaaa-0000-4000-8000-000000000001/strict-signature/"] = []int{503}
 
 	res, err := svc.Upload(context.Background(), release.Options{
 		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1.0.0", Chip: "esp32", LoadKey: keyLoader(priv),
@@ -132,7 +132,7 @@ func TestMakeStrictAnEarlierBuild(t *testing.T) {
 	fake, svc := service(t)
 	priv := registerKey(t, fake, "prod-2026", false)
 	bin := writeBin(t, "app.bin", firmware)
-	fake.FailNext["POST "+projectPath+"artifacts/aaaaaaaa-0000-4000-8000-000000000001/manifest/"] = []int{503}
+	fake.FailNext["POST "+projectPath+"artifacts/aaaaaaaa-0000-4000-8000-000000000001/strict-signature/"] = []int{503}
 	if _, err := svc.Upload(context.Background(), release.Options{BinaryPath: bin, VersionLabel: "1", Chip: "esp32", LoadKey: keyLoader(priv)}); err == nil {
 		t.Fatal("the injected failure should leave the build not strict-ready")
 	}

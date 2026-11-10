@@ -185,7 +185,7 @@ func (c *Client) UpdateArtifact(ctx context.Context, projectID, artifactID strin
 // the same signature again unchanged, so a failed call can be repeated.
 func (c *Client) AttachManifest(ctx context.Context, projectID, artifactID string, in ManifestRequest) (Artifact, error) {
 	var out Artifact
-	return out, c.sendJSON(ctx, http.MethodPost, projectPath(projectID, "artifacts", artifactID, "manifest"), in, &out)
+	return out, c.sendJSON(ctx, http.MethodPost, projectPath(projectID, "artifacts", artifactID, "strict-signature"), in, &out)
 }
 
 func (c *Client) CreateDeployment(ctx context.Context, projectID string, in DeploymentRequest) (Deployment, error) {

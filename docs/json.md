@@ -171,7 +171,7 @@ Newest first, revoked keys included.
 ```
 
 `security_mode` is `basic` or `signed`. `key_id` is omitted for `basic`.
-`strict_ready` is `true` when the build's signed manifest is attached, which a
+`strict_ready` is `true` when the build's strict signature is attached, which a
 signed release does before it deploys; it is `false` for `basic`.
 `chip` is the chip family in the manifest. `also_active` lists the other
 active deployments for the same chip on the channel as
@@ -209,7 +209,7 @@ so it is also the checksum the server stored.
 
 `id` is the API's artifact ID. `key_id` names the key that signed a signed
 build and is omitted for `basic` and on servers that do not report it.
-`strict_ready` is `true` once the build's signed manifest is attached.
+`strict_ready` is `true` once the build's strict signature is attached.
 `warnings` is always an array.
 
 ## build upload
