@@ -299,7 +299,7 @@ func FirmwareSnippet(projectID string, keys ...PinnedKey) string {
 		fmt.Fprintf(&b, "cfg.num_signing_keys = %d;\n", len(keys))
 	}
 	b.WriteString("\n// Clients with API 1.2: check each build's signed manifest. Once every\n")
-	b.WriteString("// build is attested, require it with SIMPLEOTA_SECURITY_SIGNED_BUILD.\n")
+	b.WriteString("// build is strict-ready, require it with SIMPLEOTA_SECURITY_STRICT.\n")
 	fmt.Fprintf(&b, "// cfg.project_id = %q;\n", projectID)
 	return b.String()
 }

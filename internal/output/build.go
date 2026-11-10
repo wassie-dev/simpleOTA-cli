@@ -21,7 +21,7 @@ type BuildView struct {
 	NVSSchemaVersion *int      `json:"nvs_schema_version"`
 	SecurityMode     string    `json:"security_mode"`
 	KeyID            string    `json:"key_id,omitempty"`
-	Attested         bool      `json:"attested"`
+	StrictReady      bool      `json:"strict_ready"`
 	SHA256           string    `json:"sha256"`
 	Size             int64     `json:"size"`
 	Archived         bool      `json:"archived"`
@@ -38,7 +38,7 @@ func NewBuildView(a api.Artifact) BuildView {
 	return BuildView{
 		BuildNumber: a.BuildNumber, ID: a.ID, VersionLabel: a.VersionLabel, Framework: a.Framework,
 		Chip: a.ChipFamily, BoardID: a.BoardID, PartitionProfile: a.PartitionProfile, NVSSchemaVersion: a.NVSSchemaVersion,
-		SecurityMode: a.SecurityMode, KeyID: a.SigningKeyID, Attested: a.Attested, SHA256: a.ChecksumSHA256, Size: a.FileSize, Archived: a.Archived,
+		SecurityMode: a.SecurityMode, KeyID: a.SigningKeyID, StrictReady: a.StrictReady, SHA256: a.ChecksumSHA256, Size: a.FileSize, Archived: a.Archived,
 		CreatedAt: a.CreatedAt, Warnings: warnings,
 	}
 }
@@ -78,7 +78,7 @@ func (p Printer) BuildShow(b BuildView) error {
 	if b.NVSSchemaVersion != nil {
 		p.field("nvs schema", strconv.Itoa(*b.NVSSchemaVersion))
 	}
-	p.field("security", securityText(b.SecurityMode, b.KeyID, b.Attested))
+	p.field("security", securityText(b.SecurityMode, b.KeyID, b.StrictReady))
 	p.field("sha256", b.SHA256)
 	p.field("size", fmt.Sprintf("%d bytes", b.Size))
 	if b.Archived {
@@ -99,7 +99,7 @@ type UploadView struct {
 	ArtifactID   string `json:"artifact_id"`
 	SecurityMode string `json:"security_mode"`
 	KeyID        string `json:"key_id,omitempty"`
-	Attested     bool   `json:"attested"`
+	StrictReady  bool   `json:"strict_ready"`
 	Chip         string `json:"chip"`
 	SHA256       string `json:"sha256"`
 	Size         int64  `json:"size"`
@@ -107,7 +107,7 @@ type UploadView struct {
 
 // NewUploadView converts an upload result.
 func NewUploadView(r release.Result) UploadView {
-	return UploadView{BuildNumber: r.BuildNumber, ArtifactID: r.ArtifactID, SecurityMode: r.SecurityMode, KeyID: r.KeyID, Attested: r.Attested, Chip: r.Chip, SHA256: r.SHA256, Size: r.Size}
+	return UploadView{BuildNumber: r.BuildNumber, ArtifactID: r.ArtifactID, SecurityMode: r.SecurityMode, KeyID: r.KeyID, StrictReady: r.StrictReady, Chip: r.Chip, SHA256: r.SHA256, Size: r.Size}
 }
 
 // Upload prints the result of build upload.
@@ -115,19 +115,19 @@ func (p Printer) Upload(r UploadView) error {
 	if p.JSON {
 		return p.WriteJSON(r)
 	}
-	fmt.Fprintf(p.Out, "%s build %d for %s (%s)\n", p.green("Uploaded"), r.BuildNumber, r.Chip, securityText(r.SecurityMode, r.KeyID, r.Attested))
+	fmt.Fprintf(p.Out, "%s build %d for %s (%s)\n", p.green("Uploaded"), r.BuildNumber, r.Chip, securityText(r.SecurityMode, r.KeyID, r.StrictReady))
 	fmt.Fprintf(p.Out, "  sha256      %s\n  size        %d bytes\n", r.SHA256, r.Size)
 	p.nextStep("Deploy it", fmt.Sprintf("simpleota deployment create --build %d", r.BuildNumber))
 	return nil
 }
 
-func securityText(mode, keyID string, attested bool) string {
+func securityText(mode, keyID string, strictReady bool) string {
 	text := mode
 	if keyID != "" {
 		text += " with key " + keyID
 	}
-	if attested {
-		text += ", attested"
+	if strictReady {
+		text += ", strict-ready"
 	}
 	return text
 }

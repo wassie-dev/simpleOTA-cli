@@ -29,7 +29,7 @@ type releaseOut struct {
 	ArtifactID   string `json:"artifact_id"`
 	SecurityMode string `json:"security_mode"`
 	KeyID        string `json:"key_id"`
-	Attested     bool   `json:"attested"`
+	StrictReady  bool   `json:"strict_ready"`
 	SHA256       string `json:"sha256"`
 	Chip         string `json:"chip"`
 	AlsoActive   []struct {
@@ -100,17 +100,17 @@ func TestSignedReleaseAndTamperedSignature(t *testing.T) {
 	signedBin := firmware(t)
 	out := release0(t, ci, []string{"release", signedBin, "--version-label", "e2e-" + uid(), "--chip", "esp32", "--json"})
 	t.Cleanup(func() { cancelDeployment(t, out.DeploymentID) })
-	if out.SecurityMode != "signed" || out.KeyID != keyID || !out.Attested {
+	if out.SecurityMode != "signed" || out.KeyID != keyID || !out.StrictReady {
 		t.Fatalf("release: %+v", out)
 	}
-	// The server checked the manifest signature and shows the build attested;
-	// attesting it again is accepted and changes nothing.
+	// The server checked the manifest signature and shows the build strict-ready;
+	// making it strict-ready again is accepted and changes nothing.
 	again := decode[struct {
-		Attested bool   `json:"attested"`
-		KeyID    string `json:"key_id"`
-	}](t, ci.mustRun("build", "attest", strconv.Itoa(out.BuildNumber), signedBin, "--json").stdout)
-	if !again.Attested || again.KeyID != keyID {
-		t.Fatalf("attest again: %+v", again)
+		StrictReady bool   `json:"strict_ready"`
+		KeyID       string `json:"key_id"`
+	}](t, ci.mustRun("build", "make-strict", strconv.Itoa(out.BuildNumber), signedBin, "--json").stdout)
+	if !again.StrictReady || again.KeyID != keyID {
+		t.Fatalf("make-strict again: %+v", again)
 	}
 
 	// Sign one binary, then change a byte: the server must reject it.

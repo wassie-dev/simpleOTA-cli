@@ -64,11 +64,11 @@ type Artifact struct {
 	FileSize         int64  `json:"file_size"`
 	SecurityMode     string `json:"security_mode"`
 	SigningKeyID     string `json:"signing_key_id"`
-	// Attested is true once the build's signed manifest is attached.
-	Attested  bool      `json:"attested"`
-	Archived  bool      `json:"archived"`
-	CreatedAt time.Time `json:"created_at"`
-	Warnings  []string  `json:"warnings"`
+	// StrictReady is true once the build's signed manifest is attached.
+	StrictReady bool      `json:"strict_ready"`
+	Archived    bool      `json:"archived"`
+	CreatedAt   time.Time `json:"created_at"`
+	Warnings    []string  `json:"warnings"`
 }
 
 // Device mirrors DeviceOut.
@@ -184,9 +184,9 @@ type UploadRequest struct {
 	Binary       []byte
 }
 
-// AttestRequest mirrors ArtifactAttestIn: the base64 signature over a
+// ManifestRequest mirrors ArtifactManifestIn: the base64 signature over a
 // build's manifest.
-type AttestRequest struct {
+type ManifestRequest struct {
 	ManifestSignature string `json:"manifest_signature"`
 	ManifestVersion   int    `json:"manifest_version"`
 }

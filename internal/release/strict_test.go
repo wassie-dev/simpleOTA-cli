@@ -16,7 +16,7 @@ import (
 
 const projectPath = "/api/v1/projects/" + fakeapi.ProjectID + "/"
 
-// checkManifest verifies an attested build's signature the way a device
+// checkManifest verifies a strict-ready build's manifest signature the way a device
 // does: over the manifest rebuilt from the project ID and the build.
 func checkManifest(t *testing.T, fake *fakeapi.Server, priv ed25519.PrivateKey, a api.Artifact, keyID string) {
 	t.Helper()
@@ -31,7 +31,7 @@ func checkManifest(t *testing.T, fake *fakeapi.Server, priv ed25519.PrivateKey, 
 	}
 }
 
-func TestSignedUploadIsAttested(t *testing.T) {
+func TestSignedUploadIsStrictReady(t *testing.T) {
 	fake, svc := service(t)
 	priv := registerKey(t, fake, "prod-2026", false)
 	res, err := svc.Upload(context.Background(), release.Options{
@@ -40,44 +40,44 @@ func TestSignedUploadIsAttested(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Attested || !fake.Artifacts[0].Attested {
+	if !res.StrictReady || !fake.Artifacts[0].StrictReady {
 		t.Fatalf("res = %+v", res)
 	}
 	checkManifest(t, fake, priv, fake.Artifacts[0], "prod-2026")
 }
 
-func TestBasicUploadIsNotAttested(t *testing.T) {
+func TestBasicUploadIsNotStrictReady(t *testing.T) {
 	fake, svc := service(t)
 	res, err := svc.Upload(context.Background(), release.Options{
 		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1.0.0", Chip: "esp32",
 	})
-	if err != nil || res.Attested {
+	if err != nil || res.StrictReady {
 		t.Fatalf("res = %+v, err = %v", res, err)
 	}
-	if n := fake.Count("POST " + projectPath + "artifacts/" + res.ArtifactID + "/attest/"); n != 0 {
-		t.Fatalf("attest calls = %d", n)
+	if n := fake.Count("POST " + projectPath + "artifacts/" + res.ArtifactID + "/manifest/"); n != 0 {
+		t.Fatalf("manifest calls = %d", n)
 	}
 }
 
-func TestFailedAttestationNamesTheCommandToFinish(t *testing.T) {
+func TestFailedManifestNamesTheCommandToFinish(t *testing.T) {
 	fake, svc := service(t)
 	priv := registerKey(t, fake, "prod-2026", false)
-	fake.FailNext["POST "+projectPath+"artifacts/aaaaaaaa-0000-4000-8000-000000000001/attest/"] = []int{503}
+	fake.FailNext["POST "+projectPath+"artifacts/aaaaaaaa-0000-4000-8000-000000000001/manifest/"] = []int{503}
 
 	res, err := svc.Upload(context.Background(), release.Options{
 		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1.0.0", Chip: "esp32", LoadKey: keyLoader(priv),
 	})
 
-	var ae *release.AttestError
-	if !errors.As(err, &ae) || ae.Build != 1 || !strings.Contains(err.Error(), "simpleota build attest 1 <bin>") {
+	var ae *release.StrictReadyError
+	if !errors.As(err, &ae) || ae.Build != 1 || !strings.Contains(err.Error(), "simpleota build make-strict 1 <bin>") {
 		t.Fatalf("err = %v", err)
 	}
-	if res.BuildNumber != 1 || res.Attested {
+	if res.BuildNumber != 1 || res.StrictReady {
 		t.Fatalf("res = %+v", res)
 	}
 }
 
-func TestSignedReleaseAttestsBeforeItDeploys(t *testing.T) {
+func TestSignedReleaseIsStrictReadyBeforeItDeploys(t *testing.T) {
 	fake, svc := service(t)
 	priv := registerKey(t, fake, "prod-2026", false)
 	res, err := svc.Release(context.Background(), release.Options{
@@ -86,11 +86,11 @@ func TestSignedReleaseAttestsBeforeItDeploys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Attested || res.DeploymentID == "" || res.State != api.StateActive || res.Channel != "stable" {
+	if !res.StrictReady || res.DeploymentID == "" || res.State != api.StateActive || res.Channel != "stable" {
 		t.Fatalf("res = %+v", res)
 	}
 	if fake.Count("POST "+projectPath+"release/") != 0 {
-		t.Fatal("a signed release must not use the quick-release call, which cannot attest")
+		t.Fatal("a signed release must not use the quick-release call, which cannot attach a manifest")
 	}
 	req := fake.LastDeploymentRequest
 	if req.ArtifactID != res.ArtifactID || req.RolloutPercentage != 25 || len(req.TargetChannelIDs) != 1 || req.TargetChannelIDs[0] != fakeapi.StableChannelID {
@@ -128,26 +128,26 @@ func TestSignedReleaseThatCannotStartSaysWhatExists(t *testing.T) {
 	}
 }
 
-func TestAttestAnEarlierBuild(t *testing.T) {
+func TestMakeStrictAnEarlierBuild(t *testing.T) {
 	fake, svc := service(t)
 	priv := registerKey(t, fake, "prod-2026", false)
 	bin := writeBin(t, "app.bin", firmware)
-	fake.FailNext["POST "+projectPath+"artifacts/aaaaaaaa-0000-4000-8000-000000000001/attest/"] = []int{503}
+	fake.FailNext["POST "+projectPath+"artifacts/aaaaaaaa-0000-4000-8000-000000000001/manifest/"] = []int{503}
 	if _, err := svc.Upload(context.Background(), release.Options{BinaryPath: bin, VersionLabel: "1", Chip: "esp32", LoadKey: keyLoader(priv)}); err == nil {
-		t.Fatal("the injected failure should leave the build unattested")
+		t.Fatal("the injected failure should leave the build not strict-ready")
 	}
 
-	art, err := svc.Attest(context.Background(), priv, 1, bin)
+	art, err := svc.MakeStrict(context.Background(), priv, 1, bin)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !art.Attested {
+	if !art.StrictReady {
 		t.Fatalf("art = %+v", art)
 	}
 	checkManifest(t, fake, priv, fake.Artifacts[0], "prod-2026")
 }
 
-func TestAttestRefusals(t *testing.T) {
+func TestMakeStrictRefusals(t *testing.T) {
 	fake, svc := service(t)
 	priv := registerKey(t, fake, "prod-2026", false)
 	other := registerKey(t, fake, "other", false)
@@ -169,7 +169,7 @@ func TestAttestRefusals(t *testing.T) {
 		"basic build":   {priv, 2, bin, "build 2 is basic, not signed"},
 		"no such build": {priv, 9, bin, "no build 9"},
 	} {
-		if _, err := svc.Attest(context.Background(), tc.key, tc.build, tc.bin); err == nil || !strings.Contains(err.Error(), tc.want) {
+		if _, err := svc.MakeStrict(context.Background(), tc.key, tc.build, tc.bin); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v", name, err)
 		}
 	}

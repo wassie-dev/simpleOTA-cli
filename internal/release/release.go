@@ -1,5 +1,5 @@
-// Package release checks, signs, uploads and attests a firmware build, and
-// deploys it.
+// Package release checks, signs and uploads a firmware build, makes a signed
+// build strict-ready, and deploys it.
 package release
 
 import (
@@ -72,11 +72,11 @@ type Result struct {
 	Channel      string
 	SecurityMode string
 	KeyID        string
-	// Attested is true once the build's signed manifest is attached.
-	Attested bool
-	Chip     string
-	SHA256   string
-	Size     int64
+	// StrictReady is true once the build's signed manifest is attached.
+	StrictReady bool
+	Chip        string
+	SHA256      string
+	Size        int64
 }
 
 // API is the part of the developer API that uploads need.
@@ -88,7 +88,7 @@ type API interface {
 	ListChannels(ctx context.Context, projectID string) ([]api.Channel, error)
 	ListDevices(ctx context.Context, projectID string, f api.DeviceFilter) ([]api.Device, error)
 	UploadArtifact(ctx context.Context, projectID string, req api.UploadRequest) (api.Artifact, error)
-	AttestArtifact(ctx context.Context, projectID, artifactID string, in api.AttestRequest) (api.Artifact, error)
+	AttachManifest(ctx context.Context, projectID, artifactID string, in api.ManifestRequest) (api.Artifact, error)
 	Release(ctx context.Context, projectID string, req api.ReleaseRequest) (api.ReleaseResult, error)
 	CreateDeployment(ctx context.Context, projectID string, in api.DeploymentRequest) (api.Deployment, error)
 	TransitionDeployment(ctx context.Context, projectID, deploymentID string, t api.Transition) (api.Deployment, error)
@@ -101,19 +101,20 @@ type Service struct {
 }
 
 // Upload checks, signs when a key is set, and uploads a build without
-// deploying it. A signed build is then attested. Like Release, the upload is
+// deploying it. A signed build is then made strict-ready. Like Release, the upload is
 // sent once and never retried.
 func (s Service) Upload(ctx context.Context, o Options) (Result, error) {
 	p, err := s.prepare(ctx, o)
 	if err != nil {
 		return p.res, err
 	}
-	return s.uploadAndAttest(ctx, p, o.AllowDuplicate)
+	return s.uploadAndSignManifest(ctx, p, o.AllowDuplicate)
 }
 
-// uploadAndAttest uploads a prepared build and, when it is signed, attests
-// it under the build number the server gave it.
-func (s Service) uploadAndAttest(ctx context.Context, p prepared, allowDuplicate bool) (Result, error) {
+// uploadAndSignManifest uploads a prepared build and, when it is signed,
+// signs its manifest under the build number the server gave it, which makes
+// it strict-ready.
+func (s Service) uploadAndSignManifest(ctx context.Context, p prepared, allowDuplicate bool) (Result, error) {
 	art, err := s.API.UploadArtifact(ctx, s.ProjectID, api.UploadRequest{ManifestJSON: p.manifest, FileName: p.fileName, Binary: p.binary})
 	if err != nil {
 		return p.res, s.uploadErr(ctx, err, allowDuplicate, p.req)
@@ -123,10 +124,10 @@ func (s Service) uploadAndAttest(ctx context.Context, p prepared, allowDuplicate
 	if p.key == nil {
 		return p.res, nil
 	}
-	if _, err := s.attest(ctx, p.key, art.ID, p.manifestOf(art.BuildNumber, s.ProjectID)); err != nil {
-		return p.res, &AttestError{Build: art.BuildNumber, Err: err}
+	if _, err := s.signManifest(ctx, p.key, art.ID, p.manifestOf(art.BuildNumber, s.ProjectID)); err != nil {
+		return p.res, &StrictReadyError{Build: art.BuildNumber, Err: err}
 	}
-	p.res.Attested = true
+	p.res.StrictReady = true
 	return p.res, nil
 }
 
@@ -135,7 +136,7 @@ func (s Service) uploadAndAttest(ctx context.Context, p prepared, allowDuplicate
 // SHA-256, so the server rejects the upload if the bytes it received
 // differ.
 //
-// A signed build is uploaded, attested and only then deployed, so a
+// A signed build is uploaded, made strict-ready and only then deployed, so a
 // deployment never offers a signed build without its manifest. An unsigned
 // build goes in one quick-release call.
 func (s Service) Release(ctx context.Context, o Options, t Target) (Result, error) {
@@ -150,7 +151,7 @@ func (s Service) Release(ctx context.Context, o Options, t Target) (Result, erro
 		return p.res, err
 	}
 	if p.key != nil {
-		return s.releaseAttested(ctx, p, o.AllowDuplicate, t)
+		return s.releaseStrictReady(ctx, p, o.AllowDuplicate, t)
 	}
 	out, err := s.API.Release(ctx, s.ProjectID, api.ReleaseRequest{
 		ManifestJSON:      p.manifest,

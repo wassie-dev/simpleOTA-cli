@@ -69,7 +69,7 @@ type Server struct {
 	Requests map[string]int
 	// LastManifest is the manifest of the last release.
 	LastManifest Manifest
-	// ManifestSignatures holds each attested build's manifest signature by
+	// ManifestSignatures holds each strict-ready build's manifest signature by
 	// artifact ID.
 	ManifestSignatures map[string]string
 	// CorruptUploads flips a byte of each uploaded binary, as if it changed
@@ -256,8 +256,8 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.uploadArtifact(w, r)
 	case len(parts) == 4 && parts[2] == "artifacts" && r.Method == http.MethodPatch:
 		s.updateArtifact(w, r, parts[3])
-	case len(parts) == 5 && parts[2] == "artifacts" && parts[4] == "attest" && r.Method == http.MethodPost:
-		s.attest(w, r, parts[3])
+	case len(parts) == 5 && parts[2] == "artifacts" && parts[4] == "manifest" && r.Method == http.MethodPost:
+		s.attachManifest(w, r, parts[3])
 	case route == "deployments" && r.Method == http.MethodPost:
 		s.createDeployment(w, r)
 	case len(parts) == 4 && parts[2] == "devices" && r.Method == http.MethodPatch:

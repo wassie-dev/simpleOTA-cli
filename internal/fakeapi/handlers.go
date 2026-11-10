@@ -242,10 +242,10 @@ func (s *Server) updateArtifact(w http.ResponseWriter, r *http.Request, id strin
 	detail(w, http.StatusNotFound, "Not Found")
 }
 
-// attest checks a manifest signature the way the server does: Ed25519 by
+// attachManifest checks a manifest signature the way the server does: Ed25519 by
 // the build's key over the version 1 manifest of this project and build.
-func (s *Server) attest(w http.ResponseWriter, r *http.Request, id string) {
-	var in api.AttestRequest
+func (s *Server) attachManifest(w http.ResponseWriter, r *http.Request, id string) {
+	var in api.ManifestRequest
 	if !decode(w, r, &in) {
 		return
 	}
@@ -260,7 +260,7 @@ func (s *Server) attest(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	if art.SecurityMode != "signed" {
-		detail(w, http.StatusBadRequest, "only a signed build can be attested; upload it with a signing key")
+		detail(w, http.StatusBadRequest, "only a signed build can be made strict-ready; upload it with a signing key")
 		return
 	}
 	k := slices.IndexFunc(s.SigningKeys, func(k api.SigningKey) bool { return k.KeyID == art.SigningKeyID })
@@ -280,7 +280,7 @@ func (s *Server) attest(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	s.ManifestSignatures[art.ID] = in.ManifestSignature
-	art.Attested = true
+	art.StrictReady = true
 	writeJSON(w, http.StatusOK, art)
 }
 

@@ -16,7 +16,7 @@ type ReleaseView struct {
 	Channel      string `json:"channel"`
 	SecurityMode string `json:"security_mode"`
 	KeyID        string `json:"key_id,omitempty"`
-	Attested     bool   `json:"attested"`
+	StrictReady  bool   `json:"strict_ready"`
 	Chip         string `json:"chip"`
 	SHA256       string `json:"sha256"`
 	Size         int64  `json:"size"`
@@ -35,7 +35,7 @@ func NewReleaseView(r release.Result) ReleaseView {
 		Channel:      r.Channel,
 		SecurityMode: r.SecurityMode,
 		KeyID:        r.KeyID,
-		Attested:     r.Attested,
+		StrictReady:  r.StrictReady,
 		Chip:         r.Chip,
 		SHA256:       r.SHA256,
 		Size:         r.Size,
@@ -48,7 +48,7 @@ func (p Printer) Release(r ReleaseView) error {
 	if p.JSON {
 		return p.WriteJSON(r)
 	}
-	fmt.Fprintf(p.Out, "%s build %d for %s (%s)\n", p.green("Released"), r.BuildNumber, r.Chip, securityText(r.SecurityMode, r.KeyID, r.Attested))
+	fmt.Fprintf(p.Out, "%s build %d for %s (%s)\n", p.green("Released"), r.BuildNumber, r.Chip, securityText(r.SecurityMode, r.KeyID, r.StrictReady))
 	fmt.Fprintf(p.Out, "  deployment  %s (%s, channel %s)\n", termtext.Clean(r.DeploymentID), termtext.Clean(r.State), termtext.Clean(r.Channel))
 	fmt.Fprintf(p.Out, "  sha256      %s\n  size        %d bytes\n", r.SHA256, r.Size)
 	p.alsoActive(r.AlsoActive, r.BuildNumber)

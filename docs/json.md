@@ -162,7 +162,7 @@ Newest first, revoked keys included.
   "channel": "stable",
   "security_mode": "signed",
   "key_id": "prod-2026",
-  "attested": true,
+  "strict_ready": true,
   "chip": "esp32s3",
   "sha256": "…",
   "size": 1048576,
@@ -171,7 +171,7 @@ Newest first, revoked keys included.
 ```
 
 `security_mode` is `basic` or `signed`. `key_id` is omitted for `basic`.
-`attested` is `true` when the build's signed manifest is attached, which a
+`strict_ready` is `true` when the build's signed manifest is attached, which a
 signed release does before it deploys; it is `false` for `basic`.
 `chip` is the chip family in the manifest. `also_active` lists the other
 active deployments for the same chip on the channel as
@@ -181,10 +181,10 @@ an array.
 the server accepts an upload only when the bytes it received hash the same,
 so it is also the checksum the server stored.
 
-## build list, build show, build attest, build archive, build unarchive
+## build list, build show, build make-strict, build archive, build unarchive
 
 `build list` prints an array of build objects, newest first; `build show`,
-`build attest`, `build archive` and `build unarchive` print one.
+`build make-strict`, `build archive` and `build unarchive` print one.
 
 ```json
 {
@@ -198,7 +198,7 @@ so it is also the checksum the server stored.
   "nvs_schema_version": null,
   "security_mode": "signed",
   "key_id": "prod-2026",
-  "attested": true,
+  "strict_ready": true,
   "sha256": "…",
   "size": 1048576,
   "archived": false,
@@ -209,16 +209,16 @@ so it is also the checksum the server stored.
 
 `id` is the API's artifact ID. `key_id` names the key that signed a signed
 build and is omitted for `basic` and on servers that do not report it.
-`attested` is `true` once the build's signed manifest is attached.
+`strict_ready` is `true` once the build's signed manifest is attached.
 `warnings` is always an array.
 
 ## build upload
 
 ```json
-{ "build_number": 42, "artifact_id": "…", "security_mode": "signed", "key_id": "prod-2026", "attested": true, "chip": "esp32s3", "sha256": "…", "size": 1048576 }
+{ "build_number": 42, "artifact_id": "…", "security_mode": "signed", "key_id": "prod-2026", "strict_ready": true, "chip": "esp32s3", "sha256": "…", "size": 1048576 }
 ```
 
-`key_id` is omitted for `basic`. `attested` is as for `release`.
+`key_id` is omitted for `basic`. `strict_ready` is as for `release`.
 
 ## device list, device show, device update
 

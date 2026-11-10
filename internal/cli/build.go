@@ -25,7 +25,7 @@ service.`,
 		Example: `  simpleota build list
   simpleota build show 42
   simpleota build upload build/app.bin --version-label 1.4.0
-  simpleota build attest 42 build/app.bin
+  simpleota build make-strict 42 build/app.bin
   simpleota build archive 41`,
 		Args: cobra.ArbitraryArgs,
 		RunE: groupRun,
@@ -70,7 +70,7 @@ warnings from the upload.`,
 			}
 			return a.printer().BuildShow(output.NewBuildView(art))
 		},
-	}, a.buildUploadCommand(), a.buildAttestCommand(), a.buildArchiveCommand(true), a.buildArchiveCommand(false))
+	}, a.buildUploadCommand(), a.buildMakeStrictCommand(), a.buildArchiveCommand(true), a.buildArchiveCommand(false))
 	return cmd
 }
 
@@ -103,23 +103,24 @@ deploying it. To deploy it later, use 'simpleota deployment create'.
 	return cmd
 }
 
-func (a *App) buildAttestCommand() *cobra.Command {
+func (a *App) buildMakeStrictCommand() *cobra.Command {
 	var keyFile string
 	cmd := &cobra.Command{
-		Use:   "attest <build-number> <bin>",
-		Short: "Sign the manifest of a build uploaded earlier",
+		Use:   "make-strict <build-number> <bin>",
+		Short: "Make a signed build uploaded earlier strict-ready",
 		Long: `Sign and attach the manifest of a signed build: its project, key, build
-number and SHA-256, signed with the key that signed the image. Devices that
-require attested builds are offered only builds with one. Release and build
-upload attest signed builds themselves; use this when that step failed after
+number and SHA-256, signed with the key that signed the image. This makes
+the build strict-ready: devices in strict mode are offered only such builds.
+Release and build upload do this for signed builds themselves; use this when
+that step failed after
 the upload, or for a build uploaded by an older CLI.
 
 The file must be the build's own binary, and the key the one that signed it.
-Only the signature is sent. Attesting a build again changes nothing.
+Only the signature is sent. Running it again for a build changes nothing.
 
 The key is found as for release: --key-file, then SIMPLEOTA_SIGNING_KEY,
 then the default key from 'simpleota key generate'.`,
-		Example: `  simpleota build attest 42 build/app.bin`,
+		Example: `  simpleota build make-strict 42 build/app.bin`,
 		Args:    exactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -136,10 +137,10 @@ then the default key from 'simpleota key generate'.`,
 				return err
 			}
 			if key == nil {
-				return usageErr("attesting needs the build's signing key\nPass --key-file, or set %s.", signingKeyEnv)
+				return usageErr("make-strict needs the build's signing key\nPass --key-file, or set %s.", signingKeyEnv)
 			}
 			svc := release.Service{API: s.api, ProjectID: projectID}
-			art, err := svc.Attest(ctx, key, number, args[1])
+			art, err := svc.MakeStrict(ctx, key, number, args[1])
 			if err != nil {
 				return err
 			}

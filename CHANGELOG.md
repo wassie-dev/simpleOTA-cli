@@ -8,28 +8,30 @@ All notable changes to simpleota are documented here. The format follows
 
 ### Added
 
-- Signed builds are attested: after a signed upload, `release` and
+- Signed builds are strict-ready: after a signed upload, `release` and
   `build upload` sign a short manifest with the same key, naming the project,
   the key, the build number the server gave the build and its SHA-256, and
   attach the signature. Devices that check manifests then cannot be offered an
   old signed image under a higher build number, or another project's image
-  signed with a shared key. Only the signature is sent.
-- `build attest <build> <bin>` attests a build uploaded earlier: one whose
-  attestation failed after the upload, or one from an older CLI.
+  signed with a shared key, and devices in strict mode take them. Only the
+  signature is sent.
+- `build make-strict <build> <bin>` makes a build uploaded earlier
+  strict-ready: one whose manifest failed after the upload, or one from an
+  older CLI.
 - `build list`, `build show` and the `release` and `build upload` results show
-  whether a build is attested (`attested` in `--json`), and `build show` names
+  whether a build is strict-ready (`strict_ready` in `--json`), and `build show` names
   the key that signed it (`key_id`).
 - The `key generate` snippet ends with a commented `cfg.project_id` line, for
   clients with API 1.2.
 
 ### Changed
 
-- A signed `release` uploads, attests and then creates and starts the
+- A signed `release` uploads, makes the build strict-ready and then creates and starts the
   deployment, instead of using one quick-release call, so a deployment never
   offers a signed build without its manifest. The channel is checked before the
   upload. If the deployment is not created or does not start, the error names
   the build and the command to finish with. Unsigned releases still use one
-  call. This needs a server with the attest endpoint.
+  call. This needs a server with the manifest endpoint.
 
 ### Fixed
 
