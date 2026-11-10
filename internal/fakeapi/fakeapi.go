@@ -69,6 +69,9 @@ type Server struct {
 	Requests map[string]int
 	// LastManifest is the manifest of the last release.
 	LastManifest Manifest
+	// ManifestSignatures holds each attested build's manifest signature by
+	// artifact ID.
+	ManifestSignatures map[string]string
 	// CorruptUploads flips a byte of each uploaded binary, as if it changed
 	// in transit.
 	CorruptUploads bool
@@ -101,15 +104,16 @@ func New(t *testing.T) *Server {
 		Projects: []api.Project{
 			{ID: ProjectID, Name: "Fleet", Slug: "fleet", DefaultFramework: "esp_idf", CreatedAt: Epoch},
 		},
-		Channels:      []api.Channel{{ID: StableChannelID, Name: "stable", IsDefault: true}},
-		Groups:        []api.Group{},
-		CheckEvents:   map[string][]api.CheckEvent{},
-		Audit:         []api.AuditEvent{},
-		StaffProjects: []api.Project{},
-		States:        map[string][]api.DeviceState{},
-		Requests:      map[string]int{},
-		FailNext:      map[string][]int{},
-		LoseReply:     map[string][]int{},
+		Channels:           []api.Channel{{ID: StableChannelID, Name: "stable", IsDefault: true}},
+		Groups:             []api.Group{},
+		CheckEvents:        map[string][]api.CheckEvent{},
+		Audit:              []api.AuditEvent{},
+		StaffProjects:      []api.Project{},
+		States:             map[string][]api.DeviceState{},
+		Requests:           map[string]int{},
+		ManifestSignatures: map[string]string{},
+		FailNext:           map[string][]int{},
+		LoseReply:          map[string][]int{},
 	}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	t.Cleanup(s.Close)
@@ -252,6 +256,8 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.uploadArtifact(w, r)
 	case len(parts) == 4 && parts[2] == "artifacts" && r.Method == http.MethodPatch:
 		s.updateArtifact(w, r, parts[3])
+	case len(parts) == 5 && parts[2] == "artifacts" && parts[4] == "attest" && r.Method == http.MethodPost:
+		s.attest(w, r, parts[3])
 	case route == "deployments" && r.Method == http.MethodPost:
 		s.createDeployment(w, r)
 	case len(parts) == 4 && parts[2] == "devices" && r.Method == http.MethodPatch:

@@ -52,20 +52,23 @@ type SigningKey struct {
 
 // Artifact mirrors ArtifactOut, the server's name for a build.
 type Artifact struct {
-	ID               string    `json:"id"`
-	BuildNumber      int       `json:"build_number"`
-	VersionLabel     string    `json:"version_label"`
-	Framework        string    `json:"framework"`
-	ChipFamily       string    `json:"chip_family"`
-	BoardID          string    `json:"board_id"`
-	PartitionProfile string    `json:"partition_profile"`
-	NVSSchemaVersion *int      `json:"nvs_schema_version"`
-	ChecksumSHA256   string    `json:"checksum_sha256"`
-	FileSize         int64     `json:"file_size"`
-	SecurityMode     string    `json:"security_mode"`
-	Archived         bool      `json:"archived"`
-	CreatedAt        time.Time `json:"created_at"`
-	Warnings         []string  `json:"warnings"`
+	ID               string `json:"id"`
+	BuildNumber      int    `json:"build_number"`
+	VersionLabel     string `json:"version_label"`
+	Framework        string `json:"framework"`
+	ChipFamily       string `json:"chip_family"`
+	BoardID          string `json:"board_id"`
+	PartitionProfile string `json:"partition_profile"`
+	NVSSchemaVersion *int   `json:"nvs_schema_version"`
+	ChecksumSHA256   string `json:"checksum_sha256"`
+	FileSize         int64  `json:"file_size"`
+	SecurityMode     string `json:"security_mode"`
+	SigningKeyID     string `json:"signing_key_id"`
+	// Attested is true once the build's signed manifest is attached.
+	Attested  bool      `json:"attested"`
+	Archived  bool      `json:"archived"`
+	CreatedAt time.Time `json:"created_at"`
+	Warnings  []string  `json:"warnings"`
 }
 
 // Device mirrors DeviceOut.
@@ -80,6 +83,7 @@ type Device struct {
 	PartitionProfile    string     `json:"partition_profile"`
 	NVSSchemaVersion    *int       `json:"nvs_schema_version"`
 	SecurityMode        string     `json:"security_mode"`
+	RequireManifest     bool       `json:"require_manifest"`
 	CurrentBuildNumber  *int       `json:"current_build_number"`
 	CurrentVersionLabel string     `json:"current_version_label"`
 	LastOTAStatus       string     `json:"last_ota_status"`
@@ -178,6 +182,13 @@ type UploadRequest struct {
 	ManifestJSON []byte
 	FileName     string
 	Binary       []byte
+}
+
+// AttestRequest mirrors ArtifactAttestIn: the base64 signature over a
+// build's manifest.
+type AttestRequest struct {
+	ManifestSignature string `json:"manifest_signature"`
+	ManifestVersion   int    `json:"manifest_version"`
 }
 
 // DeploymentRequest mirrors DeploymentIn.

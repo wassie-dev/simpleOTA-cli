@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
+	"github.com/wassie-dev/simpleOTA-cli/internal/release"
 )
 
 func (a *App) buildCommand() *cobra.Command {
@@ -24,6 +25,7 @@ service.`,
 		Example: `  simpleota build list
   simpleota build show 42
   simpleota build upload build/app.bin --version-label 1.4.0
+  simpleota build attest 42 build/app.bin
   simpleota build archive 41`,
 		Args: cobra.ArbitraryArgs,
 		RunE: groupRun,
@@ -68,7 +70,7 @@ warnings from the upload.`,
 			}
 			return a.printer().BuildShow(output.NewBuildView(art))
 		},
-	}, a.buildUploadCommand(), a.buildArchiveCommand(true), a.buildArchiveCommand(false))
+	}, a.buildUploadCommand(), a.buildAttestCommand(), a.buildArchiveCommand(true), a.buildArchiveCommand(false))
 	return cmd
 }
 
@@ -98,6 +100,53 @@ deploying it. To deploy it later, use 'simpleota deployment create'.
 		},
 	}
 	f.register(cmd.Flags())
+	return cmd
+}
+
+func (a *App) buildAttestCommand() *cobra.Command {
+	var keyFile string
+	cmd := &cobra.Command{
+		Use:   "attest <build-number> <bin>",
+		Short: "Sign the manifest of a build uploaded earlier",
+		Long: `Sign and attach the manifest of a signed build: its project, key, build
+number and SHA-256, signed with the key that signed the image. Devices that
+require attested builds are offered only builds with one. Release and build
+upload attest signed builds themselves; use this when that step failed after
+the upload, or for a build uploaded by an older CLI.
+
+The file must be the build's own binary, and the key the one that signed it.
+Only the signature is sent. Attesting a build again changes nothing.
+
+The key is found as for release: --key-file, then SIMPLEOTA_SIGNING_KEY,
+then the default key from 'simpleota key generate'.`,
+		Example: `  simpleota build attest 42 build/app.bin`,
+		Args:    exactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			number, err := strconv.Atoi(args[0])
+			if err != nil || number < 1 {
+				return usageErr("%q is not a build number\nList builds with:\n  simpleota build list", args[0])
+			}
+			s, projectID, err := a.projectSession(ctx)
+			if err != nil {
+				return err
+			}
+			key, err := a.loadSigningKey(keyFile, s.cfg.SigningKeyFile)
+			if err != nil {
+				return err
+			}
+			if key == nil {
+				return usageErr("attesting needs the build's signing key\nPass --key-file, or set %s.", signingKeyEnv)
+			}
+			svc := release.Service{API: s.api, ProjectID: projectID}
+			art, err := svc.Attest(ctx, key, number, args[1])
+			if err != nil {
+				return err
+			}
+			return a.printer().BuildShow(output.NewBuildView(art))
+		},
+	}
+	cmd.Flags().StringVar(&keyFile, "key-file", "", "`path` of the signing key file")
 	return cmd
 }
 

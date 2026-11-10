@@ -187,3 +187,36 @@ func TestReleaseChipFromImageAndAlsoActive(t *testing.T) {
 		t.Fatalf("%+v %+v", r, v)
 	}
 }
+
+func TestBuildAttest(t *testing.T) {
+	h := newHarness(t)
+	priv, _ := signing.Generate()
+	pub, _ := signing.PublicKeyPEM(priv.Public().(ed25519.PublicKey))
+	h.fake.SigningKeys = append(h.fake.SigningKeys, api.SigningKey{KeyID: "ci-key", PublicKeyPEM: pub})
+	plain, _ := signing.PrivateKeyPEM(priv)
+	h.env["SIMPLEOTA_TOKEN"] = fakeapi.ProjectToken
+	h.env[signingKeyEnv] = string(plain)
+	bin := writeFirmware(t)
+	attest := "POST /api/v1/projects/" + fakeapi.ProjectID + "/artifacts/aaaaaaaa-0000-4000-8000-000000000001/attest/"
+	h.fake.FailNext[attest] = []int{503}
+
+	r := h.run("build", "upload", bin, "--version-label", "1", "--chip", "esp32")
+	if r.code == 0 || !strings.Contains(r.stderr, "simpleota build attest 1 <bin>") {
+		t.Fatalf("upload with a failed attestation: %+v", r)
+	}
+	r = h.run("build", "attest", "1", bin, "--json")
+	var view struct {
+		Attested bool   `json:"attested"`
+		KeyID    string `json:"key_id"`
+	}
+	if r.code != 0 || json.Unmarshal([]byte(r.stdout), &view) != nil || !view.Attested || view.KeyID != "ci-key" {
+		t.Fatalf("attest: %+v", r)
+	}
+	if r := h.run("build", "attest", "x", bin); r.code != ExitUsage {
+		t.Fatalf("bad build number: %+v", r)
+	}
+	delete(h.env, signingKeyEnv)
+	if r := h.run("build", "attest", "1", bin); r.code != ExitUsage || !strings.Contains(r.stderr, "signing key") {
+		t.Fatalf("no key: %+v", r)
+	}
+}

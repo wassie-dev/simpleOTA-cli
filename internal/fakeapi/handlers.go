@@ -171,6 +171,9 @@ func (s *Server) receiveUpload(w http.ResponseWriter, r *http.Request, check fun
 		ID: fmt.Sprintf("aaaaaaaa-0000-4000-8000-%012d", build), BuildNumber: build, VersionLabel: m.VersionLabel, ChecksumSHA256: checksum,
 		FileSize: int64(len(binary)), SecurityMode: m.SecurityMode, ChipFamily: m.ChipFamily, Framework: m.Framework, CreatedAt: s.next(),
 	}
+	if m.SigningMetadata != nil {
+		a.SigningKeyID = m.SigningMetadata.KeyID
+	}
 	s.Artifacts = append(s.Artifacts, a)
 	return a, true
 }
@@ -237,6 +240,48 @@ func (s *Server) updateArtifact(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 	detail(w, http.StatusNotFound, "Not Found")
+}
+
+// attest checks a manifest signature the way the server does: Ed25519 by
+// the build's key over the version 1 manifest of this project and build.
+func (s *Server) attest(w http.ResponseWriter, r *http.Request, id string) {
+	var in api.AttestRequest
+	if !decode(w, r, &in) {
+		return
+	}
+	i := slices.IndexFunc(s.Artifacts, func(a api.Artifact) bool { return a.ID == id })
+	if i < 0 {
+		detail(w, http.StatusNotFound, "Not Found")
+		return
+	}
+	art := &s.Artifacts[i]
+	if in.ManifestVersion != 1 {
+		detail(w, http.StatusBadRequest, fmt.Sprintf("manifest_version must be 1, got %d", in.ManifestVersion))
+		return
+	}
+	if art.SecurityMode != "signed" {
+		detail(w, http.StatusBadRequest, "only a signed build can be attested; upload it with a signing key")
+		return
+	}
+	k := slices.IndexFunc(s.SigningKeys, func(k api.SigningKey) bool { return k.KeyID == art.SigningKeyID })
+	if k < 0 {
+		detail(w, http.StatusBadRequest, fmt.Sprintf("no signing key '%s' registered for this project", art.SigningKeyID))
+		return
+	}
+	pub, err := parsePublicKey(s.SigningKeys[k].PublicKeyPEM)
+	if err != nil {
+		detail(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	msg := fmt.Sprintf("SimpleOTA-Manifest-v1\n%s\n%s\n%d\n%s\n", ProjectID, art.SigningKeyID, art.BuildNumber, art.ChecksumSHA256)
+	sig, err := base64.StdEncoding.DecodeString(in.ManifestSignature)
+	if err != nil || len(sig) != ed25519.SignatureSize || !ed25519.Verify(pub, []byte(msg), sig) {
+		detail(w, http.StatusBadRequest, fmt.Sprintf("manifest signature does not verify for build %d with key '%s'", art.BuildNumber, art.SigningKeyID))
+		return
+	}
+	s.ManifestSignatures[art.ID] = in.ManifestSignature
+	art.Attested = true
+	writeJSON(w, http.StatusOK, art)
 }
 
 func (s *Server) createDeployment(w http.ResponseWriter, r *http.Request) {

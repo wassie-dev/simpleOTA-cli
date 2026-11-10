@@ -270,8 +270,9 @@ type PinnedKey struct {
 
 // FirmwareSnippet is the signing_keys block for the 1.0 Arduino and ESP-IDF
 // clients, pinning the first MaxPinnedKeys keys. With one key it leaves a
-// slot for the backup key.
-func FirmwareSnippet(keys ...PinnedKey) string {
+// slot for the backup key. It ends with the project ID line for clients
+// with API 1.2, commented out because older clients have no such field.
+func FirmwareSnippet(projectID string, keys ...PinnedKey) string {
 	keys = keys[:min(len(keys), MaxPinnedKeys)]
 	var b strings.Builder
 	b.WriteString("static const simpleota_signing_key_t kSigningKeys[] = {\n")
@@ -297,5 +298,8 @@ func FirmwareSnippet(keys ...PinnedKey) string {
 	} else {
 		fmt.Fprintf(&b, "cfg.num_signing_keys = %d;\n", len(keys))
 	}
+	b.WriteString("\n// Clients with API 1.2: check each build's signed manifest. Once every\n")
+	b.WriteString("// build is attested, require it with SIMPLEOTA_SECURITY_SIGNED_BUILD.\n")
+	fmt.Fprintf(&b, "// cfg.project_id = %q;\n", projectID)
 	return b.String()
 }
