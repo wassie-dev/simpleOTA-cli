@@ -122,10 +122,11 @@ Without an ID, list them for the newest deployment.`,
 			}
 			names := channelNames(channels)
 			views := viewsOf(devices, func(d api.Device) output.DeviceView { return output.NewDeviceView(d, names) })
+			// A server can serve more devices than asked for.
 			if limit > 0 && len(views) > limit {
 				views = views[:limit]
 			}
-			return printSome(a, views, max(total, len(views)), a.printer().DeploymentDevices)
+			return printSome(a, cmd, views, max(total, len(views)), a.printer().DeploymentDevices)
 		},
 	})
 }

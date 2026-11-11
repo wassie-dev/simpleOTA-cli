@@ -222,6 +222,22 @@ func TestCompatibleDevicesStopsOnAnEmptyPage(t *testing.T) {
 	}
 }
 
+// The total is the count when the listing began, even if later pages count
+// differently.
+func TestCompatibleDevicesTotalComesFromTheFirstPage(t *testing.T) {
+	const n = devicesPageSize + 100
+	fake, d := pagedFake(t, n)
+	fake.BeforeDevicesPage = func(offset int) {
+		if offset > 0 {
+			fake.Devices = fake.Devices[:len(fake.Devices)-10]
+		}
+	}
+	got, total, err := compatibleDevices(t, fake, d, 0)
+	if err != nil || total != n || len(got) != n-10 {
+		t.Fatalf("total %d, %d devices, %v; want total %d, %d devices", total, len(got), err, n, n-10)
+	}
+}
+
 func TestCompatibleDevicesReadsOnlyWhatMaxNeeds(t *testing.T) {
 	const n = 2*devicesPageSize + 3
 	fake, d := pagedFake(t, n)

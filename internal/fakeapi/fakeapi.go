@@ -100,8 +100,8 @@ type Server struct {
 	// deployment device list is 404.
 	NoCompatibleCount bool
 	// DevicesPageItems, if set, gives how many devices to serve for a page
-	// of the deployment device list asked for with offset and limit; count
-	// stays the full total.
+	// of the deployment device list asked for with offset and limit, even
+	// more than limit; count stays the full total.
 	DevicesPageItems func(offset, limit int) int
 	// BeforeDevicesPage, if set, runs before each page of the deployment
 	// device list is built, with Mu held, so a test can change the devices.

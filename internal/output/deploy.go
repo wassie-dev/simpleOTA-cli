@@ -94,7 +94,6 @@ func (p Printer) compatible(label string, n *int) {
 	switch *n {
 	case 0:
 		fmt.Fprintf(p.Out, "%s%s\n", label, p.yellow("no active device in the audience has compatible metadata"))
-		return
 	case 1:
 		fmt.Fprintf(p.Out, "%s1 active device in the audience has compatible metadata\n", label)
 	default:

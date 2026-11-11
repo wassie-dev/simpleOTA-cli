@@ -41,15 +41,15 @@ func printList[T any](a *App, cmd *cobra.Command, rows []T, render func([]T) err
 	if limit := listLimit(a, cmd); limit > 0 && len(rows) > limit {
 		shown = rows[:limit]
 	}
-	return printSome(a, shown, len(rows), render)
+	return printSome(a, cmd, shown, len(rows), render)
 }
 
-// printSome renders rows, and says when they are fewer than total.
-func printSome[T any](a *App, rows []T, total int, render func([]T) error) error {
+// printSome renders rows, and says when --limit left out some of total.
+func printSome[T any](a *App, cmd *cobra.Command, rows []T, total int, render func([]T) error) error {
 	if err := render(rows); err != nil {
 		return err
 	}
-	if len(rows) < total && !a.flags.json {
+	if listLimit(a, cmd) > 0 && len(rows) < total && !a.flags.json {
 		a.printer().Notice("\nShowing %d of %d. Use --limit <n> for more, or --limit 0 for all.", len(rows), total)
 	}
 	return nil

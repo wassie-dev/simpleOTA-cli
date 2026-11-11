@@ -205,7 +205,7 @@ func TestReleaseCountRequestFailure(t *testing.T) {
 	failNextDeploymentGet()
 	r := h.run("release", writeFirmware(t), "--version-label", "1", "--chip", "esp32", "--json")
 	objs := jsonObjects(t, r.stdout)
-	if r.code != 0 || len(objs) != 1 || !strings.Contains(r.stderr, "Could not get the number of compatible devices") {
+	if r.code != 0 || len(objs) != 1 || !strings.Contains(r.stderr, "Could not get the number of compatible devices") || !namesTheServerError(r.stderr) {
 		t.Fatalf("without the flag: %+v", r)
 	}
 	if v, ok := objs[0]["compatible_audience_device_count"]; !ok || v != nil {
@@ -214,9 +214,15 @@ func TestReleaseCountRequestFailure(t *testing.T) {
 
 	failNextDeploymentGet()
 	r = h.run("release", writeFirmware(t), "--version-label", "2", "--chip", "esp32", "--require-devices")
-	if r.code != ExitError || !strings.Contains(r.stderr, "--require-devices could not check deployment") || strings.Contains(r.stdout, "  devices") {
+	if r.code != ExitError || !strings.Contains(r.stderr, "--require-devices could not check deployment") || !namesTheServerError(r.stderr) || strings.Contains(r.stdout, "  devices") {
 		t.Fatalf("with the flag: %+v", r)
 	}
+}
+
+// namesTheServerError is whether stderr gives the injected 500 as the cause,
+// rather than blaming an old server.
+func namesTheServerError(stderr string) bool {
+	return strings.Contains(stderr, "500") && strings.Contains(stderr, "injected failure") && !strings.Contains(stderr, "did not report compatible_audience_device_count")
 }
 
 // manyDevices puts n compatible devices on stable, plus one incompatible
@@ -270,6 +276,30 @@ func TestDeploymentDevicesReadsEveryPage(t *testing.T) {
 	}
 	if c := h.fake.Count(pages); c != 6 {
 		t.Fatalf("--limit 600 read %d pages, want 2", c-4)
+	}
+
+	// A server that serves more than asked for is still cut to the limit.
+	h.fake.DevicesPageItems = func(_, _ int) int { return 500 }
+	r = h.run("deployment", "devices", depA)
+	if r.code != 0 || !strings.Contains(r.stdout, "mac-0020") || strings.Contains(r.stdout, "mac-0021") || !strings.Contains(r.stderr, fmt.Sprintf("Showing 20 of %d.", n)) {
+		t.Fatalf("oversized page: %+v", r)
+	}
+}
+
+// With --limit 0 nothing was left out on purpose, so a listing that ends up
+// shorter than the first page's count gets no "Showing" note.
+func TestDeploymentDevicesLimitZeroGetsNoShowingNote(t *testing.T) {
+	h := compatibleHarness(t)
+	manyDevices(h, 600)
+	h.fake.AddDeployment(depA, api.StateActive, 1, 10)
+	h.fake.BeforeDevicesPage = func(offset int) {
+		if offset > 0 {
+			h.fake.Devices = h.fake.Devices[:len(h.fake.Devices)-50]
+		}
+	}
+	r := h.run("deployment", "devices", depA, "--limit", "0")
+	if r.code != 0 || strings.Contains(r.stderr, "Showing") || strings.Count(r.stdout, "mac-") != 550 {
+		t.Fatalf("rows %d, stderr %q", strings.Count(r.stdout, "mac-"), r.stderr)
 	}
 }
 
