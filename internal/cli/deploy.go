@@ -34,7 +34,7 @@ build.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: groupRun,
 	}
-	cmd.AddCommand(a.deploymentListCommand(), a.deploymentShowCommand(), a.deploymentCreateCommand())
+	cmd.AddCommand(a.deploymentListCommand(), a.deploymentShowCommand(), a.deploymentDevicesCommand(), a.deploymentCreateCommand())
 	for _, action := range deploy.Actions {
 		cmd.AddCommand(a.deploymentActionCommand(action))
 	}
@@ -83,6 +83,59 @@ checked in and been offered the build.`,
 			return a.runDeploymentShow(cmd.Context(), firstArg(args))
 		},
 	}
+}
+
+func (a *App) deploymentDevicesCommand() *cobra.Command {
+	return withLimit(&cobra.Command{
+		Use:   "devices [deployment-id]",
+		Short: "List the active devices compatible with a deployment",
+		Long: `List the active devices in a deployment's audience whose last reported
+metadata (framework, chip, board, hardware revision, partitions, NVS schema,
+security mode) is compatible with its build, ordered by device ID. These are
+the devices release and deployment create count.
+
+Neither the rollout percentage nor the deployment's state is applied, so at
+10% the list still holds every compatible device. The server checks the
+metadata at the time of the request, and a device's next check-in can add it
+or remove it. A device is listed before it checks in for this deployment;
+deployment show counts only devices that have.
+
+Without an ID, list them for the newest deployment.`,
+		Example: `  simpleota deployment devices
+  simpleota deployment devices 5f0c2b1e-... --json | jq -r '.[].device_id'`,
+		Args: maxArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			s, projectID, id, err := a.deploymentTarget(ctx, firstArg(args))
+			if err != nil {
+				return err
+			}
+			devices, err := deploy.CompatibleDevices(ctx, s.api, projectID, id)
+			if err != nil {
+				return deploymentDevicesErr(ctx, s, projectID, id, err)
+			}
+			channels, err := s.api.ListChannels(ctx, projectID)
+			if err != nil {
+				return err
+			}
+			names := channelNames(channels)
+			views := viewsOf(devices, func(d api.Device) output.DeviceView { return output.NewDeviceView(d, names) })
+			return printList(a, cmd, views, a.printer().DeploymentDevices)
+		},
+	})
+}
+
+// deploymentDevicesErr explains a 404 from the deployment device list: the
+// deployment is missing, or the server predates the list.
+func deploymentDevicesErr(ctx context.Context, s *session, projectID, id string, err error) error {
+	var ae *api.Error
+	if !errors.As(err, &ae) || ae.StatusCode != http.StatusNotFound {
+		return err
+	}
+	if _, getErr := s.api.GetDeployment(ctx, projectID, id); getErr != nil {
+		return deploymentErr(getErr, id)
+	}
+	return &explainedErr{msg: "the server does not list a deployment's compatible devices; it may be older than this CLI", cause: err}
 }
 
 // deploymentTarget validates an optional deployment ID, resolves the

@@ -39,7 +39,8 @@ const (
 	ExitUsage = 2
 	ExitAuth  = 3
 	// ExitNoDevices is for release and deployment create with
-	// --require-devices, when the deployment targets no active device.
+	// --require-devices, when no active device in the deployment's audience
+	// has compatible metadata.
 	ExitNoDevices = 4
 )
 

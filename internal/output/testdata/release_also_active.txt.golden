@@ -1,6 +1,6 @@
 Released build 42 for esp32s3 (signed with key prod-2026)
   deployment  5f0c2b1e-1d2c-4b7a-9a3e-0123456789ab (active, channel stable)
-  devices     no active device is targeted
+  devices     no active device in the audience has compatible metadata
   sha256      ab12
   size        1024 bytes
 

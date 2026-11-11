@@ -294,7 +294,15 @@ func jsonObjects(t *testing.T, stdout string) []map[string]any {
 	return out
 }
 
-func TestRequireDevicesCountsTheTargetedDevices(t *testing.T) {
+// checkIn registers a device with this metadata, then puts it on channel.
+func checkIn(t *testing.T, c *cli, channel, chip string) *device {
+	d := newDevice(t)
+	d.post("/api/v1/ota/check/", map[string]any{"device_id": d.id, "current_build_number": 0, "framework": "esp_idf", "chip_family": chip})
+	c.mustRun("device", "update", d.id, "--channel", channel)
+	return d
+}
+
+func TestCompatibleCountAndDevices(t *testing.T) {
 	c := ciCLI(t)
 	channel := "e2e-" + uid()
 	c.mustRun("channel", "create", channel)
@@ -306,19 +314,27 @@ func TestRequireDevicesCountsTheTargetedDevices(t *testing.T) {
 			t.Cleanup(func() { cancelDeployment(t, id) })
 		}
 	}
-	if r.code != 4 || len(objs) != 2 || objs[0]["targeted_devices"] != 0.0 || objs[0]["state"] != "active" || objs[1]["exit_code"] != 4.0 {
+	if r.code != 4 || len(objs) != 2 || objs[0]["compatible_audience_device_count"] != 0.0 || objs[0]["state"] != "active" || objs[1]["exit_code"] != 4.0 {
 		t.Fatalf("empty channel: %+v", r)
 	}
 
-	d := newDevice(t)
-	d.post("/api/v1/ota/check/", map[string]any{"device_id": d.id, "current_build_number": 0, "framework": "esp_idf", "chip_family": "esp32"})
-	c.mustRun("device", "update", d.id, "--channel", channel)
-	out := release(t, c, "--channel", channel, "--require-devices")
-	if out.TargetedDevices == nil || *out.TargetedDevices != 1 {
-		t.Fatalf("one device on the channel: %+v", out)
+	d := checkIn(t, c, channel, "esp32")
+	other := checkIn(t, c, channel, "esp32s3")
+	out := release(t, c, "--channel", channel, "--percent", "1", "--require-devices")
+	if out.CompatibleDevices == nil || *out.CompatibleDevices != 1 {
+		t.Fatalf("one compatible device and one for another chip: %+v", out)
 	}
-	if got := d.check(out.BuildNumber); got != out.DeploymentID {
-		t.Fatalf("the counted device was offered %s, want %s", got, out.DeploymentID)
+	var listed []struct {
+		DeviceID string `json:"device_id"`
+	}
+	if err := json.Unmarshal([]byte(c.mustRun("deployment", "devices", out.DeploymentID, "--json").stdout), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].DeviceID != d.id {
+		t.Fatalf("deployment devices listed %+v, want only %s and not %s", listed, d.id, other.id)
+	}
+	if text := c.mustRun("deployment", "devices", out.DeploymentID).stdout; !strings.Contains(text, d.id) || strings.Contains(text, other.id) {
+		t.Fatalf("text: %s", text)
 	}
 
 	c.mustRun("device", "update", d.id, "--state", "inactive")
@@ -331,7 +347,7 @@ func TestRequireDevicesCountsTheTargetedDevices(t *testing.T) {
 			t.Cleanup(func() { cancelDeployment(t, id) })
 		}
 	}
-	if r.code != 4 || len(objs) != 2 || objs[0]["targeted_devices"] != 0.0 {
+	if r.code != 4 || len(objs) != 2 || objs[0]["compatible_audience_device_count"] != 0.0 {
 		t.Fatalf("inactive device: %+v", r)
 	}
 }

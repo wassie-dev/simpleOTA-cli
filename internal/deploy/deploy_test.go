@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
@@ -99,38 +100,28 @@ func TestLatest(t *testing.T) {
 	}
 }
 
-func TestTargeted(t *testing.T) {
-	const beta, kitchen, hall = "beta-id", "kitchen-id", "hall-id"
-	stable, betaID := fakeapi.StableChannelID, beta
+func TestCompatibleDevicesReadsEveryPage(t *testing.T) {
 	fake := fakeapi.New(t)
-	fake.Devices = []api.Device{
-		{ID: "d1", Active: true, ChannelID: &stable, GroupIDs: []string{kitchen}},
-		{ID: "d2", Active: true, ChannelID: &stable},
-		{ID: "d3", Active: false, ChannelID: &stable, GroupIDs: []string{kitchen}},
-		{ID: "d4", Active: true, ChannelID: &betaID, GroupIDs: []string{hall}},
-		{ID: "d5", Active: true, GroupIDs: []string{kitchen}},
+	d := fake.AddDeployment("11111111-0000-4000-8000-000000000001", api.StateActive, 1, 10)
+	stable := fakeapi.StableChannelID
+	const n = 2*devicesPageSize + 3
+	for i := range n + 2 {
+		fake.Devices = append(fake.Devices, api.Device{ID: fmt.Sprintf("dev-%04d", i), DeviceID: fmt.Sprintf("mac-%04d", n+1-i), Active: true, ChannelID: &stable})
 	}
-	tests := []struct {
-		name     string
-		channels []string
-		groups   []string
-		want     int
-	}{
-		{name: "one channel", channels: []string{stable}, want: 2},
-		{name: "two channels", channels: []string{stable, beta}, want: 3},
-		{name: "a channel no device is on", channels: []string{"empty-id"}, want: 0},
-		{name: "one group", groups: []string{kitchen}, want: 2},
-		{name: "two groups", groups: []string{kitchen, hall}, want: 3},
-		{name: "channel and group", channels: []string{stable}, groups: []string{kitchen}, want: 1},
-		{name: "every device", want: 4},
+	fake.Incompatible["dev-0000"] = true
+	fake.Devices[1].Active = false
+
+	got, err := CompatibleDevices(context.Background(), api.New(fake.URL, fakeapi.ProjectToken, "t"), fakeapi.ProjectID, d.ID)
+	if err != nil || len(got) != n {
+		t.Fatalf("got %d devices, %v; want %d", len(got), err, n)
 	}
-	c := api.New(fake.URL, fakeapi.ProjectToken, "t")
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			n, err := Targeted(context.Background(), c, fakeapi.ProjectID, api.Deployment{TargetChannelIDs: tt.channels, TargetGroupIDs: tt.groups})
-			if err != nil || n != tt.want {
-				t.Fatalf("Targeted = %d, %v; want %d", n, err, tt.want)
-			}
-		})
+	for i := 1; i < len(got); i++ {
+		if got[i-1].DeviceID >= got[i].DeviceID {
+			t.Fatalf("not in device_id order at %d: %s, %s", i, got[i-1].DeviceID, got[i].DeviceID)
+		}
+	}
+	path := "GET /api/v1/projects/" + fakeapi.ProjectID + "/deployments/" + d.ID + "/devices/"
+	if c := fake.Count(path); c != 3 {
+		t.Fatalf("%d requests, want 3", c)
 	}
 }

@@ -115,7 +115,7 @@ func TestRejectedTokenIsExplained(t *testing.T) {
 
 func TestGroupsRejectUnknownSubcommands(t *testing.T) {
 	h := newHarness(t)
-	for _, args := range [][]string{{"deployment", "rollback", depA}, {"keys", "rotate"}} {
+	for _, args := range [][]string{{"deployment", "rollback", depA}, {"deployment", "wait", depA}, {"keys", "rotate"}} {
 		if r := h.run(args...); r.code != ExitUsage || !strings.Contains(r.stderr, "unknown command") {
 			t.Errorf("%v: %+v", args, r)
 		}

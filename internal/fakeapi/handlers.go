@@ -37,6 +37,60 @@ func (s *Server) devices(q url.Values) []api.Device {
 	return out
 }
 
+// compatible is the server's compatible audience: active devices on a
+// targeted channel and in a targeted group, where any are targeted, that are
+// not Incompatible, ordered by device_id.
+func (s *Server) compatible(d api.Deployment) []api.Device {
+	out := []api.Device{}
+	for _, dev := range s.Devices {
+		switch {
+		case !dev.Active, s.Incompatible[dev.ID]:
+		case len(d.TargetChannelIDs) > 0 && (dev.ChannelID == nil || !slices.Contains(d.TargetChannelIDs, *dev.ChannelID)):
+		case len(d.TargetGroupIDs) > 0 && !slices.ContainsFunc(dev.GroupIDs, func(g string) bool { return slices.Contains(d.TargetGroupIDs, g) }):
+		default:
+			out = append(out, dev)
+		}
+	}
+	slices.SortStableFunc(out, func(a, b api.Device) int { return strings.Compare(a.DeviceID, b.DeviceID) })
+	return out
+}
+
+// withCount adds compatible_audience_device_count, as the create, show and
+// transition responses do.
+func (s *Server) withCount(d api.Deployment) api.Deployment {
+	if !s.NoCompatibleCount {
+		n := len(s.compatible(d))
+		d.CompatibleAudienceDeviceCount = &n
+	}
+	return d
+}
+
+func (s *Server) deploymentDevices(w http.ResponseWriter, r *http.Request, id string) {
+	d := s.deployment(id)
+	if d == nil {
+		detail(w, http.StatusNotFound, "Not Found")
+		return
+	}
+	limit, offset := 100, 0
+	q := r.URL.Query()
+	var err error
+	if v := q.Get("limit"); v != "" {
+		if limit, err = strconv.Atoi(v); err != nil || limit < 1 || limit > 500 {
+			detail(w, http.StatusUnprocessableEntity, "bad limit")
+			return
+		}
+	}
+	if v := q.Get("offset"); v != "" {
+		if offset, err = strconv.Atoi(v); err != nil || offset < 0 {
+			detail(w, http.StatusUnprocessableEntity, "bad offset")
+			return
+		}
+	}
+	all := s.compatible(*d)
+	page := all[min(offset, len(all)):min(offset+limit, len(all))]
+	writeJSON(w, http.StatusOK, api.DeploymentDevicesPage{Count: len(all), Items: page})
+}
+
 func (s *Server) me(w http.ResponseWriter, token string) {
 	switch token {
 	case ProjectToken:
@@ -261,7 +315,7 @@ func (s *Server) createDeployment(w http.ResponseWriter, r *http.Request) {
 		TargetChannelIDs: in.TargetChannelIDs, TargetGroupIDs: in.TargetGroupIDs, State: api.StateDraft, CreatedAt: s.next(),
 	}
 	s.Deployments = append([]api.Deployment{d}, s.Deployments...)
-	writeJSON(w, http.StatusCreated, d)
+	writeJSON(w, http.StatusCreated, s.withCount(d))
 }
 
 func (s *Server) transition(w http.ResponseWriter, r *http.Request, id string) {
@@ -323,7 +377,7 @@ func (s *Server) transition(w http.ResponseWriter, r *http.Request, id string) {
 		detail(w, http.StatusBadRequest, fmt.Sprintf("unknown action '%s'", t.Action))
 		return
 	}
-	writeJSON(w, http.StatusOK, d)
+	writeJSON(w, http.StatusOK, s.withCount(*d))
 }
 
 // startRefusal is the server's reason not to activate a deployment for every

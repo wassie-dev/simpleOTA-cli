@@ -61,10 +61,11 @@ type CreatedView struct {
 	// Targets names the channels and groups the deployment reaches; empty
 	// means every device in the project.
 	Targets []string `json:"targets"`
-	// TargetedDevices counts the active devices in the deployment's
-	// audience, or is nil when they could not be counted.
-	TargetedDevices *int             `json:"targeted_devices"`
-	AlsoActive      []DeploymentView `json:"also_active"`
+	// CompatibleDevices is the server's count of active devices in the
+	// audience whose metadata is compatible with the build, before the
+	// rollout percentage, or nil when it is not known.
+	CompatibleDevices *int             `json:"compatible_audience_device_count"`
+	AlsoActive        []DeploymentView `json:"also_active"`
 }
 
 // Created prints the result of deployment create.
@@ -79,23 +80,27 @@ func (p Printer) Created(v CreatedView) error {
 	}
 	fmt.Fprintf(p.Out, "%s deployment %s\n", p.green("Started"), termtext.Clean(d.ID))
 	fmt.Fprintf(p.Out, "  build    %d, offered to %d%% of %s\n", d.BuildNumber, d.RolloutPercentage, audience)
-	if v.TargetedDevices != nil {
-		fmt.Fprintf(p.Out, "  devices  %s\n", p.targeted(*v.TargetedDevices))
-	}
+	p.compatible("  devices  ", v.CompatibleDevices)
 	p.alsoActive(v.AlsoActive, d.BuildNumber)
 	p.nextStep("Check on it", "simpleota deployment show "+termtext.Clean(d.ID))
 	return nil
 }
 
-// targeted describes a count of targeted devices.
-func (p Printer) targeted(n int) string {
-	switch n {
-	case 0:
-		return p.yellow("no active device is targeted")
-	case 1:
-		return "1 active device targeted"
+// compatible prints the compatible device count after label, if it is known.
+func (p Printer) compatible(label string, n *int) {
+	if n == nil {
+		return
 	}
-	return fmt.Sprintf("%d active devices targeted", n)
+	switch *n {
+	case 0:
+		fmt.Fprintf(p.Out, "%s%s\n", label, p.yellow("no active device in the audience has compatible metadata"))
+		return
+	case 1:
+		fmt.Fprintf(p.Out, "%s1 active device in the audience has compatible metadata\n", label)
+	default:
+		fmt.Fprintf(p.Out, "%s%d active devices in the audience have compatible metadata\n", label, *n)
+	}
+	fmt.Fprintf(p.Out, "%s(rollout percentage not applied; a check-in can change this)\n", strings.Repeat(" ", len(label)))
 }
 
 // alsoActive explains the other active deployments that still reach some

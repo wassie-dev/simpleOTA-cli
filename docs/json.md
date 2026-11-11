@@ -168,7 +168,7 @@ Newest first, revoked keys included.
   "sha256": "…",
   "size": 1048576,
   "also_active": [ { … } ],
-  "targeted_devices": 12
+  "compatible_audience_device_count": 12
 }
 ```
 
@@ -177,11 +177,16 @@ Newest first, revoked keys included.
 active deployments for the same chip on the channel as
 [deployment objects](#deployment-object), highest build first; it is always
 an array.
-`targeted_devices` counts the project's active devices in the deployment's
-audience: on its channels, if it has any, and in its groups, if it has any.
-The rollout percentage and the build's compatibility then decide which of
-them are offered the build when they check in. It is `null` when the devices
-could not be counted, and a notice on stderr says why.
+`compatible_audience_device_count` is the server's count of active devices in
+the deployment's audience (on its channels, if it has any, and in its groups,
+if it has any) whose last reported framework, chip, board, hardware revision,
+partition profile, NVS schema version and security mode are compatible with
+the build, at the time of the request. It does not apply the rollout
+percentage, so a 10% rollout reports the same count as 100%, and a device's
+next check-in can change it. [deployment devices](#deployment-devices) lists
+the same devices. It is `null` when the count is unknown: the request for it
+failed, or the server is too old to report it. A notice on stderr then says
+why, and `--require-devices` exits 1.
 `sha256` is the SHA-256 of the local file. It was sent in the manifest, and
 the server accepts an upload only when the bytes it received hash the same,
 so it is also the checksum the server stored.
@@ -352,12 +357,23 @@ An array of [deployment objects](#deployment-object), newest first.
 ## deployment create
 
 ```json
-{ "deployment": { … }, "targets": ["channel stable"], "targeted_devices": 12, "also_active": [ { … } ] }
+{ "deployment": { … }, "targets": ["channel stable"], "compatible_audience_device_count": 12, "also_active": [ { … } ] }
 ```
 
 `targets` names the channels and groups the deployment reaches, such as
 `channel beta` or `group kitchen`; it is empty for `--all-devices`.
-`targeted_devices` and `also_active` are as in [release](#release).
+`compatible_audience_device_count` and `also_active` are as in
+[release](#release).
+
+## deployment devices
+
+An array of [device objects](#device-list-device-show-device-update), ordered
+by `device_id`: the active devices in the deployment's audience whose last
+reported metadata is compatible with its build, the devices
+`compatible_audience_device_count` counts. The rollout percentage is not
+applied, and a device's next check-in can add or remove it. The CLI reads
+every page from the server; the pages are separate requests, so a device that
+changes between them can be missed.
 
 ## deployment show
 

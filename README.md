@@ -150,7 +150,7 @@ simpleota
 ├── project   list | show [slug|id] | use <slug|id>
 ├── build     list | show <n> | upload <bin> | archive <n> | unarchive <n>
 ├── deployment
-│   ├── list | show [id]
+│   ├── list | show [id] | devices [id]
 │   ├── create --build <n> [--channel]... [--group]... [--all-devices] [--percent] [--require-devices]
 │   ├── ramp <id> --percent <n> | pause | complete | cancel <id>
 │   └── resume <id> [--all-devices]
@@ -174,6 +174,7 @@ simpleota
 | `build upload` | Sign and upload a build without deploying it; checked like `release` |
 | `build archive\|unarchive` | Take a build out of service, or return it |
 | `deployment list\|show` | List deployments, or show one's state and device progress |
+| `deployment devices` | List the active devices in a deployment's audience whose reported metadata is compatible with its build, before the rollout percentage |
 | `deployment create` | Deploy an uploaded build to channels (stable by default), groups, or every device, and start it |
 | `deployment ramp\|pause\|resume\|complete\|cancel` | Change a deployment's state. Resuming a deployment for every device in a project with two or more devices needs `--all-devices` |
 | `device list\|show` | List devices, filtered by channel, group or state, or show one |
@@ -189,11 +190,13 @@ Global flags: `--json` ([schema](docs/json.md)), `--api-url`, `--project`.
 `list` commands show 20 rows as text and say when there are more: `--limit <n>`
 changes that, and `--limit 0` shows all. With `--json` they return every row
 unless you pass `--limit`.
-`release` and `deployment create` report how many active devices the new
-deployment targets: those on its channels and in its groups. The rollout
-percentage and the build's compatibility then decide which of them are
-offered the build when they check in. With `--require-devices`, a count of 0
-exits 4 and leaves the deployment active.
+`release` and `deployment create` report the server's count of active devices
+in the new deployment's audience (its channels and groups) whose last reported
+metadata is compatible with the build. The count does not apply the rollout
+percentage, and a device's next check-in can change it. `deployment devices`
+lists the same devices. With `--require-devices`, a count of 0 exits 4 and
+leaves the deployment active; a server too old to report the count makes it
+exit 1.
 
 | Exit code | Meaning |
 | --- | --- |
@@ -201,7 +204,7 @@ exits 4 and leaves the deployment active.
 | 1 | Error, or the command was interrupted (for `status`: the API could not be reached) |
 | 2 | Usage error, including no current project when the token sees several (for `status`: the chosen project cannot be found) |
 | 3 | Not logged in, or the token was rejected (`status` too) |
-| 4 | With `--require-devices`, the deployment targets no active device |
+| 4 | With `--require-devices`, no active device in the deployment's audience has compatible metadata |
 
 | Variable | Use |
 | --- | --- |
@@ -222,8 +225,9 @@ with `simpleota key export`. Store both as secrets, and put `simpleota` on
 the runner's PATH from the releases page.
 
 Devices may check in only once a day, so a CI job does not wait for them.
-`--require-devices` fails the job when the deployment would reach no device;
-follow the rollout afterwards with `simpleota deployment show`.
+`--require-devices` fails the job when no active device in the audience has
+reported metadata compatible with the build. Follow the rollout afterwards
+with `simpleota deployment show`.
 
 GitHub Actions:
 

@@ -8,9 +8,15 @@ All notable changes to simpleota are documented here. The format follows
 
 ### Added
 
-- `release` and `deployment create` report how many active devices the new
-  deployment targets, in text and as `targeted_devices` in `--json`.
-  `--require-devices` makes them exit 4 when that count is 0.
+- `release` and `deployment create` report the server's count of active
+  devices in the new deployment's audience whose last reported metadata is
+  compatible with the build, in text and as
+  `compatible_audience_device_count` in `--json`. The count does not apply the
+  rollout percentage, and a device's next check-in can change it.
+  `--require-devices` makes them exit 4 when the count is 0. A server too old
+  to report it leaves the count `null`, and `--require-devices` then exits 1.
+- `deployment devices [id]` lists the devices that count includes, reading
+  every page from the server.
 
 ### Removed
 
@@ -70,8 +76,8 @@ All notable changes to simpleota are documented here. The format follows
 - An unknown deployment ID exits with code 2, like an unknown build or
   device, instead of 1.
 - Times in text output end in `UTC`, the zone they were always shown in.
-- Exit code 4 now means only that `--require-devices` found no targeted
-  device. Exit code 5 is no longer used.
+- Exit code 4 now means only that `--require-devices` found no active device
+  in the audience with compatible metadata. Exit code 5 is no longer used.
 - On Windows, two `simpleota` commands saving the config or the credentials
   file at the same moment could fail with "Access is denied". The save now
   retries for up to a second.

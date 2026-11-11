@@ -1,5 +1,6 @@
-// Package deploy changes deployment state, counts the devices a deployment
-// targets and summarises per-device rollout progress.
+// Package deploy changes deployment state, lists the devices whose metadata
+// is compatible with a deployment, and summarises per-device rollout
+// progress.
 package deploy
 
 import (
@@ -18,6 +19,7 @@ type API interface {
 	GetDeployment(ctx context.Context, projectID, deploymentID string) (api.Deployment, error)
 	ListDeploymentStates(ctx context.Context, projectID, deploymentID string) ([]api.DeviceState, error)
 	ListDevices(ctx context.Context, projectID string, f api.DeviceFilter) ([]api.Device, error)
+	ListDeploymentDevices(ctx context.Context, projectID, deploymentID string, limit, offset int) (api.DeploymentDevicesPage, error)
 }
 
 // ActionStart starts a draft deployment. deployment create sends it; it is

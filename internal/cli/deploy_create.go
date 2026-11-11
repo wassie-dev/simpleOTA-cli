@@ -42,7 +42,7 @@ If another deployment for the same chip is still active for the same
 devices, it is listed. A device installs the highest build offered to it, so
 the older deployment keeps reaching the devices this one does not.
 
-` + targetedHelp,
+` + compatibleHelp,
 		Example: `  simpleota deployment create --build 42
   simpleota deployment create --build 42 --channel beta --percent 10
   simpleota deployment create --build 42 --group kitchen --group hall
@@ -133,10 +133,10 @@ func (a *App) runCreateDeployment(ctx context.Context, f createFlags) error {
 		AlsoActive: alsoActive(ctx, p, s, projectID, d.ID, art.ChipFamily),
 	}
 	var countErr error
-	view.TargetedDevices, countErr = countTargeted(ctx, s, projectID, d)
-	requireErr := targetedErr(p, f.require, d.ID, view.TargetedDevices, countErr)
+	view.CompatibleDevices, countErr = compatibleCount(d)
+	reqErr := requireErr(p, f.require, d.ID, view.CompatibleDevices, countErr)
 	if err := p.Created(view); err != nil {
 		return err
 	}
-	return requireErr
+	return reqErr
 }
