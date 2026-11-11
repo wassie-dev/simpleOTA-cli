@@ -372,8 +372,9 @@ by `device_id`: the active devices in the deployment's audience whose last
 reported metadata is compatible with its build, the devices
 `compatible_audience_device_count` counts. The rollout percentage is not
 applied, and a device's next check-in can add or remove it. The CLI reads
-every page from the server; the pages are separate requests, so a device that
-changes between them can be missed.
+every page from the server, or with `--limit` only the pages it needs. The
+pages are separate requests, so a device that changes during the walk can be
+missed; a device served twice is listed once.
 
 ## deployment show
 

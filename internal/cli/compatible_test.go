@@ -155,6 +155,9 @@ func TestDeploymentCreateRequireDevicesFailsOnAZeroCount(t *testing.T) {
 	if r.code != ExitNoDevices || !strings.Contains(r.stdout, "Started deployment "+id) || !strings.Contains(r.stderr, "deployment "+id+" has no compatible device") {
 		t.Fatalf("with the flag: %+v", r)
 	}
+	if d := h.fake.Deployments[0]; d.State != api.StateActive {
+		t.Fatalf("the deployment should be left active: %+v", d)
+	}
 }
 
 // An older server leaves out compatible_audience_device_count. The count is
@@ -248,13 +251,25 @@ func TestDeploymentDevicesReadsEveryPage(t *testing.T) {
 	if !slices.IsSorted(ids) || ids[0] != "mac-0001" || ids[n-1] != fmt.Sprintf("mac-%04d", n) {
 		t.Fatalf("devices out of order or wrong: first %s, last %s", ids[0], ids[n-1])
 	}
-	if c := h.fake.Count("GET /api/v1/projects/" + fakeapi.ProjectID + "/deployments/" + depA + "/devices/"); c != 3 {
+	pages := "GET /api/v1/projects/" + fakeapi.ProjectID + "/deployments/" + depA + "/devices/"
+	if c := h.fake.Count(pages); c != 3 {
 		t.Fatalf("%d page requests, want 3", c)
 	}
 
+	// Text shows 20 rows by default, so one page is enough.
 	r = h.run("deployment", "devices", depA)
 	if r.code != 0 || !strings.Contains(r.stdout, "mac-0020") || strings.Contains(r.stdout, "mac-0021") || !strings.Contains(r.stderr, fmt.Sprintf("Showing 20 of %d.", n)) {
 		t.Fatalf("text: %+v", r)
+	}
+	if c := h.fake.Count(pages); c != 4 {
+		t.Fatalf("text read %d pages, want 1", c-3)
+	}
+	r = h.run("deployment", "devices", depA, "--json", "--limit", "600")
+	if err := json.Unmarshal([]byte(r.stdout), &got); r.code != 0 || err != nil || len(got) != 600 {
+		t.Fatalf("json --limit 600: %d devices, %v", len(got), err)
+	}
+	if c := h.fake.Count(pages); c != 6 {
+		t.Fatalf("--limit 600 read %d pages, want 2", c-4)
 	}
 }
 

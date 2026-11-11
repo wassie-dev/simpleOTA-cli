@@ -3,7 +3,9 @@ package deploy
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/fakeapi"
@@ -100,28 +102,134 @@ func TestLatest(t *testing.T) {
 	}
 }
 
-func TestCompatibleDevicesReadsEveryPage(t *testing.T) {
+// pagedFake serves n compatible devices on stable, plus an incompatible and
+// an inactive one, for one active deployment.
+func pagedFake(t *testing.T, n int) (*fakeapi.Server, api.Deployment) {
 	fake := fakeapi.New(t)
 	d := fake.AddDeployment("11111111-0000-4000-8000-000000000001", api.StateActive, 1, 10)
 	stable := fakeapi.StableChannelID
-	const n = 2*devicesPageSize + 3
 	for i := range n + 2 {
-		fake.Devices = append(fake.Devices, api.Device{ID: fmt.Sprintf("dev-%04d", i), DeviceID: fmt.Sprintf("mac-%04d", n+1-i), Active: true, ChannelID: &stable})
+		fake.Devices = append(fake.Devices, api.Device{ID: fmt.Sprintf("dev-%04d", i), DeviceID: fmt.Sprintf("mac-%04d", n+2-i), Active: true, ChannelID: &stable})
 	}
 	fake.Incompatible["dev-0000"] = true
 	fake.Devices[1].Active = false
+	return fake, d
+}
 
-	got, err := CompatibleDevices(context.Background(), api.New(fake.URL, fakeapi.ProjectToken, "t"), fakeapi.ProjectID, d.ID)
-	if err != nil || len(got) != n {
-		t.Fatalf("got %d devices, %v; want %d", len(got), err, n)
+func compatibleDevices(t *testing.T, fake *fakeapi.Server, d api.Deployment, max int) ([]api.Device, int, error) {
+	t.Helper()
+	// The deadline turns a pager that never stops into a failure.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return CompatibleDevices(ctx, api.New(fake.URL, fakeapi.ProjectToken, "t"), fakeapi.ProjectID, d.ID, max)
+}
+
+func pageRequests(fake *fakeapi.Server, d api.Deployment) int {
+	return fake.Count("GET /api/v1/projects/" + fakeapi.ProjectID + "/deployments/" + d.ID + "/devices/")
+}
+
+// wantAll checks got is the n devices pagedFake serves, once each, in
+// device_id order.
+func wantAll(t *testing.T, got []api.Device, n int) {
+	t.Helper()
+	if len(got) != n {
+		t.Fatalf("got %d devices, want %d", len(got), n)
 	}
-	for i := 1; i < len(got); i++ {
-		if got[i-1].DeviceID >= got[i].DeviceID {
-			t.Fatalf("not in device_id order at %d: %s, %s", i, got[i-1].DeviceID, got[i].DeviceID)
+	for i, dev := range got {
+		if want := fmt.Sprintf("mac-%04d", i+1); dev.DeviceID != want {
+			t.Fatalf("device %d is %s, want %s", i, dev.DeviceID, want)
 		}
 	}
-	path := "GET /api/v1/projects/" + fakeapi.ProjectID + "/deployments/" + d.ID + "/devices/"
-	if c := fake.Count(path); c != 3 {
+}
+
+func TestCompatibleDevicesReadsEveryPage(t *testing.T) {
+	const n = 2*devicesPageSize + 3
+	fake, d := pagedFake(t, n)
+	got, total, err := compatibleDevices(t, fake, d, 0)
+	if err != nil || total != n {
+		t.Fatalf("total %d, %v", total, err)
+	}
+	wantAll(t, got, n)
+	if c := pageRequests(fake, d); c != 3 {
 		t.Fatalf("%d requests, want 3", c)
+	}
+}
+
+// A page can be short while more devices follow, for instance when the
+// server leaves out a device deleted while it built the page.
+func TestCompatibleDevicesContinuesAfterAShortPage(t *testing.T) {
+	const n = 2*devicesPageSize + 3
+	fake, d := pagedFake(t, n)
+	fake.DevicesPageItems = func(offset, limit int) int {
+		if offset == devicesPageSize {
+			return 200
+		}
+		return limit
+	}
+	got, _, err := compatibleDevices(t, fake, d, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, got, n)
+}
+
+func TestCompatibleDevicesFollowsALowerServerMaximum(t *testing.T) {
+	const n = 250
+	fake, d := pagedFake(t, n)
+	fake.DevicesPageItems = func(_, limit int) int { return min(limit, 100) }
+	got, _, err := compatibleDevices(t, fake, d, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, got, n)
+	if c := pageRequests(fake, d); c != 3 {
+		t.Fatalf("%d requests, want 3", c)
+	}
+}
+
+// A device that joins before the offset between two pages shifts the second
+// page back by one, so its first device was already on the first page.
+func TestCompatibleDevicesListsAShiftedDeviceOnce(t *testing.T) {
+	const n = devicesPageSize + 10
+	fake, d := pagedFake(t, n)
+	stable := fakeapi.StableChannelID
+	fake.BeforeDevicesPage = func(offset int) {
+		if offset == devicesPageSize {
+			fake.Devices = append(fake.Devices, api.Device{ID: "dev-new", DeviceID: "mac-0000", Active: true, ChannelID: &stable})
+		}
+	}
+	got, _, err := compatibleDevices(t, fake, d, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, got, n)
+}
+
+func TestCompatibleDevicesStopsOnAnEmptyPage(t *testing.T) {
+	const n = 2*devicesPageSize + 3
+	fake, d := pagedFake(t, n)
+	fake.DevicesPageItems = func(offset, limit int) int {
+		if offset > 0 {
+			return 0
+		}
+		return limit
+	}
+	if _, _, err := compatibleDevices(t, fake, d, 0); err == nil || !strings.Contains(err.Error(), "no devices at offset 500 of 1003") {
+		t.Fatalf("err = %v", err)
+	}
+	if c := pageRequests(fake, d); c != 2 {
+		t.Fatalf("%d requests, want 2", c)
+	}
+}
+
+func TestCompatibleDevicesReadsOnlyWhatMaxNeeds(t *testing.T) {
+	const n = 2*devicesPageSize + 3
+	fake, d := pagedFake(t, n)
+	got, total, err := compatibleDevices(t, fake, d, 20)
+	if err != nil || total != n || len(got) != 20 || got[19].DeviceID != "mac-0020" {
+		t.Fatalf("got %d devices, total %d, %v", len(got), total, err)
+	}
+	if c := pageRequests(fake, d); c != 1 {
+		t.Fatalf("%d requests, want 1", c)
 	}
 }

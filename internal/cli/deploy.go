@@ -110,7 +110,9 @@ Without an ID, list them for the newest deployment.`,
 			if err != nil {
 				return err
 			}
-			devices, err := deploy.CompatibleDevices(ctx, s.api, projectID, id)
+			// A limited listing reads only the pages it shows.
+			limit := listLimit(a, cmd)
+			devices, total, err := deploy.CompatibleDevices(ctx, s.api, projectID, id, limit)
 			if err != nil {
 				return deploymentDevicesErr(ctx, s, projectID, id, err)
 			}
@@ -120,7 +122,10 @@ Without an ID, list them for the newest deployment.`,
 			}
 			names := channelNames(channels)
 			views := viewsOf(devices, func(d api.Device) output.DeviceView { return output.NewDeviceView(d, names) })
-			return printList(a, cmd, views, a.printer().DeploymentDevices)
+			if limit > 0 && len(views) > limit {
+				views = views[:limit]
+			}
+			return printSome(a, views, max(total, len(views)), a.printer().DeploymentDevices)
 		},
 	})
 }

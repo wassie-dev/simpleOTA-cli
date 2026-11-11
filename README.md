@@ -74,7 +74,7 @@ simpleota key generate --key-id prod-2026
 # 4. Pin the printed signing_keys snippet in your firmware, then release
 simpleota release build/app.bin --version-label 1.0.0 --percent 10
 
-# 5. See which devices have it, then widen it
+# 5. Follow the rollout's device counts, then widen it
 simpleota deployment show
 simpleota deployment ramp <deployment-id> --percent 100
 ```
@@ -195,8 +195,9 @@ in the new deployment's audience (its channels and groups) whose last reported
 metadata is compatible with the build. The count does not apply the rollout
 percentage, and a device's next check-in can change it. `deployment devices`
 lists the same devices. With `--require-devices`, a count of 0 exits 4 and
-leaves the deployment active; a server too old to report the count makes it
-exit 1.
+leaves the deployment active. If the count is unknown, because the server is
+too old to report it or the request for it failed, `--require-devices` exits
+1.
 
 | Exit code | Meaning |
 | --- | --- |

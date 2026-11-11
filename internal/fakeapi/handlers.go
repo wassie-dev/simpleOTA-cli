@@ -86,7 +86,13 @@ func (s *Server) deploymentDevices(w http.ResponseWriter, r *http.Request, id st
 			return
 		}
 	}
+	if s.BeforeDevicesPage != nil {
+		s.BeforeDevicesPage(offset)
+	}
 	all := s.compatible(*d)
+	if s.DevicesPageItems != nil {
+		limit = min(limit, s.DevicesPageItems(offset, limit))
+	}
 	page := all[min(offset, len(all)):min(offset+limit, len(all))]
 	writeJSON(w, http.StatusOK, api.DeploymentDevicesPage{Count: len(all), Items: page})
 }

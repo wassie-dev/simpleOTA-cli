@@ -30,7 +30,8 @@ const compatibleHelp = `Compatible devices:
   check-in can change it. List the devices with:
     simpleota deployment devices <deployment-id>
   With --require-devices, a count of 0 exits 4 and the deployment stays
-  active. A server too old to report the count makes it exit 1 instead.`
+  active. An unknown count, from a server too old to report it or a failed
+  request for it, exits 1 instead.`
 
 // uploadHelp describes how release and build upload check, sign and send a
 // build.

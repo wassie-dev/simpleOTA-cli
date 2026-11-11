@@ -53,7 +53,7 @@ Get started:
   simpleota project use my-fleet                 choose a project
   simpleota key generate --key-id prod           make a signing key
   simpleota release app.bin --version-label 1.0  upload and deploy a build
-  simpleota deployment show                      see which devices have it
+  simpleota deployment show                      follow its device progress
 
 Most commands act on the current project; see 'simpleota project --help'.
 Add --json to any command for machine-readable output.
