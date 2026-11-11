@@ -11,9 +11,9 @@ All notable changes to simpleota are documented here. The format follows
 - Signed builds are strict-ready: after a signed upload, `release` and
   `build upload` sign a short text with the same key, naming the project,
   the key, the build number the server gave the build and its SHA-256, and
-  attach that strict signature. Devices that check it then cannot be offered an
-  old signed image under a higher build number, or another project's image
-  signed with a shared key, and devices in strict mode take them. Only the
+  attach that strict signature. Devices in strict mode take only such
+  builds, and cannot be offered an old signed image under a higher build
+  number, or another project's image signed with a shared key. Only the
   signature is sent.
 - `build make-strict <build> <bin>` makes a build uploaded earlier
   strict-ready: one whose strict signature failed after the upload, or one from an

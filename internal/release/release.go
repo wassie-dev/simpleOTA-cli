@@ -108,13 +108,16 @@ func (s Service) Upload(ctx context.Context, o Options) (Result, error) {
 	if err != nil {
 		return p.res, err
 	}
-	return s.uploadAndSignManifest(ctx, p, o.AllowDuplicate)
+	return s.uploadAndSignManifest(ctx, p, o.AllowDuplicate, nil)
 }
 
 // uploadAndSignManifest uploads a prepared build and, when it is signed,
-// signs its manifest under the build number the server gave it, which makes
-// it strict-ready.
-func (s Service) uploadAndSignManifest(ctx context.Context, p prepared, allowDuplicate bool) (Result, error) {
+// attaches its strict signature under the build number the server gave it,
+// which makes it strict-ready.
+//
+// deployTo is the release's target, or nil for an upload alone. It only
+// shapes the error when the strict signature fails.
+func (s Service) uploadAndSignManifest(ctx context.Context, p prepared, allowDuplicate bool, deployTo *Target) (Result, error) {
 	art, err := s.API.UploadArtifact(ctx, s.ProjectID, api.UploadRequest{ManifestJSON: p.manifest, FileName: p.fileName, Binary: p.binary})
 	if err != nil {
 		return p.res, s.uploadErr(ctx, err, allowDuplicate, p.req)
@@ -125,7 +128,7 @@ func (s Service) uploadAndSignManifest(ctx context.Context, p prepared, allowDup
 		return p.res, nil
 	}
 	if _, err := s.signManifest(ctx, p.key, art.ID, p.manifestOf(art.BuildNumber, s.ProjectID)); err != nil {
-		return p.res, &StrictReadyError{Build: art.BuildNumber, Err: err}
+		return p.res, &StrictReadyError{Build: art.BuildNumber, NotDeployedTo: deployTo, Err: err}
 	}
 	p.res.StrictReady = true
 	return p.res, nil
@@ -137,7 +140,7 @@ func (s Service) uploadAndSignManifest(ctx context.Context, p prepared, allowDup
 // differ.
 //
 // A signed build is uploaded, made strict-ready and only then deployed, so a
-// deployment never offers a signed build without its manifest. An unsigned
+// deployment never offers a signed build without its strict signature. An unsigned
 // build goes in one quick-release call.
 func (s Service) Release(ctx context.Context, o Options, t Target) (Result, error) {
 	if t.Percent < 0 || t.Percent > 100 {
@@ -254,7 +257,7 @@ func (s Service) prepare(ctx context.Context, o Options) (prepared, error) {
 		return p, err
 	}
 	p.res.SecurityMode = m.SecurityMode
-	p.req = request{sha: m.SHA256, label: m.VersionLabel, framework: m.Framework, chip: m.ChipFamily, security: m.SecurityMode}
+	p.req = request{sha: m.SHA256, label: m.VersionLabel, framework: m.Framework, chip: m.ChipFamily, security: m.SecurityMode, keyID: p.res.KeyID}
 	p.manifest, err = json.Marshal(m)
 	return p, err
 }

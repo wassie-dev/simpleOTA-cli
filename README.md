@@ -106,13 +106,17 @@ A signed `release` or `build upload` also makes the build strict-ready,
 with nothing extra to run: once the server has given the upload its build
 number, the CLI signs a short text with the same key, naming the project,
 the key, that build number and the image's SHA-256, and attaches that
-strict signature. A device configured with its project ID
-checks it, so a server that has been taken over cannot offer an old signed
-image as a newer build, or another project's image signed with the same key.
-Devices in strict mode (`SIMPLEOTA_SECURITY_STRICT`) take strict-ready builds
-only. If this step fails after the upload, finish with
-`simpleota build make-strict <build> <bin>`, which also works for builds
-uploaded by an older CLI.
+strict signature. A device in strict mode (`SIMPLEOTA_SECURITY_STRICT`, with
+its project ID configured) takes only such builds and checks the strict
+signature itself, so a server that has been taken over cannot offer it an old
+signed image as a newer build, or another project's image signed with the
+same key. Only strict mode gives that protection: outside it, a server can
+leave the strict signature out.
+
+If this step fails after the upload, the error names the commands that
+finish the job: `simpleota build make-strict <build> <bin>`, and for a
+release also `simpleota deployment create`. `build make-strict` also works
+for builds uploaded by an older CLI.
 
 `release` reads the chip family from the image header, which names the chip
 the image was built for. It refuses a `--chip` that differs from the header

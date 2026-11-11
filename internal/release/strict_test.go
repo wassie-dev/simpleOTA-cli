@@ -99,6 +99,45 @@ func TestSignedReleaseIsStrictReadyBeforeItDeploys(t *testing.T) {
 	checkManifest(t, fake, priv, fake.Artifacts[0], "prod-2026")
 }
 
+func TestSignedReleaseWhoseStrictSignatureFailsDeploysNothingAndSaysSo(t *testing.T) {
+	fake, svc := service(t)
+	priv := registerKey(t, fake, "prod-2026", false)
+	fake.FailNext["POST "+projectPath+"artifacts/aaaaaaaa-0000-4000-8000-000000000001/strict-signature/"] = []int{503}
+
+	_, err := svc.Release(context.Background(), release.Options{
+		BinaryPath: writeBin(t, "app.bin", firmware), VersionLabel: "1.0.0", Chip: "esp32", LoadKey: keyLoader(priv),
+	}, release.Target{Channel: "stable", Percent: 25})
+
+	var se *release.StrictReadyError
+	if !errors.As(err, &se) {
+		t.Fatalf("err = %v", err)
+	}
+	for _, want := range []string{
+		"so it was not deployed",
+		"simpleota build make-strict 1 <bin>",
+		"simpleota deployment create --build 1 --channel stable --percent 25",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q:\n%v", want, err)
+		}
+	}
+	if n := fake.Count("POST " + projectPath + "deployments/"); n != 0 {
+		t.Fatalf("deployments created = %d", n)
+	}
+}
+
+func TestDeployErrorSaysWhenTheServerDidNotAnswer(t *testing.T) {
+	target := release.Target{Channel: "my channel", Percent: 10}
+	unanswered := (&release.DeployError{Build: 7, Target: target, Err: errors.New("timeout")}).Error()
+	if !strings.Contains(unanswered, "the deployment may exist") || !strings.Contains(unanswered, "--channel 'my channel' --percent 10") {
+		t.Errorf("unanswered:\n%s", unanswered)
+	}
+	refused := (&release.DeployError{Build: 7, Target: target, Err: &api.Error{StatusCode: 400, Detail: "no"}}).Error()
+	if strings.Contains(refused, "may exist") {
+		t.Errorf("refused:\n%s", refused)
+	}
+}
+
 func TestSignedReleaseToUnknownChannelUploadsNothing(t *testing.T) {
 	fake, svc := service(t)
 	priv := registerKey(t, fake, "prod-2026", false)
@@ -123,7 +162,8 @@ func TestSignedReleaseThatCannotStartSaysWhatExists(t *testing.T) {
 	}, everyone)
 
 	var de *release.DeployError
-	if !errors.As(err, &de) || !strings.Contains(err.Error(), "simpleota deployment cancel cccccccc-0000-4000-8000-000000000001") {
+	if !errors.As(err, &de) || !strings.Contains(err.Error(), "simpleota deployment cancel cccccccc-0000-4000-8000-000000000001") ||
+		!strings.Contains(err.Error(), "simpleota deployment create --build 1 --channel stable --percent 100") {
 		t.Fatalf("err = %v", err)
 	}
 }

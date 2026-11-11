@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -14,36 +15,60 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
-// StrictReadyError means a signed build was uploaded but its manifest was not
-// attached, so devices in strict mode are not offered it.
+// StrictReadyError means a signed build was uploaded but its strict
+// signature was not attached, so devices in strict mode are not offered it.
 type StrictReadyError struct {
 	Build int
-	Err   error
+	// NotDeployedTo is set when a release stopped here, before it deployed.
+	NotDeployedTo *Target
+	Err           error
 }
 
 func (e *StrictReadyError) Error() string {
+	if t := e.NotDeployedTo; t != nil {
+		return fmt.Sprintf("build %d was uploaded but is not strict-ready, so it was not deployed: %v\nFinish with:\n  simpleota build make-strict %d <bin>\n  simpleota deployment create --build %d --channel %s --percent %d",
+			e.Build, e.Err, e.Build, e.Build, shellWord(t.Channel), t.Percent)
+	}
 	return fmt.Sprintf("build %d was uploaded but is not strict-ready: %v\nDevices in strict mode will not be offered it until it is.\nFinish with:\n  simpleota build make-strict %d <bin>", e.Build, e.Err, e.Build)
 }
 
 func (e *StrictReadyError) Unwrap() error { return e.Err }
 
-// DeployError means a build was uploaded, and made strict-ready when signed, but its
-// deployment was not created or did not start.
+// DeployError means a build was uploaded, and made strict-ready when signed,
+// but its deployment was not created or did not start.
 type DeployError struct {
 	Build        int
 	DeploymentID string
+	Target       Target
 	Err          error
 }
 
 func (e *DeployError) Error() string {
 	if e.DeploymentID == "" {
-		return fmt.Sprintf("build %d was uploaded, but its deployment was not created: %v\nDeploy it with:\n  simpleota deployment create --build %d", e.Build, e.Err, e.Build)
+		// Without an answer from the server, the deployment may exist.
+		check := ""
+		var apiErr *api.Error
+		if !errors.As(e.Err, &apiErr) {
+			check = "\nThe server did not answer, so the deployment may exist. Check first with:\n  simpleota deployment list"
+		}
+		return fmt.Sprintf("build %d was uploaded, but its deployment was not created: %v%s\nDeploy it with:\n  simpleota deployment create --build %d --channel %s --percent %d",
+			e.Build, e.Err, check, e.Build, shellWord(e.Target.Channel), e.Target.Percent)
 	}
 	id := termtext.Clean(e.DeploymentID)
-	return fmt.Sprintf("build %d was uploaded, and deployment %s was created but did not start: %v\nCancel it with:\n  simpleota deployment cancel %s", e.Build, id, e.Err, id)
+	return fmt.Sprintf("build %d was uploaded, and deployment %s was created but did not start: %v\nCancel it and deploy again with:\n  simpleota deployment cancel %s\n  simpleota deployment create --build %d --channel %s --percent %d",
+		e.Build, id, e.Err, id, e.Build, shellWord(e.Target.Channel), e.Target.Percent)
 }
 
 func (e *DeployError) Unwrap() error { return e.Err }
+
+// shellWord quotes a channel name for a command the user can paste.
+func shellWord(s string) string {
+	s = termtext.Clean(s)
+	if strings.ContainsAny(s, " \t'\"$`\\") {
+		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	}
+	return s
+}
 
 // signManifest signs m and attaches the signature to the artifact. The private
 // key stays here: only the signature is sent.
@@ -63,7 +88,7 @@ func (s Service) releaseStrictReady(ctx context.Context, p prepared, allowDuplic
 	if err != nil {
 		return p.res, err
 	}
-	res, err := s.uploadAndSignManifest(ctx, p, allowDuplicate)
+	res, err := s.uploadAndSignManifest(ctx, p, allowDuplicate, &t)
 	if err != nil {
 		return res, err
 	}
@@ -76,11 +101,11 @@ func (s Service) releaseStrictReady(ctx context.Context, p prepared, allowDuplic
 		Notes:             "Created by simpleota release.",
 	})
 	if err != nil {
-		return res, &DeployError{Build: res.BuildNumber, Err: err}
+		return res, &DeployError{Build: res.BuildNumber, Target: t, Err: err}
 	}
 	d, err := s.API.TransitionDeployment(ctx, s.ProjectID, draft.ID, api.Transition{Action: "start"})
 	if err != nil {
-		return res, &DeployError{Build: res.BuildNumber, DeploymentID: draft.ID, Err: err}
+		return res, &DeployError{Build: res.BuildNumber, DeploymentID: draft.ID, Target: t, Err: err}
 	}
 	res.DeploymentID, res.State, res.Channel = d.ID, d.State, t.Channel
 	return res, nil

@@ -36,6 +36,19 @@ func TestManifestMatchesSharedVector(t *testing.T) {
 	}
 }
 
+// Real project IDs are UUIDs, which a device configures in lowercase with
+// hyphens.
+func TestManifestKeepsTheProjectUUIDAsGiven(t *testing.T) {
+	const id = "7f3a9c1e-2b4d-4c6f-8a1b-0c9d8e7f6a5b"
+	msg, err := Manifest{ProjectID: id, KeyID: "prod-2026", Build: 3, SHA256: vectorSHA}.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "SimpleOTA-Manifest-v1\n" + id + "\nprod-2026\n3\n" + vectorSHA + "\n"; string(msg) != want {
+		t.Fatalf("manifest = %q", msg)
+	}
+}
+
 func TestManifestRefusesFieldsDevicesCannotRebuild(t *testing.T) {
 	ok := Manifest{ProjectID: "p", KeyID: "k", Build: 1, SHA256: vectorSHA}
 	for name, m := range map[string]Manifest{
