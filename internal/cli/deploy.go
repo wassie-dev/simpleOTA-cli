@@ -6,21 +6,18 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/deploy"
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
-	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 func (a *App) deploymentCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "deployment",
 		Aliases: []string{"deployments"},
-		Short:   "Create, list, watch and change deployments",
+		Short:   "Create, list, show and change deployments",
 		Long: `A deployment offers one build to devices in the current project. A device
 is offered the build if it is on a targeted channel, inside the rollout
 percentage, and able to run the build.
@@ -33,12 +30,11 @@ they run. To go back, release the previous source again as a new, higher
 build.`,
 		Example: `  simpleota deployment list
   simpleota deployment show
-  simpleota deployment wait 5f0c2b1e-... --timeout 30m
   simpleota deployment ramp 5f0c2b1e-... --percent 50`,
 		Args: cobra.ArbitraryArgs,
 		RunE: groupRun,
 	}
-	cmd.AddCommand(a.deploymentListCommand(), a.deploymentShowCommand(), a.deploymentWaitCommand(), a.deploymentCreateCommand())
+	cmd.AddCommand(a.deploymentListCommand(), a.deploymentShowCommand(), a.deploymentDevicesCommand(), a.deploymentCreateCommand())
 	for _, action := range deploy.Actions {
 		cmd.AddCommand(a.deploymentActionCommand(action))
 	}
@@ -89,40 +85,63 @@ checked in and been offered the build.`,
 	}
 }
 
-func (a *App) deploymentWaitCommand() *cobra.Command {
-	var timeout, interval time.Duration
-	cmd := &cobra.Command{
-		Use:   "wait [deployment-id]",
-		Short: "Wait for a deployment to succeed or fail, for CI",
-		Long: `Wait until a deployment succeeds or fails, and exit with a code a CI job can
-check. Without an ID, wait on the newest deployment.
+func (a *App) deploymentDevicesCommand() *cobra.Command {
+	return withLimit(&cobra.Command{
+		Use:   "devices [deployment-id]",
+		Short: "List the active devices compatible with a deployment",
+		Long: `List the active devices in a deployment's audience whose last reported
+metadata (framework, chip, board, hardware revision, partitions, NVS schema,
+security mode) is compatible with its build, ordered by device ID. These are
+the devices release and deployment create count.
 
-Exit codes:
-  0  every device the current rollout step reached has confirmed
-  4  a device failed or rolled back; the deployment is paused, cancelled or
-     not started; or it was completed before any device was offered the build
-  5  --timeout passed first
+Neither the rollout percentage nor the deployment's state is applied, so at
+10% the list still holds every compatible device. The server checks the
+metadata at the time of the request, and a device's next check-in can add it
+or remove it. A device is listed before it checks in for this deployment;
+deployment show counts only devices that have.
 
-A device counts once it has checked in and been offered the build, so the
-wait cannot finish until devices check in. Network and gateway errors are
-retried until the timeout, which also cuts short a request in flight.
-Progress goes to stderr, and the final state to stdout.`,
-		Example: `  simpleota deployment wait
-  simpleota deployment wait 5f0c2b1e-... --timeout 30m
-
-  # In CI: release, then fail the job if the rollout fails
-  ID=$(simpleota release build/app.bin --version-label 1.4.0 --json \
-    | jq -r .deployment_id)
-  simpleota deployment wait "$ID" --timeout 30m`,
+Without an ID, list them for the newest deployment.`,
+		Example: `  simpleota deployment devices
+  simpleota deployment devices 5f0c2b1e-... --json | jq -r '.[].device_id'`,
 		Args: maxArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.runDeploymentWait(cmd.Context(), firstArg(args), timeout, interval)
+			ctx := cmd.Context()
+			s, projectID, id, err := a.deploymentTarget(ctx, firstArg(args))
+			if err != nil {
+				return err
+			}
+			// A limited listing reads only the pages it shows.
+			limit := listLimit(a, cmd)
+			devices, total, err := deploy.CompatibleDevices(ctx, s.api, projectID, id, limit)
+			if err != nil {
+				return deploymentDevicesErr(ctx, s, projectID, id, err)
+			}
+			channels, err := s.api.ListChannels(ctx, projectID)
+			if err != nil {
+				return err
+			}
+			names := channelNames(channels)
+			views := viewsOf(devices, func(d api.Device) output.DeviceView { return output.NewDeviceView(d, names) })
+			// A server can serve more devices than asked for.
+			if limit > 0 && len(views) > limit {
+				views = views[:limit]
+			}
+			return printSome(a, cmd, views, max(total, len(views)), a.printer().DeploymentDevices)
 		},
+	})
+}
+
+// deploymentDevicesErr explains a 404 from the deployment device list: the
+// deployment is missing, or the server predates the list.
+func deploymentDevicesErr(ctx context.Context, s *session, projectID, id string, err error) error {
+	var ae *api.Error
+	if !errors.As(err, &ae) || ae.StatusCode != http.StatusNotFound {
+		return err
 	}
-	fl := cmd.Flags()
-	fl.DurationVar(&timeout, "timeout", 30*time.Minute, "how long to wait")
-	fl.DurationVar(&interval, "interval", 10*time.Second, "how often to poll")
-	return cmd
+	if _, getErr := s.api.GetDeployment(ctx, projectID, id); getErr != nil {
+		return deploymentErr(getErr, id)
+	}
+	return &explainedErr{msg: "the server does not list a deployment's compatible devices; it may be older than this CLI", cause: err}
 }
 
 // deploymentTarget validates an optional deployment ID, resolves the
@@ -157,71 +176,6 @@ func (a *App) runDeploymentShow(ctx context.Context, ref string) error {
 	return a.printer().DeploymentStatus(output.NewDeploymentStatusView(sum, deploy.Evaluate(sum)))
 }
 
-func (a *App) runDeploymentWait(ctx context.Context, ref string, timeout, interval time.Duration) error {
-	if timeout <= 0 {
-		return usageErr("--timeout must be positive")
-	}
-	if interval < time.Second {
-		return usageErr("--interval must be at least 1s")
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	s, projectID, id, err := a.deploymentTarget(ctx, ref)
-	if err != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s before the deployment could be found: %w", timeout, err)}
-		}
-		return err
-	}
-	p := a.printer()
-	w := deploy.Waiter{
-		API:         s.api,
-		ProjectID:   projectID,
-		Interval:    interval,
-		Timeout:     timeout,
-		Now:         a.Now,
-		Sleep:       a.Sleep,
-		OnPollError: func(err error) { p.Notice("Polling failed, retrying: %v", err) },
-	}
-	if !p.JSON {
-		w.OnProgress = p.Progress
-	}
-	sum, outcome, err := w.Wait(ctx, id)
-	if errors.Is(err, deploy.ErrNoStatus) {
-		return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s: %w", timeout, err)}
-	}
-	if err != nil {
-		return deploymentErr(err, id)
-	}
-	if err := p.DeploymentStatus(output.NewDeploymentStatusView(sum, outcome)); err != nil {
-		return err
-	}
-	return waitErr(sum, outcome, timeout)
-}
-
-// waitErr turns a wait outcome into the exit code CI gates on.
-func waitErr(sum deploy.Summary, outcome deploy.Outcome, timeout time.Duration) error {
-	d := sum.Deployment
-	switch outcome {
-	case deploy.OutcomeDeviceFailed:
-		return &exitError{code: ExitDeployment, err: fmt.Errorf("deployment %s: %s", termtext.Clean(d.ID), failureText(sum))}
-	case deploy.OutcomeStopped:
-		msg := fmt.Sprintf("deployment %s is %s", termtext.Clean(d.ID), termtext.Clean(d.State))
-		if next := output.NextStep(d); next != "" {
-			msg += "\n" + next
-		}
-		return &exitError{code: ExitDeployment, err: errors.New(msg)}
-	case deploy.OutcomeNoDevices:
-		return &exitError{code: ExitDeployment, err: fmt.Errorf("deployment %s was completed too early\nNo device was offered build %d, so none updated.", termtext.Clean(d.ID), d.ArtifactBuildNumber)}
-	case deploy.OutcomeTimedOut:
-		if sum.Counts.Offered == 0 {
-			return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s: no device has been offered build %d yet\nA device is offered it when it checks in, if it is targeted, inside the\nrollout and compatible. To see why one was not:\n  simpleota device events <device>", timeout, d.ArtifactBuildNumber)}
-		}
-		return &exitError{code: ExitTimeout, err: fmt.Errorf("timed out after %s: %d of %d offered devices confirmed", timeout, sum.Counts.Confirmed, sum.Counts.Offered)}
-	}
-	return nil
-}
-
 // notDeploymentID refuses something that cannot be a deployment ID.
 func notDeploymentID(ref string) error {
 	return usageErr("%q is not a deployment ID\nList deployments with:\n  simpleota deployment list", ref)
@@ -235,12 +189,4 @@ func deploymentErr(err error, id string) error {
 		return &exitError{code: ExitUsage, err: &explainedErr{msg: msg, cause: err}}
 	}
 	return err
-}
-
-func failureText(s deploy.Summary) string {
-	parts := make([]string, 0, len(s.Failures))
-	for _, f := range s.Failures {
-		parts = append(parts, fmt.Sprintf("device %s %s", termtext.Clean(f.Name()), termtext.Clean(strings.ReplaceAll(f.Status, "_", " "))))
-	}
-	return strings.Join(parts, "; ")
 }

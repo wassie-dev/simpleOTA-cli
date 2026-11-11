@@ -53,13 +53,14 @@ Get started:
   simpleota project use my-fleet                 choose a project
   simpleota key generate --key-id prod           make a signing key
   simpleota release app.bin --version-label 1.0  upload and deploy a build
-  simpleota deployment wait                      watch devices install it
+  simpleota deployment show                      follow its device progress
 
 Most commands act on the current project; see 'simpleota project --help'.
 Add --json to any command for machine-readable output.
 
 Exit codes: 0 success, 1 error, 2 bad usage, 3 not logged in or token
-rejected, 4 deployment failed or stopped, 5 timed out.`
+rejected, 4 no active device in the deployment's audience has compatible
+metadata (with --require-devices).`
 
 // setupHelp applies the help layout to the root command, once every command
 // has been added. Commands stay in the order they were added, which follows

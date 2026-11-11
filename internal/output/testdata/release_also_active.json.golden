@@ -21,5 +21,6 @@
       "started_at": null,
       "completed_at": null
     }
-  ]
+  ],
+  "compatible_audience_device_count": 0
 }

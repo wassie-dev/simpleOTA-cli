@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"fmt"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -14,9 +15,23 @@ import (
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
 	"github.com/wassie-dev/simpleOTA-cli/internal/release"
 	"github.com/wassie-dev/simpleOTA-cli/internal/signing"
+	"github.com/wassie-dev/simpleOTA-cli/internal/termtext"
 )
 
 const signingKeyEnv = "SIMPLEOTA_SIGNING_KEY"
+
+// compatibleHelp describes the device count that release and deployment
+// create report.
+const compatibleHelp = `Compatible devices:
+  The result gives the server's count of active devices in the deployment's
+  audience whose last reported metadata (framework, chip, board, hardware
+  revision, partitions, NVS schema, security mode) is compatible with the
+  build. It does not apply the rollout percentage, and a device's next
+  check-in can change it. List the devices with:
+    simpleota deployment devices <deployment-id>
+  With --require-devices, a count of 0 exits 4 and the deployment stays
+  active. An unknown count, from a server too old to report it or a failed
+  request for it, exits 1 instead.`
 
 // uploadHelp describes how release and build upload check, sign and send a
 // build.
@@ -139,6 +154,41 @@ func noticeUnsigned(p output.Printer, res release.Result) {
 	}
 }
 
+// requireDevicesFlag registers --require-devices.
+func requireDevicesFlag(cmd *cobra.Command, require *bool) {
+	cmd.Flags().BoolVar(require, "require-devices", false, "exit 4 if no active device in the audience has compatible metadata")
+}
+
+// errNoCount is a deployment response without
+// compatible_audience_device_count, from a server older than the CLI.
+var errNoCount = errors.New("the server did not report compatible_audience_device_count; it may be older than this CLI")
+
+// compatibleCount is the server's count from a deployment response.
+func compatibleCount(d api.Deployment) (*int, error) {
+	if d.CompatibleAudienceDeviceCount == nil {
+		return nil, errNoCount
+	}
+	return d.CompatibleAudienceDeviceCount, nil
+}
+
+// requireErr is what --require-devices does with the count. Without the flag
+// a missing count is only a notice, printed before the result.
+func requireErr(p output.Printer, require bool, deploymentID string, n *int, err error) error {
+	id := termtext.Clean(deploymentID)
+	switch {
+	case !require:
+		if err != nil {
+			p.Notice("Could not get the number of compatible devices: %v", err)
+		}
+		return nil
+	case err != nil:
+		return fmt.Errorf("--require-devices could not check deployment %s: %w\nThe deployment is active. Check it with:\n  simpleota deployment show %s", id, err, id)
+	case *n == 0:
+		return &exitError{code: ExitNoDevices, err: fmt.Errorf("deployment %s has no compatible device\nNo active device in its audience has reported metadata compatible with the\nbuild. The deployment stays active, and a device can become compatible at\nits next check-in. Cancel it with:\n  simpleota deployment cancel %s", id, id)}
+	}
+	return nil
+}
+
 // alsoActive lists the other active deployments reaching the same devices,
 // printing a notice instead of failing when the check itself fails.
 func alsoActive(ctx context.Context, p output.Printer, s *session, projectID, deploymentID, chip string) []output.DeploymentView {
@@ -153,6 +203,7 @@ func (a *App) releaseCommand() *cobra.Command {
 	var f buildFlags
 	var percent int
 	var channel string
+	var requireDevices bool
 	cmd := &cobra.Command{
 		Use:   "release <bin> --version-label <label>",
 		Short: "Sign, upload and deploy a firmware binary in one step",
@@ -167,10 +218,16 @@ If another deployment for the same chip is still active on the channel, it
 is listed. A device installs the highest build offered to it, so the older
 deployment keeps reaching the devices this one does not.
 
+` + compatibleHelp + `
+
 ` + uploadHelp,
 		Example: `  simpleota release build/app.bin --version-label 1.4.0
   simpleota release build/app.bin --version-label 1.4.1 --percent 10
-  simpleota release build/app.bin --version-label 1.4.2 --channel beta`,
+  simpleota release build/app.bin --version-label 1.4.2 --channel beta
+
+  # In CI: fail the job if no active device on the channel has compatible
+  # metadata
+  simpleota release build/app.bin --version-label 1.4.3 --require-devices`,
 		Args: exactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if percent < 0 || percent > 100 {
@@ -189,10 +246,21 @@ deployment keeps reaching the devices this one does not.
 			noticeUnsigned(p, res)
 			view := output.NewReleaseView(res)
 			view.AlsoActive = alsoActive(ctx, p, job.session, job.projectID, res.DeploymentID, res.Chip)
-			return p.Release(view)
+			// The release response has no count, so read it from the
+			// deployment.
+			d, countErr := job.session.api.GetDeployment(ctx, job.projectID, res.DeploymentID)
+			if countErr == nil {
+				view.CompatibleDevices, countErr = compatibleCount(d)
+			}
+			reqErr := requireErr(p, requireDevices, res.DeploymentID, view.CompatibleDevices, countErr)
+			if err := p.Release(view); err != nil {
+				return err
+			}
+			return reqErr
 		},
 	}
 	f.register(cmd.Flags())
+	requireDevicesFlag(cmd, &requireDevices)
 	cmd.Flags().IntVar(&percent, "percent", 100, "offer the build to `n` percent of the channel's devices")
 	cmd.Flags().StringVar(&channel, "channel", api.DefaultChannel, "`name` of the channel to deploy to; it must already exist")
 	return cmd

@@ -45,44 +45,6 @@ func TestRollout(t *testing.T) {
 	}
 }
 
-func TestStatusWaitExitCodes(t *testing.T) {
-	tests := []struct {
-		name   string
-		state  string
-		status string
-		want   int
-	}{
-		{name: "success", state: api.StateActive, status: "confirmed", want: ExitOK},
-		{name: "device failed", state: api.StateActive, status: "failed", want: ExitDeployment},
-		{name: "rolled back", state: api.StatePaused, status: "rolled_back", want: ExitDeployment},
-		{name: "paused", state: api.StatePaused, status: "confirmed", want: ExitDeployment},
-		{name: "timeout", state: api.StateActive, status: "downloaded", want: ExitTimeout},
-		{name: "completed with no devices", state: api.StateCompleted, want: ExitDeployment},
-		{name: "no devices yet", state: api.StateActive, want: ExitTimeout},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			h := newHarness(t)
-			h.login(fakeapi.ProjectToken)
-			h.fake.AddDeployment(depA, tt.state, 5, 100)
-			if tt.status != "" {
-				h.fake.SetStates(depA, api.DeviceState{DeviceID: "d1", FinalStatus: tt.status, AssignedToRollout: true})
-			}
-			r := h.run("deployment", "wait", depA, "--timeout", "30s", "--json")
-			if r.code != tt.want {
-				t.Fatalf("exit = %d, want %d: %+v", r.code, tt.want, r)
-			}
-			dec := json.NewDecoder(strings.NewReader(r.stdout))
-			var status struct {
-				Outcome string `json:"outcome"`
-			}
-			if err := dec.Decode(&status); err != nil || status.Outcome == "" {
-				t.Fatalf("stdout is not a status object: %s", r.stdout)
-			}
-		})
-	}
-}
-
 func TestStatusDefaultsToLatestDeployment(t *testing.T) {
 	h := newHarness(t)
 	h.login(fakeapi.ProjectToken)
@@ -134,7 +96,7 @@ func TestStatusNeedsLogin(t *testing.T) {
 func TestUnknownDeploymentIsExplained(t *testing.T) {
 	h := newHarness(t)
 	h.login(fakeapi.ProjectToken)
-	for _, args := range [][]string{{"deployment", "show", depA}, {"deployment", "pause", depA}, {"deployment", "wait", depA}} {
+	for _, args := range [][]string{{"deployment", "show", depA}, {"deployment", "pause", depA}} {
 		r := h.run(args...)
 		if r.code != ExitUsage || !strings.Contains(r.stderr, "no deployment aaaaaaaa") {
 			t.Errorf("%v: %+v", args, r)
@@ -153,7 +115,7 @@ func TestRejectedTokenIsExplained(t *testing.T) {
 
 func TestGroupsRejectUnknownSubcommands(t *testing.T) {
 	h := newHarness(t)
-	for _, args := range [][]string{{"deployment", "rollback", depA}, {"keys", "rotate"}} {
+	for _, args := range [][]string{{"deployment", "rollback", depA}, {"deployment", "wait", depA}, {"keys", "rotate"}} {
 		if r := h.run(args...); r.code != ExitUsage || !strings.Contains(r.stderr, "unknown command") {
 			t.Errorf("%v: %+v", args, r)
 		}
@@ -223,7 +185,7 @@ func TestServerTextCannotDriveTheTerminal(t *testing.T) {
 	h.fake.SetStates(depA, api.DeviceState{DeviceID: "dev\x1b[2J", FinalStatus: api.DeviceFailed, AssignedToRollout: true, StatusReason: hostile})
 	h.fake.Devices = []api.Device{{ID: "dddddddd-dddd-4ddd-8ddd-000000000001", DeviceID: hostile, Active: true}}
 
-	for _, args := range [][]string{{"deployment", "show", depA}, {"deployment", "wait", depA}, {"device", "list"}} {
+	for _, args := range [][]string{{"deployment", "show", depA}, {"device", "list"}} {
 		r := h.run(args...)
 		if hasTerminalControl(r.stdout) || hasTerminalControl(r.stderr) || strings.Contains(r.stdout, "\n2nd-line") {
 			t.Errorf("%v printed control characters: %q %q", args, r.stdout, r.stderr)
@@ -244,16 +206,6 @@ func TestServerTextCannotDriveTheTerminal(t *testing.T) {
 	}
 }
 
-func TestWaitErrorShowsServerIDsEscaped(t *testing.T) {
-	h := newHarness(t)
-	h.login(fakeapi.ProjectToken)
-	h.fake.AddDeployment("dep\x1b]0;PWNED\x07\nError: forged", api.StatePaused, 5, 100)
-	r := h.run("deployment", "wait")
-	if r.code != ExitDeployment || hasTerminalControl(r.stdout+r.stderr) || strings.Contains(r.stderr, "\nError: forged") {
-		t.Fatalf("%+v", r)
-	}
-}
-
 func TestFailuresNameTheReportedDeviceID(t *testing.T) {
 	h := newHarness(t)
 	h.login(fakeapi.ProjectToken)
@@ -261,8 +213,8 @@ func TestFailuresNameTheReportedDeviceID(t *testing.T) {
 	uuid := "dddddddd-dddd-4ddd-8ddd-000000000001"
 	h.fake.Devices = []api.Device{{ID: uuid, DeviceID: "lamp-kitchen"}}
 	h.fake.SetStates(depA, api.DeviceState{DeviceID: uuid, FinalStatus: api.DeviceFailed, AssignedToRollout: true, StatusReason: "boom"})
-	r := h.run("deployment", "wait", depA)
-	if r.code != ExitDeployment || !strings.Contains(r.stdout, "device lamp-kitchen failed: boom") || !strings.Contains(r.stderr, "device lamp-kitchen failed") {
+	r := h.run("deployment", "show", depA)
+	if r.code != 0 || !strings.Contains(r.stdout, "device lamp-kitchen failed: boom") {
 		t.Fatalf("%+v", r)
 	}
 	r = h.run("deployment", "show", depA, "--json")
@@ -325,13 +277,11 @@ func TestFailuresDoNotPrintAHostileDeviceID(t *testing.T) {
 	hostileID := "lamp\x1b[2J\x1b]0;PWNED\x07\rFORGED\nError: none"
 	h.fake.Devices = []api.Device{{ID: uuid, DeviceID: hostileID}}
 	h.fake.SetStates(depA, api.DeviceState{DeviceID: uuid, FinalStatus: api.DeviceFailed, AssignedToRollout: true})
-	for _, args := range [][]string{{"deployment", "wait", depA}, {"deployment", "show", depA}} {
-		r := h.run(args...)
-		if strings.ContainsAny(r.stdout+r.stderr, "\x1b\x07\r") || strings.Contains(r.stdout+r.stderr, "FORGED") || !strings.Contains(r.stdout, "device "+uuid) {
-			t.Errorf("%v: %q %q", args, r.stdout, r.stderr)
-		}
+	r := h.run("deployment", "show", depA)
+	if strings.ContainsAny(r.stdout+r.stderr, "\x1b\x07\r") || strings.Contains(r.stdout+r.stderr, "FORGED") || !strings.Contains(r.stdout, "device "+uuid) {
+		t.Errorf("%q %q", r.stdout, r.stderr)
 	}
-	r := h.run("deployment", "show", depA, "--json")
+	r = h.run("deployment", "show", depA, "--json")
 	var v struct {
 		Failures []struct {
 			Device string `json:"device"`
@@ -360,19 +310,5 @@ func TestParseErrorsStayTextWithoutJSON(t *testing.T) {
 		if r := h.run(args...); r.code != ExitUsage || r.stdout != "" || !strings.HasPrefix(r.stderr, "Error: ") {
 			t.Errorf("%v: %+v", args, r)
 		}
-	}
-}
-
-func TestWaitTimesOutWhenNoPollSucceeds(t *testing.T) {
-	h := newHarness(t)
-	h.login(fakeapi.ProjectToken)
-	h.fake.AddDeployment(depA, api.StateActive, 5, 100)
-	path := "/api/v1/projects/" + fakeapi.ProjectID + "/deployments/" + depA + "/states/"
-	for range 100 {
-		h.fake.FailNext[path] = append(h.fake.FailNext[path], 503)
-	}
-	r := h.run("deployment", "wait", depA, "--timeout", "30s", "--json")
-	if r.code != ExitTimeout || !strings.Contains(r.stdout, "could not be read before the timeout") || !strings.Contains(r.stdout, "503") {
-		t.Fatalf("%+v", r)
 	}
 }

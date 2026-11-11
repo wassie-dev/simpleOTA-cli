@@ -2,9 +2,8 @@ package deploy
 
 import (
 	"context"
-	"errors"
-	"net/http"
-	"net/http/httptest"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,87 +89,6 @@ func TestBuildTransition(t *testing.T) {
 	}
 }
 
-type fakeClock struct{ now time.Time }
-
-func (c *fakeClock) Now() time.Time { return c.now }
-func (c *fakeClock) Sleep(_ context.Context, d time.Duration) error {
-	c.now = c.now.Add(d)
-	return nil
-}
-
-func newWaiter(t *testing.T, fake *fakeapi.Server, clock *fakeClock, onSleep func(n int)) Waiter {
-	c := api.New(fake.URL, fakeapi.ProjectToken, "test", api.WithSleep(func(context.Context, time.Duration) error { return nil }))
-	n := 0
-	return Waiter{
-		API: c, ProjectID: fakeapi.ProjectID, Interval: 10 * time.Second, Timeout: time.Minute,
-		Now: clock.Now,
-		Sleep: func(ctx context.Context, d time.Duration) error {
-			n++
-			if onSleep != nil {
-				onSleep(n)
-			}
-			return clock.Sleep(ctx, d)
-		},
-	}
-}
-
-const depID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-
-func TestWaitSucceedsWhenDevicesConfirm(t *testing.T) {
-	fake := fakeapi.New(t)
-	fake.AddDeployment(depID, api.StateActive, 3, 100)
-	fake.SetStates(depID, st("offered"))
-	clock := &fakeClock{now: time.Unix(0, 0)}
-	var progress int
-	w := newWaiter(t, fake, clock, func(n int) {
-		if n == 2 {
-			fake.SetStates(depID, st("confirmed"))
-		}
-	})
-	w.OnProgress = func(Summary) { progress++ }
-	s, o, err := w.Wait(context.Background(), depID)
-	if err != nil || o != OutcomeSucceeded || s.Counts.Confirmed != 1 {
-		t.Fatalf("o=%s err=%v counts=%+v", o, err, s.Counts)
-	}
-	if progress != 2 {
-		t.Fatalf("progress callbacks = %d, want 2 (only on change)", progress)
-	}
-}
-
-func TestWaitFailsOnDeviceFailure(t *testing.T) {
-	fake := fakeapi.New(t)
-	fake.AddDeployment(depID, api.StateActive, 3, 100)
-	fake.SetStates(depID, st("failed"))
-	_, o, err := newWaiter(t, fake, &fakeClock{}, nil).Wait(context.Background(), depID)
-	if err != nil || o != OutcomeDeviceFailed {
-		t.Fatalf("o=%s err=%v", o, err)
-	}
-}
-
-func TestWaitStopsWhenPaused(t *testing.T) {
-	fake := fakeapi.New(t)
-	fake.AddDeployment(depID, api.StateActive, 3, 100)
-	w := newWaiter(t, fake, &fakeClock{}, func(int) { fake.SetDeploymentState(depID, api.StatePaused) })
-	_, o, err := w.Wait(context.Background(), depID)
-	if err != nil || o != OutcomeStopped {
-		t.Fatalf("o=%s err=%v", o, err)
-	}
-}
-
-func TestWaitTimesOut(t *testing.T) {
-	fake := fakeapi.New(t)
-	fake.AddDeployment(depID, api.StateActive, 3, 100)
-	clock := &fakeClock{now: time.Unix(0, 0)}
-	w := newWaiter(t, fake, clock, nil)
-	_, o, err := w.Wait(context.Background(), depID)
-	if err != nil || o != OutcomeTimedOut {
-		t.Fatalf("o=%s err=%v", o, err)
-	}
-	if got := clock.now.Sub(time.Unix(0, 0)); got != time.Minute {
-		t.Fatalf("waited %s, want exactly the timeout", got)
-	}
-}
-
 func TestLatest(t *testing.T) {
 	fake := fakeapi.New(t)
 	if _, err := Latest(context.Background(), api.New(fake.URL, fakeapi.ProjectToken, "t"), fakeapi.ProjectID); err == nil {
@@ -184,79 +102,150 @@ func TestLatest(t *testing.T) {
 	}
 }
 
-func TestWaitSurvivesTransientPollFailures(t *testing.T) {
+// pagedFake serves n compatible devices on stable, plus an incompatible and
+// an inactive one, for one active deployment.
+func pagedFake(t *testing.T, n int) (*fakeapi.Server, api.Deployment) {
 	fake := fakeapi.New(t)
-	fake.AddDeployment(depID, api.StateActive, 3, 100)
-	fake.SetStates(depID, st("confirmed"))
-	fake.FailNext["/api/v1/projects/"+fakeapi.ProjectID+"/deployments/"+depID+"/"] = []int{503, 503, 503}
-	var pollErrors int
-	w := newWaiter(t, fake, &fakeClock{}, nil)
-	w.OnPollError = func(error) { pollErrors++ }
-	_, o, err := w.Wait(context.Background(), depID)
-	if err != nil || o != OutcomeSucceeded || pollErrors != 1 {
-		t.Fatalf("o=%s err=%v pollErrors=%d", o, err, pollErrors)
+	d := fake.AddDeployment("11111111-0000-4000-8000-000000000001", api.StateActive, 1, 10)
+	stable := fakeapi.StableChannelID
+	for i := range n + 2 {
+		fake.Devices = append(fake.Devices, api.Device{ID: fmt.Sprintf("dev-%04d", i), DeviceID: fmt.Sprintf("mac-%04d", n+2-i), Active: true, ChannelID: &stable})
+	}
+	fake.Incompatible["dev-0000"] = true
+	fake.Devices[1].Active = false
+	return fake, d
+}
+
+func compatibleDevices(t *testing.T, fake *fakeapi.Server, d api.Deployment, max int) ([]api.Device, int, error) {
+	t.Helper()
+	// The deadline turns a pager that never stops into a failure.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return CompatibleDevices(ctx, api.New(fake.URL, fakeapi.ProjectToken, "t"), fakeapi.ProjectID, d.ID, max)
+}
+
+func pageRequests(fake *fakeapi.Server, d api.Deployment) int {
+	return fake.Count("GET /api/v1/projects/" + fakeapi.ProjectID + "/deployments/" + d.ID + "/devices/")
+}
+
+// wantAll checks got is the n devices pagedFake serves, once each, in
+// device_id order.
+func wantAll(t *testing.T, got []api.Device, n int) {
+	t.Helper()
+	if len(got) != n {
+		t.Fatalf("got %d devices, want %d", len(got), n)
+	}
+	for i, dev := range got {
+		if want := fmt.Sprintf("mac-%04d", i+1); dev.DeviceID != want {
+			t.Fatalf("device %d is %s, want %s", i, dev.DeviceID, want)
+		}
 	}
 }
 
-func TestWaitStopsOnPermanentError(t *testing.T) {
-	fake := fakeapi.New(t)
-	_, _, err := newWaiter(t, fake, &fakeClock{}, nil).Wait(context.Background(), depID)
-	var ae *api.Error
-	if !errors.As(err, &ae) || ae.StatusCode != 404 {
-		t.Fatalf("err = %v, want the 404", err)
+func TestCompatibleDevicesReadsEveryPage(t *testing.T) {
+	const n = 2*devicesPageSize + 3
+	fake, d := pagedFake(t, n)
+	got, total, err := compatibleDevices(t, fake, d, 0)
+	if err != nil || total != n {
+		t.Fatalf("total %d, %v", total, err)
+	}
+	wantAll(t, got, n)
+	if c := pageRequests(fake, d); c != 3 {
+		t.Fatalf("%d requests, want 3", c)
 	}
 }
 
-func TestWaitReturnsErrorWhenNoPollEverSucceeded(t *testing.T) {
-	fake := fakeapi.New(t)
-	fake.AddDeployment(depID, api.StateActive, 3, 100)
-	path := "/api/v1/projects/" + fakeapi.ProjectID + "/deployments/" + depID + "/"
-	for i := 0; i < 30; i++ {
-		fake.FailNext[path] = append(fake.FailNext[path], 503)
+// A page can be short while more devices follow, for instance when the
+// server leaves out a device deleted while it built the page.
+func TestCompatibleDevicesContinuesAfterAShortPage(t *testing.T) {
+	const n = 2*devicesPageSize + 3
+	fake, d := pagedFake(t, n)
+	fake.DevicesPageItems = func(offset, limit int) int {
+		if offset == devicesPageSize {
+			return 200
+		}
+		return limit
 	}
-	_, o, err := newWaiter(t, fake, &fakeClock{now: time.Unix(0, 0)}, nil).Wait(context.Background(), depID)
-	var ae *api.Error
-	if o != OutcomeTimedOut || !errors.Is(err, ErrNoStatus) || !errors.As(err, &ae) || ae.StatusCode != 503 {
-		t.Fatalf("o=%s err=%v, want a timeout wrapping the poll error", o, err)
+	got, _, err := compatibleDevices(t, fake, d, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, got, n)
+}
+
+func TestCompatibleDevicesFollowsALowerServerMaximum(t *testing.T) {
+	const n = 250
+	fake, d := pagedFake(t, n)
+	fake.DevicesPageItems = func(_, limit int) int { return min(limit, 100) }
+	got, _, err := compatibleDevices(t, fake, d, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, got, n)
+	if c := pageRequests(fake, d); c != 3 {
+		t.Fatalf("%d requests, want 3", c)
 	}
 }
 
-// hangingWaiter waits on a server that never answers, with the real
-// transport, its retries and the real clock.
-func hangingWaiter(t *testing.T, timeout time.Duration) Waiter {
-	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
-	t.Cleanup(srv.Close)
-	return Waiter{
-		API: api.New(srv.URL, fakeapi.ProjectToken, "test"), ProjectID: fakeapi.ProjectID,
-		Interval: time.Second, Timeout: timeout, Now: time.Now,
-		Sleep: func(ctx context.Context, d time.Duration) error {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(d):
-				return nil
-			}
-		},
+// A device that joins before the offset between two pages shifts the second
+// page back by one, so its first device was already on the first page.
+func TestCompatibleDevicesListsAShiftedDeviceOnce(t *testing.T) {
+	const n = devicesPageSize + 10
+	fake, d := pagedFake(t, n)
+	stable := fakeapi.StableChannelID
+	fake.BeforeDevicesPage = func(offset int) {
+		if offset == devicesPageSize {
+			fake.Devices = append(fake.Devices, api.Device{ID: "dev-new", DeviceID: "mac-0000", Active: true, ChannelID: &stable})
+		}
+	}
+	got, _, err := compatibleDevices(t, fake, d, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, got, n)
+}
+
+func TestCompatibleDevicesStopsOnAnEmptyPage(t *testing.T) {
+	const n = 2*devicesPageSize + 3
+	fake, d := pagedFake(t, n)
+	fake.DevicesPageItems = func(offset, limit int) int {
+		if offset > 0 {
+			return 0
+		}
+		return limit
+	}
+	if _, _, err := compatibleDevices(t, fake, d, 0); err == nil || !strings.Contains(err.Error(), "no devices at offset 500 of 1003") {
+		t.Fatalf("err = %v", err)
+	}
+	if c := pageRequests(fake, d); c != 2 {
+		t.Fatalf("%d requests, want 2", c)
 	}
 }
 
-func TestWaitTimeoutCutsShortAHungRequest(t *testing.T) {
-	start := time.Now()
-	_, o, err := hangingWaiter(t, 300*time.Millisecond).Wait(context.Background(), depID)
-	if o != OutcomeTimedOut || !errors.Is(err, ErrNoStatus) {
-		t.Fatalf("o=%s err=%v", o, err)
+// The total is the count when the listing began, even if later pages count
+// differently.
+func TestCompatibleDevicesTotalComesFromTheFirstPage(t *testing.T) {
+	const n = devicesPageSize + 100
+	fake, d := pagedFake(t, n)
+	fake.BeforeDevicesPage = func(offset int) {
+		if offset > 0 {
+			fake.Devices = fake.Devices[:len(fake.Devices)-10]
+		}
 	}
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Fatalf("waited %s for a 300ms timeout", elapsed)
+	got, total, err := compatibleDevices(t, fake, d, 0)
+	if err != nil || total != n || len(got) != n-10 {
+		t.Fatalf("total %d, %d devices, %v; want total %d, %d devices", total, len(got), err, n, n-10)
 	}
 }
 
-func TestWaitStopsPromptlyWhenCancelled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	time.AfterFunc(200*time.Millisecond, cancel)
-	start := time.Now()
-	_, o, err := hangingWaiter(t, time.Hour).Wait(ctx, depID)
-	if o != OutcomeInProgress || !errors.Is(err, context.Canceled) || time.Since(start) > 5*time.Second {
-		t.Fatalf("o=%s err=%v after %s", o, err, time.Since(start))
+func TestCompatibleDevicesReadsOnlyWhatMaxNeeds(t *testing.T) {
+	const n = 2*devicesPageSize + 3
+	fake, d := pagedFake(t, n)
+	got, total, err := compatibleDevices(t, fake, d, 20)
+	if err != nil || total != n || len(got) != 20 || got[19].DeviceID != "mac-0020" {
+		t.Fatalf("got %d devices, total %d, %v", len(got), total, err)
+	}
+	if c := pageRequests(fake, d); c != 1 {
+		t.Fatalf("%d requests, want 1", c)
 	}
 }

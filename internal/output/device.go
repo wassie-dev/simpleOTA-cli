@@ -86,6 +86,15 @@ func (p Printer) DeviceList(devices []DeviceView) error {
 	return p.table([]string{"DEVICE", "NAME", "CHIP", "BUILD", "CHANNEL", "STATE", "LAST SEEN"}, rows)
 }
 
+// DeploymentDevices prints deployment devices.
+func (p Printer) DeploymentDevices(devices []DeviceView) error {
+	if len(devices) == 0 && !p.JSON {
+		fmt.Fprintln(p.Out, "No active device in the deployment's audience has metadata compatible with\nits build. A device's next check-in can change this.")
+		return nil
+	}
+	return p.DeviceList(devices)
+}
+
 // DeviceShow prints device show.
 func (p Printer) DeviceShow(d DeviceView) error {
 	if p.JSON {

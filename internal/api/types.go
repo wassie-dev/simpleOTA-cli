@@ -128,6 +128,18 @@ type Deployment struct {
 	StartedAt           *time.Time `json:"started_at"`
 	CompletedAt         *time.Time `json:"completed_at"`
 	CreatedAt           time.Time  `json:"created_at"`
+	// CompatibleAudienceDeviceCount is the server's count of active devices
+	// in the audience whose stored metadata is compatible with the build. It
+	// ignores the rollout percentage. Only create, show and transition
+	// responses carry it, and a server without it leaves it nil.
+	CompatibleAudienceDeviceCount *int `json:"compatible_audience_device_count,omitempty"`
+}
+
+// DeploymentDevicesPage is one page of the devices a deployment's
+// CompatibleAudienceDeviceCount counts. Count covers every page.
+type DeploymentDevicesPage struct {
+	Count int      `json:"count"`
+	Items []Device `json:"items"`
 }
 
 // DefaultChannel is the channel every project starts with, and the one

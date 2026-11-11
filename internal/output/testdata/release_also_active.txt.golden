@@ -1,5 +1,7 @@
 Released build 42 for esp32s3 (signed with key prod-2026)
   deployment  5f0c2b1e-1d2c-4b7a-9a3e-0123456789ab (active, channel stable)
+  devices     no active device in the audience has compatible metadata
+              (rollout percentage not applied; a check-in can change this)
   sha256      ab12
   size        1024 bytes
 
@@ -9,5 +11,5 @@ Each device installs the highest build offered to it, so these keep reaching
 the devices build 42 does not. To stop one:
   simpleota deployment complete <id>
 
-Watch it:
-  simpleota deployment wait 5f0c2b1e-1d2c-4b7a-9a3e-0123456789ab
+Check on it:
+  simpleota deployment show 5f0c2b1e-1d2c-4b7a-9a3e-0123456789ab

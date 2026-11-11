@@ -10,7 +10,7 @@ import (
 const defaultListLimit = 20
 
 // withLimit gives a list command its --limit flag and says what it defaults
-// to. The server has no pagination, so printList cuts the full listing.
+// to. printList cuts a full listing; the server pages only a few lists.
 func withLimit(cmd *cobra.Command) *cobra.Command {
 	cmd.Long += fmt.Sprintf("\n\nBy default this shows %d rows as text, and every row as JSON.", defaultListLimit)
 	cmd.Flags().Int("limit", defaultListLimit, "show at most `n` rows, or 0 for all")
@@ -23,23 +23,34 @@ func withLimit(cmd *cobra.Command) *cobra.Command {
 	return cmd
 }
 
-// printList renders rows up to the --limit flag, and says when it left some
-// out. JSON stays complete unless --limit was given, because a script would
-// not see that note and would carry on with part of the data.
-func printList[T any](a *App, cmd *cobra.Command, rows []T, render func([]T) error) error {
-	limit, _ := cmd.Flags().GetInt("limit")
+// listLimit is how many rows a list command shows, or 0 for all. JSON stays
+// complete unless --limit was given, because a script would not see the
+// note that rows were left out and would carry on with part of the data.
+func listLimit(a *App, cmd *cobra.Command) int {
 	if a.flags.json && !cmd.Flags().Changed("limit") {
-		limit = 0
+		return 0
 	}
+	limit, _ := cmd.Flags().GetInt("limit")
+	return limit
+}
+
+// printList renders rows up to the --limit flag, and says when it left some
+// out.
+func printList[T any](a *App, cmd *cobra.Command, rows []T, render func([]T) error) error {
 	shown := rows
-	if limit > 0 && len(rows) > limit {
+	if limit := listLimit(a, cmd); limit > 0 && len(rows) > limit {
 		shown = rows[:limit]
 	}
-	if err := render(shown); err != nil {
+	return printSome(a, cmd, shown, len(rows), render)
+}
+
+// printSome renders rows, and says when --limit left out some of total.
+func printSome[T any](a *App, cmd *cobra.Command, rows []T, total int, render func([]T) error) error {
+	if err := render(rows); err != nil {
 		return err
 	}
-	if len(shown) < len(rows) && !a.flags.json {
-		a.printer().Notice("\nShowing %d of %d. Use --limit <n> for more, or --limit 0 for all.", len(shown), len(rows))
+	if listLimit(a, cmd) > 0 && len(rows) < total && !a.flags.json {
+		a.printer().Notice("\nShowing %d of %d. Use --limit <n> for more, or --limit 0 for all.", len(rows), total)
 	}
 	return nil
 }

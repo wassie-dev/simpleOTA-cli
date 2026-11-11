@@ -74,8 +74,8 @@ simpleota key generate --key-id prod-2026
 # 4. Pin the printed signing_keys snippet in your firmware, then release
 simpleota release build/app.bin --version-label 1.0.0 --percent 10
 
-# 5. Watch devices take it, then widen it
-simpleota deployment wait --timeout 30m
+# 5. Follow the rollout's device counts, then widen it
+simpleota deployment show
 simpleota deployment ramp <deployment-id> --percent 100
 ```
 
@@ -150,8 +150,8 @@ simpleota
 ├── project   list | show [slug|id] | use <slug|id>
 ├── build     list | show <n> | upload <bin> | archive <n> | unarchive <n>
 ├── deployment
-│   ├── list | show [id] | wait [id] [--timeout]
-│   ├── create --build <n> [--channel]... [--group]... [--all-devices] [--percent]
+│   ├── list | show [id] | devices [id]
+│   ├── create --build <n> [--channel]... [--group]... [--all-devices] [--percent] [--require-devices]
 │   ├── ramp <id> --percent <n> | pause | complete | cancel <id>
 │   └── resume <id> [--all-devices]
 ├── device    list [--channel] [--group] [--state] | show <device>
@@ -174,8 +174,8 @@ simpleota
 | `build upload` | Sign and upload a build without deploying it; checked like `release` |
 | `build archive\|unarchive` | Take a build out of service, or return it |
 | `deployment list\|show` | List deployments, or show one's state and device progress |
+| `deployment devices` | List the active devices in a deployment's audience whose reported metadata is compatible with its build, before the rollout percentage |
 | `deployment create` | Deploy an uploaded build to channels (stable by default), groups, or every device, and start it |
-| `deployment wait` | Wait for a deployment to succeed or fail; gates CI |
 | `deployment ramp\|pause\|resume\|complete\|cancel` | Change a deployment's state. Resuming a deployment for every device in a project with two or more devices needs `--all-devices` |
 | `device list\|show` | List devices, filtered by channel, group or state, or show one |
 | `device events` | Show a device's recent update checks and why it was or was not offered a build |
@@ -190,10 +190,14 @@ Global flags: `--json` ([schema](docs/json.md)), `--api-url`, `--project`.
 `list` commands show 20 rows as text and say when there are more: `--limit <n>`
 changes that, and `--limit 0` shows all. With `--json` they return every row
 unless you pass `--limit`.
-`deployment wait` exits 0 once every device the current step reached has
-confirmed, and counts a device once it has checked in and been offered the
-build. A deployment completed before any device was offered the build exits
-4, since no device updated.
+`release` and `deployment create` report the server's count of active devices
+in the new deployment's audience (its channels and groups) whose last reported
+metadata is compatible with the build. The count does not apply the rollout
+percentage, and a device's next check-in can change it. `deployment devices`
+lists the same devices. With `--require-devices`, a count of 0 exits 4 and
+leaves the deployment active. If the count is unknown, because the server is
+too old to report it or the request for it failed, `--require-devices` exits
+1.
 
 | Exit code | Meaning |
 | --- | --- |
@@ -201,8 +205,7 @@ build. A deployment completed before any device was offered the build exits
 | 1 | Error, or the command was interrupted (for `status`: the API could not be reached) |
 | 2 | Usage error, including no current project when the token sees several (for `status`: the chosen project cannot be found) |
 | 3 | Not logged in, or the token was rejected (`status` too) |
-| 4 | A device failed or rolled back, the deployment is paused, cancelled or not started, or it was completed before any device was offered the build |
-| 5 | `deployment wait` timed out, including when the server did not answer in time |
+| 4 | With `--require-devices`, no active device in the deployment's audience has compatible metadata |
 
 | Variable | Use |
 | --- | --- |
@@ -222,6 +225,11 @@ Make an `api`-scoped project token in the dashboard, and export the key once
 with `simpleota key export`. Store both as secrets, and put `simpleota` on
 the runner's PATH from the releases page.
 
+Devices may check in only once a day, so a CI job does not wait for them.
+`--require-devices` fails the job when no active device in the audience has
+reported metadata compatible with the build. Follow the rollout afterwards
+with `simpleota deployment show`.
+
 GitHub Actions:
 
 ```yaml
@@ -230,9 +238,7 @@ GitHub Actions:
     SIMPLEOTA_TOKEN: ${{ secrets.SIMPLEOTA_TOKEN }}
     SIMPLEOTA_SIGNING_KEY: ${{ secrets.SIMPLEOTA_SIGNING_KEY }}
     SIMPLEOTA_SIGNING_KEY_PASSPHRASE: ${{ secrets.SIMPLEOTA_SIGNING_KEY_PASSPHRASE }}
-  run: |
-    ID=$(simpleota release build/app.bin --version-label "${GITHUB_REF_NAME}" --percent 10 --json | jq -r .deployment_id)
-    simpleota deployment wait "$ID" --timeout 30m
+  run: simpleota release build/app.bin --version-label "${GITHUB_REF_NAME}" --percent 10 --require-devices
 ```
 
 GitLab CI:
@@ -240,8 +246,7 @@ GitLab CI:
 ```yaml
 release:
   script:
-    - ID=$(simpleota release build/app.bin --version-label "$CI_COMMIT_TAG" --percent 10 --json | jq -r .deployment_id)
-    - simpleota deployment wait "$ID" --timeout 30m
+    - simpleota release build/app.bin --version-label "$CI_COMMIT_TAG" --percent 10 --require-devices
 ```
 
 ## Development

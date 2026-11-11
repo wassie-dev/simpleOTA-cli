@@ -91,6 +91,21 @@ type Server struct {
 	// answer with these statuses instead, one per request. 0 closes the
 	// connection without a reply.
 	LoseReply map[string][]int
+	// Incompatible holds the UUIDs of devices whose metadata does not pass
+	// the server's compatibility check, so they are left out of
+	// compatible_audience_device_count and the deployment's device list.
+	Incompatible map[string]bool
+	// NoCompatibleCount answers as a server from before
+	// compatible_audience_device_count: deployments lack the field and the
+	// deployment device list is 404.
+	NoCompatibleCount bool
+	// DevicesPageItems, if set, gives how many devices to serve for a page
+	// of the deployment device list asked for with offset and limit, even
+	// more than limit; count stays the full total.
+	DevicesPageItems func(offset, limit int) int
+	// BeforeDevicesPage, if set, runs before each page of the deployment
+	// device list is built, with Mu held, so a test can change the devices.
+	BeforeDevicesPage func(offset int)
 
 	clock int
 }
@@ -110,6 +125,7 @@ func New(t *testing.T) *Server {
 		Requests:      map[string]int{},
 		FailNext:      map[string][]int{},
 		LoseReply:     map[string][]int{},
+		Incompatible:  map[string]bool{},
 	}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	t.Cleanup(s.Close)
@@ -298,10 +314,12 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.Deployments)
 	case len(parts) == 4 && parts[2] == "deployments" && r.Method == http.MethodGet:
 		if d := s.deployment(parts[3]); d != nil {
-			writeJSON(w, http.StatusOK, d)
+			writeJSON(w, http.StatusOK, s.withCount(*d))
 			return
 		}
 		detail(w, http.StatusNotFound, "Not Found")
+	case len(parts) == 5 && parts[2] == "deployments" && parts[4] == "devices" && r.Method == http.MethodGet && !s.NoCompatibleCount:
+		s.deploymentDevices(w, r, parts[3])
 	case len(parts) == 5 && parts[2] == "deployments" && parts[4] == "states" && r.Method == http.MethodGet:
 		states := s.States[parts[3]]
 		if states == nil {
