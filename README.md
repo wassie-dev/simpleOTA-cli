@@ -102,6 +102,22 @@ run's snippet holds both. If registering the public key fails without a clear
 refusal from the server, the encrypted key is kept: run the same command again
 to finish.
 
+A signed `release` or `build upload` also makes the build strict-ready,
+with nothing extra to run: once the server has given the upload its build
+number, the CLI signs a short text with the same key, naming the project,
+the key, that build number and the image's SHA-256, and attaches that
+strict signature. A device in strict mode (`SIMPLEOTA_SECURITY_STRICT`, with
+its project ID configured) takes only such builds and checks the strict
+signature itself, so a server that has been taken over cannot offer it an old
+signed image as a newer build, or another project's image signed with the
+same key. Only strict mode gives that protection: outside it, a server can
+leave the strict signature out.
+
+If this step fails after the upload, the error names the commands that
+finish the job: `simpleota build make-strict <build> <bin>`, and for a
+release also `simpleota deployment create`. `build make-strict` also works
+for builds uploaded by an older CLI.
+
 `release` reads the chip family from the image header, which names the chip
 the image was built for. It refuses a `--chip` that differs from the header
 unless a device in the project reports that chip, since no other device would
@@ -148,7 +164,8 @@ simpleota
 ├── login | logout | status | update [--check] [--version <v>]
 ├── release <bin> --version-label <v>    sign, upload and deploy in one call
 ├── project   list | show [slug|id] | use <slug|id>
-├── build     list | show <n> | upload <bin> | archive <n> | unarchive <n>
+├── build     list | show <n> | upload <bin> | make-strict <n> <bin>
+│             archive <n> | unarchive <n>
 ├── deployment
 │   ├── list | show [id] | wait [id] [--timeout]
 │   ├── create --build <n> [--channel]... [--group]... [--all-devices] [--percent]
@@ -172,6 +189,7 @@ simpleota
 | `project list\|show\|use` | List projects, show one, or choose the current project |
 | `build list\|show` | List the project's builds (the API calls them artifacts) or show one by build number |
 | `build upload` | Sign and upload a build without deploying it; checked like `release` |
+| `build make-strict` | Make a signed build uploaded earlier strict-ready, with the key that signed it |
 | `build archive\|unarchive` | Take a build out of service, or return it |
 | `deployment list\|show` | List deployments, or show one's state and device progress |
 | `deployment create` | Deploy an uploaded build to channels (stable by default), groups, or every device, and start it |

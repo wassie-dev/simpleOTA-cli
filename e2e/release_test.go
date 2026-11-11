@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -28,6 +29,7 @@ type releaseOut struct {
 	ArtifactID   string `json:"artifact_id"`
 	SecurityMode string `json:"security_mode"`
 	KeyID        string `json:"key_id"`
+	StrictReady  bool   `json:"strict_ready"`
 	SHA256       string `json:"sha256"`
 	Chip         string `json:"chip"`
 	AlsoActive   []struct {
@@ -95,9 +97,20 @@ func TestSignedReleaseAndTamperedSignature(t *testing.T) {
 	ci := ciCLI(t)
 	ci.extra["SIMPLEOTA_SIGNING_KEY"] = exported
 	ci.extra["SIMPLEOTA_SIGNING_KEY_PASSPHRASE"] = "e2e passphrase long"
-	out := release(t, ci)
-	if out.SecurityMode != "signed" || out.KeyID != keyID {
+	signedBin := firmware(t)
+	out := release0(t, ci, []string{"release", signedBin, "--version-label", "e2e-" + uid(), "--chip", "esp32", "--json"})
+	t.Cleanup(func() { cancelDeployment(t, out.DeploymentID) })
+	if out.SecurityMode != "signed" || out.KeyID != keyID || !out.StrictReady {
 		t.Fatalf("release: %+v", out)
+	}
+	// The server checked the manifest signature and shows the build strict-ready;
+	// making it strict-ready again is accepted and changes nothing.
+	again := decode[struct {
+		StrictReady bool   `json:"strict_ready"`
+		KeyID       string `json:"key_id"`
+	}](t, ci.mustRun("build", "make-strict", strconv.Itoa(out.BuildNumber), signedBin, "--json").stdout)
+	if !again.StrictReady || again.KeyID != keyID {
+		t.Fatalf("make-strict again: %+v", again)
 	}
 
 	// Sign one binary, then change a byte: the server must reject it.

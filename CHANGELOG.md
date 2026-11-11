@@ -6,6 +6,33 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Signed builds are strict-ready: after a signed upload, `release` and
+  `build upload` sign a short text with the same key, naming the project,
+  the key, the build number the server gave the build and its SHA-256, and
+  attach that strict signature. Devices in strict mode take only such
+  builds, and cannot be offered an old signed image under a higher build
+  number, or another project's image signed with a shared key. Only the
+  signature is sent.
+- `build make-strict <build> <bin>` makes a build uploaded earlier
+  strict-ready: one whose strict signature failed after the upload, or one from an
+  older CLI.
+- `build list`, `build show` and the `release` and `build upload` results show
+  whether a build is strict-ready (`strict_ready` in `--json`), and `build show` names
+  the key that signed it (`key_id`).
+- The `key generate` snippet ends with a commented `cfg.project_id` line, for
+  clients with API 1.2.
+
+### Changed
+
+- A signed `release` uploads, makes the build strict-ready and then creates and starts the
+  deployment, instead of using one quick-release call, so a deployment never
+  offers a signed build without its strict signature. The channel is checked before the
+  upload. If the deployment is not created or does not start, the error names
+  the build and the command to finish with. Unsigned releases still use one
+  call. This needs a server with the strict-signature endpoint.
+
 ### Fixed
 
 - `deployment resume` can resume a paused deployment that targets every

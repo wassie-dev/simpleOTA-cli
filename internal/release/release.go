@@ -1,5 +1,5 @@
-// Package release checks, signs and uploads a firmware build, and deploys it
-// with one quick-release call.
+// Package release checks, signs and uploads a firmware build, makes a signed
+// build strict-ready, and deploys it.
 package release
 
 import (
@@ -72,9 +72,11 @@ type Result struct {
 	Channel      string
 	SecurityMode string
 	KeyID        string
-	Chip         string
-	SHA256       string
-	Size         int64
+	// StrictReady is true once the build's signed manifest is attached.
+	StrictReady bool
+	Chip        string
+	SHA256      string
+	Size        int64
 }
 
 // API is the part of the developer API that uploads need.
@@ -86,7 +88,10 @@ type API interface {
 	ListChannels(ctx context.Context, projectID string) ([]api.Channel, error)
 	ListDevices(ctx context.Context, projectID string, f api.DeviceFilter) ([]api.Device, error)
 	UploadArtifact(ctx context.Context, projectID string, req api.UploadRequest) (api.Artifact, error)
+	AttachManifest(ctx context.Context, projectID, artifactID string, in api.ManifestRequest) (api.Artifact, error)
 	Release(ctx context.Context, projectID string, req api.ReleaseRequest) (api.ReleaseResult, error)
+	CreateDeployment(ctx context.Context, projectID string, in api.DeploymentRequest) (api.Deployment, error)
+	TransitionDeployment(ctx context.Context, projectID, deploymentID string, t api.Transition) (api.Deployment, error)
 }
 
 // Service runs releases for one project.
@@ -96,18 +101,36 @@ type Service struct {
 }
 
 // Upload checks, signs when a key is set, and uploads a build without
-// deploying it. Like Release, the upload is sent once and never retried.
+// deploying it. A signed build is then made strict-ready. Like Release, the upload is
+// sent once and never retried.
 func (s Service) Upload(ctx context.Context, o Options) (Result, error) {
 	p, err := s.prepare(ctx, o)
 	if err != nil {
 		return p.res, err
 	}
+	return s.uploadAndSignManifest(ctx, p, o.AllowDuplicate, nil)
+}
+
+// uploadAndSignManifest uploads a prepared build and, when it is signed,
+// attaches its strict signature under the build number the server gave it,
+// which makes it strict-ready.
+//
+// deployTo is the release's target, or nil for an upload alone. It only
+// shapes the error when the strict signature fails.
+func (s Service) uploadAndSignManifest(ctx context.Context, p prepared, allowDuplicate bool, deployTo *Target) (Result, error) {
 	art, err := s.API.UploadArtifact(ctx, s.ProjectID, api.UploadRequest{ManifestJSON: p.manifest, FileName: p.fileName, Binary: p.binary})
 	if err != nil {
-		return p.res, s.uploadErr(ctx, err, o.AllowDuplicate, p.req)
+		return p.res, s.uploadErr(ctx, err, allowDuplicate, p.req)
 	}
 	p.res.BuildNumber = art.BuildNumber
 	p.res.ArtifactID = art.ID
+	if p.key == nil {
+		return p.res, nil
+	}
+	if _, err := s.signManifest(ctx, p.key, art.ID, p.manifestOf(art.BuildNumber, s.ProjectID)); err != nil {
+		return p.res, &StrictReadyError{Build: art.BuildNumber, NotDeployedTo: deployTo, Err: err}
+	}
+	p.res.StrictReady = true
 	return p.res, nil
 }
 
@@ -115,6 +138,10 @@ func (s Service) Upload(ctx context.Context, o Options) (Result, error) {
 // is sent once and never retried. The manifest carries the binary's
 // SHA-256, so the server rejects the upload if the bytes it received
 // differ.
+//
+// A signed build is uploaded, made strict-ready and only then deployed, so a
+// deployment never offers a signed build without its strict signature. An unsigned
+// build goes in one quick-release call.
 func (s Service) Release(ctx context.Context, o Options, t Target) (Result, error) {
 	if t.Percent < 0 || t.Percent > 100 {
 		return Result{}, errors.New("--percent must be between 0 and 100")
@@ -125,6 +152,9 @@ func (s Service) Release(ctx context.Context, o Options, t Target) (Result, erro
 	p, err := s.prepare(ctx, o)
 	if err != nil {
 		return p.res, err
+	}
+	if p.key != nil {
+		return s.releaseStrictReady(ctx, p, o.AllowDuplicate, t)
 	}
 	out, err := s.API.Release(ctx, s.ProjectID, api.ReleaseRequest{
 		ManifestJSON:      p.manifest,
@@ -150,8 +180,16 @@ type prepared struct {
 	binary   []byte
 	fileName string
 	manifest []byte
-	res      Result
-	req      request
+	// key signed the image, or is nil for a basic build.
+	key ed25519.PrivateKey
+	res Result
+	req request
+}
+
+// manifestOf is the signed manifest of this build once the server has
+// numbered it.
+func (p prepared) manifestOf(build int, projectID string) signing.Manifest {
+	return signing.Manifest{ProjectID: strings.ToLower(projectID), KeyID: p.res.KeyID, Build: build, SHA256: p.res.SHA256}
 }
 
 // prepare reads the binary, settles its chip, refuses a duplicate, and
@@ -213,12 +251,13 @@ func (s Service) prepare(ctx context.Context, o Options) (prepared, error) {
 			Signature: signing.Sign(key, binary),
 		}
 		p.res.KeyID = keyID
+		p.key = key
 	}
 	if err := m.Validate(); err != nil {
 		return p, err
 	}
 	p.res.SecurityMode = m.SecurityMode
-	p.req = request{sha: m.SHA256, label: m.VersionLabel, framework: m.Framework, chip: m.ChipFamily, security: m.SecurityMode}
+	p.req = request{sha: m.SHA256, label: m.VersionLabel, framework: m.Framework, chip: m.ChipFamily, security: m.SecurityMode, keyID: p.res.KeyID}
 	p.manifest, err = json.Marshal(m)
 	return p, err
 }

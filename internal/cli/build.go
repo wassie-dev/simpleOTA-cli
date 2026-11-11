@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/output"
+	"github.com/wassie-dev/simpleOTA-cli/internal/release"
 )
 
 func (a *App) buildCommand() *cobra.Command {
@@ -24,6 +25,7 @@ service.`,
 		Example: `  simpleota build list
   simpleota build show 42
   simpleota build upload build/app.bin --version-label 1.4.0
+  simpleota build make-strict 42 build/app.bin
   simpleota build archive 41`,
 		Args: cobra.ArbitraryArgs,
 		RunE: groupRun,
@@ -68,7 +70,7 @@ warnings from the upload.`,
 			}
 			return a.printer().BuildShow(output.NewBuildView(art))
 		},
-	}, a.buildUploadCommand(), a.buildArchiveCommand(true), a.buildArchiveCommand(false))
+	}, a.buildUploadCommand(), a.buildMakeStrictCommand(), a.buildArchiveCommand(true), a.buildArchiveCommand(false))
 	return cmd
 }
 
@@ -98,6 +100,54 @@ deploying it. To deploy it later, use 'simpleota deployment create'.
 		},
 	}
 	f.register(cmd.Flags())
+	return cmd
+}
+
+func (a *App) buildMakeStrictCommand() *cobra.Command {
+	var keyFile string
+	cmd := &cobra.Command{
+		Use:   "make-strict <build-number> <bin>",
+		Short: "Make a signed build uploaded earlier strict-ready",
+		Long: `Make a signed build strict-ready, so that devices in strict mode are
+offered it. Release and build upload do this themselves; use this when that
+step failed after the upload, or for a build uploaded by an older CLI.
+
+This signs the build's project, key, build number and SHA-256 with the key
+that signed the image, and attaches that strict signature.
+
+The file must be the build's own binary, and the key the one that signed it.
+Only the signature is sent. Running it again for a build changes nothing.
+
+The key is found as for release: --key-file, then SIMPLEOTA_SIGNING_KEY,
+then the default key from 'simpleota key generate'.`,
+		Example: `  simpleota build make-strict 42 build/app.bin`,
+		Args:    exactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			number, err := strconv.Atoi(args[0])
+			if err != nil || number < 1 {
+				return usageErr("%q is not a build number\nList builds with:\n  simpleota build list", args[0])
+			}
+			s, projectID, err := a.projectSession(ctx)
+			if err != nil {
+				return err
+			}
+			key, err := a.loadSigningKey(keyFile, s.cfg.SigningKeyFile)
+			if err != nil {
+				return err
+			}
+			if key == nil {
+				return usageErr("make-strict needs the build's signing key\nPass --key-file, or set %s.", signingKeyEnv)
+			}
+			svc := release.Service{API: s.api, ProjectID: projectID}
+			art, err := svc.MakeStrict(ctx, key, number, args[1])
+			if err != nil {
+				return err
+			}
+			return a.printer().BuildShow(output.NewBuildView(art))
+		},
+	}
+	cmd.Flags().StringVar(&keyFile, "key-file", "", "`path` of the signing key file")
 	return cmd
 }
 
