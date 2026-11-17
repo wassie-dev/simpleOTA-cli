@@ -135,7 +135,7 @@ func TestHelpAtEveryLevel(t *testing.T) {
 	h := newHarness(t)
 	for _, args := range [][]string{
 		{"--help"}, {"project"}, {"build", "--help"}, {"deployment"}, {"device"}, {"channel"}, {"key"},
-		{"deployment", "wait", "--help"}, {"deployment", "ramp", "--help"}, {"project", "use", "--help"},
+		{"deployment", "create", "--help"}, {"deployment", "ramp", "--help"}, {"project", "use", "--help"},
 	} {
 		r := h.run(args...)
 		if r.code != 0 || !strings.Contains(r.stdout, "Usage:") || len(r.stdout) < 400 {

@@ -1,5 +1,6 @@
-// Package deploy changes deployment state and summarises and waits on
-// per-device rollout progress.
+// Package deploy changes deployment state, lists the devices whose metadata
+// is compatible with a deployment, and summarises per-device rollout
+// progress.
 package deploy
 
 import (
@@ -7,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
@@ -19,6 +19,7 @@ type API interface {
 	GetDeployment(ctx context.Context, projectID, deploymentID string) (api.Deployment, error)
 	ListDeploymentStates(ctx context.Context, projectID, deploymentID string) ([]api.DeviceState, error)
 	ListDevices(ctx context.Context, projectID string, f api.DeviceFilter) ([]api.Device, error)
+	ListDeploymentDevices(ctx context.Context, projectID, deploymentID string, limit, offset int) (api.DeploymentDevicesPage, error)
 }
 
 // ActionStart starts a draft deployment. deployment create sends it; it is
@@ -135,7 +136,7 @@ func Summarize(d api.Deployment, states []api.DeviceState) Summary {
 	return s
 }
 
-// Outcome is the wait verdict for a summary.
+// Outcome is the verdict for a summary.
 type Outcome string
 
 const (
@@ -144,10 +145,9 @@ const (
 	OutcomeDeviceFailed Outcome = "device_failed"
 	OutcomeStopped      Outcome = "stopped"
 	OutcomeNoDevices    Outcome = "no_devices"
-	OutcomeTimedOut     Outcome = "timed_out"
 )
 
-// Evaluate applies the deployment wait rule: success once every device the current
+// Evaluate gives a summary's verdict: success once every device the current
 // step reached has confirmed; failure on any failed or rolled-back device,
 // when the deployment is no longer running, or when it was completed before
 // any device was offered the build.
@@ -212,81 +212,4 @@ func (f Failure) Name() string {
 		return f.Device
 	}
 	return f.DeviceID
-}
-
-// Waiter polls a deployment until Evaluate reaches a verdict or the timeout
-// passes.
-type Waiter struct {
-	API        API
-	ProjectID  string
-	Interval   time.Duration
-	Timeout    time.Duration
-	Now        func() time.Time
-	Sleep      func(context.Context, time.Duration) error
-	OnProgress func(Summary)
-	// OnPollError is called when a poll fails transiently and waiting goes on.
-	OnPollError func(error)
-}
-
-// ErrNoStatus means the timeout passed before any poll succeeded. It wraps
-// the last poll error.
-var ErrNoStatus = errors.New("the deployment could not be read before the timeout")
-
-// Wait returns the last summary and its outcome. The outcome is
-// OutcomeTimedOut when the timeout, or a deadline on ctx, passes first; the
-// timeout also cuts short a request or retry in flight. A transient poll
-// failure (network, 429, 5xx gateway errors) does not end the wait; any
-// other error does. When the timeout passes before any poll succeeded, the
-// error wraps ErrNoStatus and the last poll error.
-func (w Waiter) Wait(ctx context.Context, deploymentID string) (Summary, Outcome, error) {
-	deadline := w.Now().Add(w.Timeout)
-	ctx, cancel := context.WithTimeout(ctx, w.Timeout)
-	defer cancel()
-	var last Summary
-	var lastCounts *Counts
-	var lastErr error
-	read := false
-	timedOut := func() (Summary, Outcome, error) {
-		if !read {
-			return last, OutcomeTimedOut, fmt.Errorf("%w: %w", ErrNoStatus, lastErr)
-		}
-		return last, OutcomeTimedOut, nil
-	}
-	for {
-		s, err := Status(ctx, w.API, w.ProjectID, deploymentID)
-		switch {
-		case err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
-			if lastErr == nil {
-				lastErr = err
-			}
-			return timedOut()
-		case err == nil:
-			last, lastErr, read = s, nil, true
-			if w.OnProgress != nil && (lastCounts == nil || *lastCounts != s.Counts) {
-				c := s.Counts
-				lastCounts = &c
-				w.OnProgress(s)
-			}
-			if o := Evaluate(s); o != OutcomeInProgress {
-				return s, o, nil
-			}
-		case api.IsTransient(err) && ctx.Err() == nil:
-			lastErr = err
-			if w.OnPollError != nil {
-				w.OnPollError(err)
-			}
-		default:
-			return last, OutcomeInProgress, err
-		}
-		remaining := deadline.Sub(w.Now())
-		if remaining <= 0 {
-			return timedOut()
-		}
-		if err := w.Sleep(ctx, min(w.Interval, remaining)); err != nil {
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return timedOut()
-			}
-			return last, OutcomeInProgress, err
-		}
-	}
 }

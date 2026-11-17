@@ -12,7 +12,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -35,12 +34,14 @@ const (
 
 // Exit codes.
 const (
-	ExitOK         = 0
-	ExitError      = 1
-	ExitUsage      = 2
-	ExitAuth       = 3
-	ExitDeployment = 4
-	ExitTimeout    = 5
+	ExitOK    = 0
+	ExitError = 1
+	ExitUsage = 2
+	ExitAuth  = 3
+	// ExitNoDevices is for release and deployment create with
+	// --require-devices, when no active device in the deployment's audience
+	// has compatible metadata.
+	ExitNoDevices = 4
 )
 
 // exitError carries a specific exit code. A quiet one is not printed,
@@ -76,9 +77,6 @@ type App struct {
 	// Color enables ANSI colour in human output.
 	Color bool
 
-	Now   func() time.Time
-	Sleep func(context.Context, time.Duration) error
-
 	// CurrentVersion, Executable and UpdateSource override how update finds
 	// this binary and new releases; nil selects the real ones.
 	CurrentVersion func() string
@@ -106,8 +104,6 @@ func NewApp() *App {
 		Getenv:          os.Getenv,
 		StdinIsTerminal: stdinTTY,
 		Color:           stdoutTTY && os.Getenv("NO_COLOR") == "",
-		Now:             time.Now,
-		Sleep:           sleepCtx,
 	}
 	if stdinTTY {
 		a.Prompt = terminalPrompt(os.Stdin, os.Stderr)
@@ -127,17 +123,6 @@ func terminalPrompt(in *os.File, w io.Writer) func(string) (string, error) {
 			return "", fmt.Errorf("reading input: %w", err)
 		}
 		return string(b), nil
-	}
-}
-
-func sleepCtx(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
 	}
 }
 

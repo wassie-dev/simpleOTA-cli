@@ -33,6 +33,26 @@ All notable changes to simpleota are documented here. The format follows
   the build and the command to finish with. Unsigned releases still use one
   call. This needs a server with the strict-signature endpoint.
 
+## [0.1.4] - 2026-11-11
+
+### Added
+
+- `release` and `deployment create` report the server's count of active
+  devices in the new deployment's audience whose last reported metadata is
+  compatible with the build, in text and as
+  `compatible_audience_device_count` in `--json`. The count does not apply the
+  rollout percentage, and a device's next check-in can change it.
+  `--require-devices` makes them exit 4 when the count is 0. A server too old
+  to report it leaves the count `null`, and `--require-devices` then exits 1.
+- `deployment devices [id]` lists the devices that count includes, reading
+  every page from the server.
+
+### Removed
+
+- `deployment wait`. Devices may check in once a day, so CI cannot wait for
+  them; use `--require-devices` on `release` or `deployment create`, and
+  `deployment show` to follow a rollout.
+
 ### Fixed
 
 - `deployment resume` can resume a paused deployment that targets every
@@ -84,9 +104,9 @@ All notable changes to simpleota are documented here. The format follows
 
 - An unknown deployment ID exits with code 2, like an unknown build or
   device, instead of 1.
-- `deployment wait --timeout` now bounds the whole command, including a
-  request or retry in flight, and exits 5 when it passes. Against a server that
-  did not answer, it ran about 90 seconds past the timeout and exited 1.
+- Times in text output end in `UTC`, the zone they were always shown in.
+- Exit code 4 now means only that `--require-devices` found no active device
+  in the audience with compatible metadata. Exit code 5 is no longer used.
 - On Windows, two `simpleota` commands saving the config or the credentials
   file at the same moment could fail with "Access is denied". The save now
   retries for up to a second.
@@ -235,7 +255,8 @@ project. Commands that changed name or behaviour are listed under Changed.
 - `install.sh` and `install.ps1`: one-line install and update scripts,
   published with each release, that verify the download's checksum.
 
-[Unreleased]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.0...v0.1.1

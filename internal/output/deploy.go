@@ -60,8 +60,12 @@ type CreatedView struct {
 	Deployment DeploymentView `json:"deployment"`
 	// Targets names the channels and groups the deployment reaches; empty
 	// means every device in the project.
-	Targets    []string         `json:"targets"`
-	AlsoActive []DeploymentView `json:"also_active"`
+	Targets []string `json:"targets"`
+	// CompatibleDevices is the server's count of active devices in the
+	// audience whose metadata is compatible with the build, before the
+	// rollout percentage, or nil when it is not known.
+	CompatibleDevices *int             `json:"compatible_audience_device_count"`
+	AlsoActive        []DeploymentView `json:"also_active"`
 }
 
 // Created prints the result of deployment create.
@@ -76,9 +80,26 @@ func (p Printer) Created(v CreatedView) error {
 	}
 	fmt.Fprintf(p.Out, "%s deployment %s\n", p.green("Started"), termtext.Clean(d.ID))
 	fmt.Fprintf(p.Out, "  build    %d, offered to %d%% of %s\n", d.BuildNumber, d.RolloutPercentage, audience)
+	p.compatible("  devices  ", v.CompatibleDevices)
 	p.alsoActive(v.AlsoActive, d.BuildNumber)
-	p.nextStep("Watch it", "simpleota deployment wait "+termtext.Clean(d.ID))
+	p.nextStep("Check on it", "simpleota deployment show "+termtext.Clean(d.ID))
 	return nil
+}
+
+// compatible prints the compatible device count after label, if it is known.
+func (p Printer) compatible(label string, n *int) {
+	if n == nil {
+		return
+	}
+	switch *n {
+	case 0:
+		fmt.Fprintf(p.Out, "%s%s\n", label, p.yellow("no active device in the audience has compatible metadata"))
+	case 1:
+		fmt.Fprintf(p.Out, "%s1 active device in the audience has compatible metadata\n", label)
+	default:
+		fmt.Fprintf(p.Out, "%s%d active devices in the audience have compatible metadata\n", label, *n)
+	}
+	fmt.Fprintf(p.Out, "%s(rollout percentage not applied; a check-in can change this)\n", strings.Repeat(" ", len(label)))
 }
 
 // alsoActive explains the other active deployments that still reach some
@@ -125,7 +146,7 @@ func NextStep(d api.Deployment) string {
 	return ""
 }
 
-// DeploymentStatusView is the result of deployment show and deployment wait.
+// DeploymentStatusView is the result of deployment show.
 type DeploymentStatusView struct {
 	Deployment DeploymentView   `json:"deployment"`
 	Devices    deploy.Counts    `json:"devices"`
@@ -168,15 +189,8 @@ func (p Printer) DeploymentStatus(v DeploymentStatusView) error {
 		fmt.Fprintln(p.Out, p.yellow("The deployment is not running."))
 	case deploy.OutcomeNoDevices:
 		fmt.Fprintln(p.Out, p.yellow("The deployment was completed before any device was offered the build."))
-	case deploy.OutcomeTimedOut:
-		fmt.Fprintln(p.Out, p.yellow("Timed out before every device confirmed."))
 	}
 	return nil
-}
-
-// Progress is the one-line update printed to Err while waiting.
-func (p Printer) Progress(s deploy.Summary) {
-	p.Notice("%s  %s, %d%%: %s", time.Now().Format("15:04:05"), termtext.Clean(s.Deployment.State), s.Deployment.RolloutPercentage, p.counts(s.Counts))
 }
 
 func (p Printer) counts(c deploy.Counts) string {

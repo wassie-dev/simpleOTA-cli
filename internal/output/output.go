@@ -114,13 +114,13 @@ func indentRest(s string, columns int) string {
 	return strings.ReplaceAll(s, "\n", "\n"+strings.Repeat(" ", columns))
 }
 
-// when formats a time for a table, in UTC so output does not depend on the
-// machine's zone.
+// when formats a time for text output, in UTC and labelled as such so output
+// does not depend on the machine's zone.
 func when(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.UTC().Format("2006-01-02 15:04")
+	return t.UTC().Format("2006-01-02 15:04 UTC")
 }
 
 // whenPtr is when for an optional time.

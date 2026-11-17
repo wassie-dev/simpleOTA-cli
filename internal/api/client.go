@@ -27,6 +27,7 @@ type API interface {
 	GetDeployment(ctx context.Context, projectID, deploymentID string) (Deployment, error)
 	TransitionDeployment(ctx context.Context, projectID, deploymentID string, t Transition) (Deployment, error)
 	ListDeploymentStates(ctx context.Context, projectID, deploymentID string) ([]DeviceState, error)
+	ListDeploymentDevices(ctx context.Context, projectID, deploymentID string, limit, offset int) (DeploymentDevicesPage, error)
 	UploadArtifact(ctx context.Context, projectID string, req UploadRequest) (Artifact, error)
 	UpdateArtifact(ctx context.Context, projectID, artifactID string, archived bool) (Artifact, error)
 	AttachManifest(ctx context.Context, projectID, artifactID string, in ManifestRequest) (Artifact, error)
@@ -154,6 +155,12 @@ func (c *Client) TransitionDeployment(ctx context.Context, projectID, deployment
 func (c *Client) ListDeploymentStates(ctx context.Context, projectID, deploymentID string) ([]DeviceState, error) {
 	var out []DeviceState
 	return out, c.get(ctx, projectPath(projectID, "deployments", deploymentID, "states"), &out)
+}
+
+func (c *Client) ListDeploymentDevices(ctx context.Context, projectID, deploymentID string, limit, offset int) (DeploymentDevicesPage, error) {
+	var out DeploymentDevicesPage
+	q := url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}}
+	return out, c.get(ctx, projectPath(projectID, "deployments", deploymentID, "devices")+"?"+q.Encode(), &out)
 }
 
 // Release uploads the binary and starts a deployment in one request. It is

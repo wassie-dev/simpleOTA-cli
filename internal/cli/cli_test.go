@@ -65,12 +65,6 @@ func (h *harness) run(args ...string) result {
 			return api.New(u, tok, "test", api.WithSleep(func(context.Context, time.Duration) error { return nil }))
 		},
 	}
-	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	a.Now = func() time.Time { return now }
-	a.Sleep = func(_ context.Context, d time.Duration) error {
-		now = now.Add(d)
-		return nil
-	}
 	if prompts != nil {
 		a.StdinIsTerminal = true
 		a.Prompt = func(label string) (string, error) {

@@ -136,11 +136,7 @@ func TestSuggestedCommandsAreOnTheirOwnLine(t *testing.T) {
 		t.Fatalf("not logged in: %+v", r)
 	}
 	h.login(fakeapi.ProjectToken)
-	h.fake.AddDeployment(depA, api.StatePaused, 5, 100)
-	r = h.run("deployment", "wait", depA)
-	if r.code != ExitDeployment || !strings.Contains(r.stderr, "is paused\nTo ship a fix") || !strings.Contains(r.stderr, "new build:\n  simpleota release <bin>") {
-		t.Fatalf("paused: %+v", r)
-	}
+	h.fake.AddDeployment(depA, api.StateActive, 5, 100)
 	r = h.run("deployment", "pause", depA)
 	if !strings.Contains(r.stdout, "\n\nTo ship a fix") || !strings.Contains(r.stdout, ":\n  simpleota release <bin> --version-label <label>\n") {
 		t.Fatalf("next step: %+v", r)
