@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/wassie-dev/simpleOTA-cli/internal/api"
 	"github.com/wassie-dev/simpleOTA-cli/internal/fakeapi"
+	"github.com/wassie-dev/simpleOTA-cli/internal/signing"
 )
 
 const (
@@ -109,6 +111,36 @@ func TestReleaseRequireDevicesFailsOnAZeroCount(t *testing.T) {
 	}
 	if d := h.fake.Deployments[0]; d.ID != id || d.State != api.StateActive {
 		t.Fatalf("the deployment should be left active: %+v", d)
+	}
+}
+
+// A signed release uploads, attaches the strict signature, then creates and
+// starts the deployment itself, so --require-devices must read the count of
+// the deployment that path started.
+func TestSignedReleaseRequireDevicesFailsOnAZeroCount(t *testing.T) {
+	h := compatibleHarness(t)
+	h.fake.Incompatible[fleet()[0].ID] = true
+	priv, _ := signing.Generate()
+	pub, _ := signing.PublicKeyPEM(priv.Public().(ed25519.PublicKey))
+	h.fake.SigningKeys = append(h.fake.SigningKeys, api.SigningKey{KeyID: "ci-key", PublicKeyPEM: pub})
+	plain, _ := signing.PrivateKeyPEM(priv)
+	h.env[signingKeyEnv] = string(plain)
+
+	r := h.run("release", writeFirmware(t), "--version-label", "1", "--chip", "esp32", "--require-devices", "--json")
+	objs := jsonObjects(t, r.stdout)
+	if r.code != ExitNoDevices || len(objs) != 2 {
+		t.Fatalf("signed release: %+v", r)
+	}
+	id, _ := objs[0]["deployment_id"].(string)
+	if objs[0]["compatible_audience_device_count"] != 0.0 || id == "" || objs[1]["exit_code"] != float64(ExitNoDevices) {
+		t.Fatalf("signed release: %+v", objs)
+	}
+	if len(h.fake.Deployments) != 1 {
+		t.Fatalf("deployments: %+v", h.fake.Deployments)
+	}
+	d := h.fake.Deployments[0]
+	if d.ID != id || d.State != api.StateActive || h.fake.ManifestSignatures[d.ArtifactID] == "" || h.fake.LastManifest.SecurityMode != "signed" {
+		t.Fatalf("want an active deployment of a strict-ready signed build: %+v", d)
 	}
 }
 
