@@ -6,32 +6,38 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-18
+
 ### Added
 
 - Signed builds are strict-ready: after a signed upload, `release` and
   `build upload` sign a short text with the same key, naming the project,
   the key, the build number the server gave the build and its SHA-256, and
-  attach that strict signature. Devices in strict mode take only such
-  builds, and cannot be offered an old signed image under a higher build
-  number, or another project's image signed with a shared key. Only the
-  signature is sent.
+  attach that strict signature. Only the signature is sent. Strict mode is
+  part of client API 1.2, and no released client has it yet. Once a client
+  has it, a device in strict mode takes only such builds, and cannot be
+  offered an old signed image under a higher build number, or another
+  project's image signed with a shared key.
 - `build make-strict <build> <bin>` makes a build uploaded earlier
-  strict-ready: one whose strict signature failed after the upload, or one from an
-  older CLI.
-- `build list`, `build show` and the `release` and `build upload` results show
-  whether a build is strict-ready (`strict_ready` in `--json`), and `build show` names
-  the key that signed it (`key_id`).
+  strict-ready: one whose strict signature failed after the upload, or one
+  from an older CLI.
+- `build show` and the `release` and `build upload` results say whether a
+  build is strict-ready, and `build show` names the key that signed it.
+  With `--json`, these and `build list` have `strict_ready`, and
+  `build show` has `key_id`. The plain-text `build list` table does not
+  show strict readiness.
 - The `key generate` snippet ends with a commented `cfg.project_id` line, for
   clients with API 1.2.
 
 ### Changed
 
-- A signed `release` uploads, makes the build strict-ready and then creates and starts the
-  deployment, instead of using one quick-release call, so a deployment never
-  offers a signed build without its strict signature. The channel is checked before the
-  upload. If the deployment is not created or does not start, the error names
-  the build and the command to finish with. Unsigned releases still use one
-  call. This needs a server with the strict-signature endpoint.
+- A signed `release` uploads, makes the build strict-ready and then creates
+  and starts the deployment, instead of using one quick-release call, so a
+  deployment never offers a signed build without its strict signature. The
+  channel is checked before the upload. If the deployment is not created or
+  does not start, the error names the build and the command to finish with.
+  Unsigned releases still use one call. This needs a server with the
+  strict-signature endpoint.
 
 ## [0.1.4] - 2026-11-11
 
@@ -255,7 +261,8 @@ project. Commands that changed name or behaviour are listed under Changed.
 - `install.sh` and `install.ps1`: one-line install and update scripts,
   published with each release, that verify the download's checksum.
 
-[Unreleased]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.1...v0.1.2
