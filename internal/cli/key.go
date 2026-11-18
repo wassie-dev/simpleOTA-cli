@@ -181,7 +181,7 @@ func (a *App) runKeyGenerate(ctx context.Context, keyID, out string) error {
 		PublicKeyPEM:      publicPEM,
 		PrivateKeyFile:    out,
 		DefaultSigningKey: isDefault,
-		FirmwareSnippet:   signing.FirmwareSnippet(pinned...),
+		FirmwareSnippet:   signing.FirmwareSnippet(projectID, pinned...),
 		PinnedKeyIDs:      make([]string, len(pinned)),
 	}
 	for i, k := range pinned {

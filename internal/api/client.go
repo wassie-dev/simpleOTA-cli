@@ -30,6 +30,7 @@ type API interface {
 	ListDeploymentDevices(ctx context.Context, projectID, deploymentID string, limit, offset int) (DeploymentDevicesPage, error)
 	UploadArtifact(ctx context.Context, projectID string, req UploadRequest) (Artifact, error)
 	UpdateArtifact(ctx context.Context, projectID, artifactID string, archived bool) (Artifact, error)
+	AttachManifest(ctx context.Context, projectID, artifactID string, in ManifestRequest) (Artifact, error)
 	CreateDeployment(ctx context.Context, projectID string, in DeploymentRequest) (Deployment, error)
 	UpdateDevice(ctx context.Context, projectID, deviceID string, in DeviceUpdate) (Device, error)
 	ListCheckEvents(ctx context.Context, projectID, deviceID string, limit int) ([]CheckEvent, error)
@@ -185,6 +186,13 @@ func (c *Client) UploadArtifact(ctx context.Context, projectID string, req Uploa
 func (c *Client) UpdateArtifact(ctx context.Context, projectID, artifactID string, archived bool) (Artifact, error) {
 	var out Artifact
 	return out, c.sendJSON(ctx, http.MethodPatch, projectPath(projectID, "artifacts", artifactID), map[string]bool{"archived": archived}, &out)
+}
+
+// AttachManifest attaches a build's manifest signature. The server accepts
+// the same signature again unchanged, so a failed call can be repeated.
+func (c *Client) AttachManifest(ctx context.Context, projectID, artifactID string, in ManifestRequest) (Artifact, error) {
+	var out Artifact
+	return out, c.sendJSON(ctx, http.MethodPost, projectPath(projectID, "artifacts", artifactID, "strict-signature"), in, &out)
 }
 
 func (c *Client) CreateDeployment(ctx context.Context, projectID string, in DeploymentRequest) (Deployment, error) {

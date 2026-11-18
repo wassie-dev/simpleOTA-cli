@@ -14,6 +14,8 @@ import (
 // request is what an upload asked the server to create.
 type request struct {
 	sha, label, framework, chip, security string
+	// keyID is the key a signed request was signed with.
+	keyID string
 	// target is set for a release, which also deploys.
 	target *Target
 }
@@ -75,9 +77,6 @@ func (s Service) candidates(ctx context.Context, req request) (string, error) {
 			b.WriteString("\n    no deployment")
 		}
 	}
-	if req.security == "signed" {
-		b.WriteString("\n  The server does not show which key signed a build, so the key is not compared.")
-	}
 	return b.String(), nil
 }
 
@@ -100,6 +99,10 @@ func buildDiffs(a api.Artifact, req request) []string {
 	}
 	if a.SecurityMode != req.security {
 		d = append(d, fmt.Sprintf("security %q, not %q", a.SecurityMode, req.security))
+	}
+	// An older server does not say which key signed a build.
+	if a.SigningKeyID != "" && req.keyID != "" && a.SigningKeyID != req.keyID {
+		d = append(d, fmt.Sprintf("key %q, not %q", termtext.Clean(a.SigningKeyID), req.keyID))
 	}
 	if a.ChipFamily != req.chip {
 		d = append(d, fmt.Sprintf("chip %q, not %q", a.ChipFamily, req.chip))

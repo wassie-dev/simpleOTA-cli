@@ -12,7 +12,7 @@ import (
 func TestReleaseGolden(t *testing.T) {
 	r := NewReleaseView(release.Result{
 		BuildNumber: 42, ArtifactID: "art", DeploymentID: "5f0c2b1e-1d2c-4b7a-9a3e-0123456789ab", State: "active", Channel: "stable",
-		SecurityMode: "signed", KeyID: "prod-2026", Chip: "esp32s3", SHA256: "ab12", Size: 1024,
+		SecurityMode: "signed", KeyID: "prod-2026", StrictReady: true, Chip: "esp32s3", SHA256: "ab12", Size: 1024,
 	})
 	three, none := 3, 0
 	r.CompatibleDevices = &three
