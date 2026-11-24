@@ -18,9 +18,9 @@ func (a *App) deviceCommand() *cobra.Command {
 		Use:     "device",
 		Aliases: []string{"devices"},
 		Short:   "List, inspect and update devices",
-		Long: `A device is one board in the current project's fleet. Devices register
-themselves the first time their firmware checks in, and report their build,
-chip and compatibility on every check.
+		Long: `A device is one board in the current project's fleet. It is created in the
+dashboard, or registers itself the first time its firmware checks in. It
+reports its build, chip and compatibility on every check.
 
 Name a device by the device ID its firmware reports, such as a MAC address,
 or by its SimpleOTA UUID. A device created in the dashboard has no device ID

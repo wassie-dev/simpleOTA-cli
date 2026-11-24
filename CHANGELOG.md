@@ -10,8 +10,9 @@ All notable changes to simpleota are documented here. The format follows
 
 - A device created in the dashboard has no device ID until it checks in.
   `device list` now shows `(not saved yet)` in its DEVICE column, and
-  `device show` names it by its name and shows `(not saved yet)` as its
-  device ID. With `--json`, its `device_id` is `null`, not `""`.
+  `device show` names it by its name, or by its UUID when it has no name,
+  and shows `(not saved yet)` as its device ID. With `--json`, its
+  `device_id` is `null`, not `""`.
 - An empty or blank device argument, such as `device show ""`, no longer
   matches a device without a device ID.
 - The empty `device list` message no longer says devices appear only once

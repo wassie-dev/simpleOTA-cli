@@ -99,7 +99,7 @@ func (p Printer) DeviceList(devices []DeviceView) error {
 		return p.WriteJSON(devices)
 	}
 	if len(devices) == 0 {
-		fmt.Fprintln(p.Out, "No devices match. A device appears once it is created in the dashboard or checks in.")
+		fmt.Fprintln(p.Out, "No devices match. A device appears once it is created in the dashboard or\nchecks in.")
 		return nil
 	}
 	rows := make([][]string, len(devices))
