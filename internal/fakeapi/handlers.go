@@ -51,7 +51,7 @@ func (s *Server) compatible(d api.Deployment) []api.Device {
 			out = append(out, dev)
 		}
 	}
-	slices.SortStableFunc(out, func(a, b api.Device) int { return strings.Compare(a.DeviceID, b.DeviceID) })
+	slices.SortStableFunc(out, api.CompareDeviceIDs)
 	return out
 }
 

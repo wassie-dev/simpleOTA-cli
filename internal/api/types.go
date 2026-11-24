@@ -2,6 +2,7 @@ package api
 
 import (
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -71,10 +72,12 @@ type Artifact struct {
 	Warnings    []string  `json:"warnings"`
 }
 
-// Device mirrors DeviceOut.
+// Device mirrors DeviceOut. DeviceID is the ID the device's firmware
+// reports, nil for a device created in the dashboard until a check-in saves
+// its ID.
 type Device struct {
 	ID                  string     `json:"id"`
-	DeviceID            string     `json:"device_id"`
+	DeviceID            *string    `json:"device_id"`
 	Name                string     `json:"name"`
 	Framework           string     `json:"framework"`
 	ChipFamily          string     `json:"chip_family"`
@@ -94,6 +97,20 @@ type Device struct {
 	CheckState          string     `json:"check_state"`
 	ChannelID           *string    `json:"channel_id"`
 	GroupIDs            []string   `json:"group_ids"`
+}
+
+// CompareDeviceIDs orders devices by device ID, with devices that have none
+// first.
+func CompareDeviceIDs(a, b Device) int {
+	switch {
+	case a.DeviceID == nil && b.DeviceID == nil:
+		return 0
+	case a.DeviceID == nil:
+		return -1
+	case b.DeviceID == nil:
+		return 1
+	}
+	return strings.Compare(*a.DeviceID, *b.DeviceID)
 }
 
 // DeviceFilter narrows a device listing; empty fields do not filter.

@@ -109,7 +109,7 @@ func pagedFake(t *testing.T, n int) (*fakeapi.Server, api.Deployment) {
 	d := fake.AddDeployment("11111111-0000-4000-8000-000000000001", api.StateActive, 1, 10)
 	stable := fakeapi.StableChannelID
 	for i := range n + 2 {
-		fake.Devices = append(fake.Devices, api.Device{ID: fmt.Sprintf("dev-%04d", i), DeviceID: fmt.Sprintf("mac-%04d", n+2-i), Active: true, ChannelID: &stable})
+		fake.Devices = append(fake.Devices, api.Device{ID: fmt.Sprintf("dev-%04d", i), DeviceID: new(fmt.Sprintf("mac-%04d", n+2-i)), Active: true, ChannelID: &stable})
 	}
 	fake.Incompatible["dev-0000"] = true
 	fake.Devices[1].Active = false
@@ -136,8 +136,8 @@ func wantAll(t *testing.T, got []api.Device, n int) {
 		t.Fatalf("got %d devices, want %d", len(got), n)
 	}
 	for i, dev := range got {
-		if want := fmt.Sprintf("mac-%04d", i+1); dev.DeviceID != want {
-			t.Fatalf("device %d is %s, want %s", i, dev.DeviceID, want)
+		if want := fmt.Sprintf("mac-%04d", i+1); *dev.DeviceID != want {
+			t.Fatalf("device %d is %s, want %s", i, *dev.DeviceID, want)
 		}
 	}
 }
@@ -195,7 +195,7 @@ func TestCompatibleDevicesListsAShiftedDeviceOnce(t *testing.T) {
 	stable := fakeapi.StableChannelID
 	fake.BeforeDevicesPage = func(offset int) {
 		if offset == devicesPageSize {
-			fake.Devices = append(fake.Devices, api.Device{ID: "dev-new", DeviceID: "mac-0000", Active: true, ChannelID: &stable})
+			fake.Devices = append(fake.Devices, api.Device{ID: "dev-new", DeviceID: new("mac-0000"), Active: true, ChannelID: &stable})
 		}
 	}
 	got, _, err := compatibleDevices(t, fake, d, 0)
@@ -242,7 +242,7 @@ func TestCompatibleDevicesReadsOnlyWhatMaxNeeds(t *testing.T) {
 	const n = 2*devicesPageSize + 3
 	fake, d := pagedFake(t, n)
 	got, total, err := compatibleDevices(t, fake, d, 20)
-	if err != nil || total != n || len(got) != 20 || got[19].DeviceID != "mac-0020" {
+	if err != nil || total != n || len(got) != 20 || *got[19].DeviceID != "mac-0020" {
 		t.Fatalf("got %d devices, total %d, %v", len(got), total, err)
 	}
 	if c := pageRequests(fake, d); c != 1 {

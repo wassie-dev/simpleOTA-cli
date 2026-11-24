@@ -16,7 +16,7 @@ func TestResourceListGolden(t *testing.T) {
 			return p.BuildList([]BuildView{{BuildNumber: 2, VersionLabel: "1.0.1", Chip: "esp32s3", SecurityMode: "signed", CreatedAt: at, Warnings: []string{}}, {BuildNumber: 1, VersionLabel: "1.0.0", Chip: "esp32s3", SecurityMode: "basic", Archived: true, CreatedAt: at, Warnings: []string{}}})
 		},
 		"device_list": func(p Printer) error {
-			return p.DeviceList([]DeviceView{{DeviceID: "lamp-1", Name: "Kitchen", Chip: "esp32", CurrentBuildNumber: &build, CurrentVersionLabel: "1.0.0", ChannelID: &channel, Channel: "stable", Active: true, CheckState: "checking_in", LastSeen: &at, GroupIDs: []string{}}})
+			return p.DeviceList([]DeviceView{{DeviceID: new("lamp-1"), Name: "Kitchen", Chip: "esp32", CurrentBuildNumber: &build, CurrentVersionLabel: "1.0.0", ChannelID: &channel, Channel: "stable", Active: true, CheckState: "checking_in", LastSeen: &at, GroupIDs: []string{}}})
 		},
 		"channel_list": func(p Printer) error {
 			return p.ChannelList([]ChannelView{{ID: channel, Name: "stable", IsDefault: true}})

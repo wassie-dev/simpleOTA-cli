@@ -24,11 +24,11 @@ func strp(s string) *string { return &s }
 // inactive one on stable, and active ones on beta and on no channel.
 func fleet() []api.Device {
 	return []api.Device{
-		{ID: "dddddddd-dddd-4ddd-8ddd-000000000001", DeviceID: "mac-1", Active: true, ChannelID: strp(fakeapi.StableChannelID), GroupIDs: []string{"g1"}},
-		{ID: "dddddddd-dddd-4ddd-8ddd-000000000002", DeviceID: "mac-2", Active: true, ChannelID: strp(fakeapi.StableChannelID)},
-		{ID: "dddddddd-dddd-4ddd-8ddd-000000000003", DeviceID: "mac-3", Active: false, ChannelID: strp(fakeapi.StableChannelID)},
-		{ID: "dddddddd-dddd-4ddd-8ddd-000000000004", DeviceID: "mac-4", Active: true, ChannelID: strp(betaID), GroupIDs: []string{"g1"}},
-		{ID: "dddddddd-dddd-4ddd-8ddd-000000000005", DeviceID: "mac-5", Active: true},
+		{ID: "dddddddd-dddd-4ddd-8ddd-000000000001", DeviceID: new("mac-1"), Active: true, ChannelID: strp(fakeapi.StableChannelID), GroupIDs: []string{"g1"}},
+		{ID: "dddddddd-dddd-4ddd-8ddd-000000000002", DeviceID: new("mac-2"), Active: true, ChannelID: strp(fakeapi.StableChannelID)},
+		{ID: "dddddddd-dddd-4ddd-8ddd-000000000003", DeviceID: new("mac-3"), Active: false, ChannelID: strp(fakeapi.StableChannelID)},
+		{ID: "dddddddd-dddd-4ddd-8ddd-000000000004", DeviceID: new("mac-4"), Active: true, ChannelID: strp(betaID), GroupIDs: []string{"g1"}},
+		{ID: "dddddddd-dddd-4ddd-8ddd-000000000005", DeviceID: new("mac-5"), Active: true},
 	}
 }
 
@@ -264,7 +264,7 @@ func manyDevices(h *harness, n int) {
 	h.fake.Devices = nil
 	for i := range n + 2 {
 		h.fake.Devices = append(h.fake.Devices, api.Device{
-			ID: fmt.Sprintf("dddddddd-0000-4000-8000-%012d", i), DeviceID: fmt.Sprintf("mac-%04d", n+2-i),
+			ID: fmt.Sprintf("dddddddd-0000-4000-8000-%012d", i), DeviceID: new(fmt.Sprintf("mac-%04d", n+2-i)),
 			Active: i != 1, ChannelID: &stable,
 		})
 	}

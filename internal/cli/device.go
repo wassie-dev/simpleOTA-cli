@@ -23,7 +23,8 @@ themselves the first time their firmware checks in, and report their build,
 chip and compatibility on every check.
 
 Name a device by the device ID its firmware reports, such as a MAC address,
-or by its SimpleOTA UUID.`,
+or by its SimpleOTA UUID. A device created in the dashboard has no device ID
+until it checks in; name it by the UUID 'simpleota device list --json' shows.`,
 		Example: `  simpleota device list --channel beta
   simpleota device show lamp-kitchen
   simpleota device events lamp-kitchen
@@ -228,13 +229,13 @@ func (a *App) printDevices(cmd *cobra.Command, devices []api.Device, channels []
 		x, y := devices[i], devices[j]
 		switch {
 		case x.LastSeen == nil && y.LastSeen == nil:
-			return x.DeviceID < y.DeviceID
+			return api.CompareDeviceIDs(x, y) < 0
 		case x.LastSeen == nil:
 			return false
 		case y.LastSeen == nil:
 			return true
 		case x.LastSeen.Equal(*y.LastSeen):
-			return x.DeviceID < y.DeviceID
+			return api.CompareDeviceIDs(x, y) < 0
 		}
 		return x.LastSeen.After(*y.LastSeen)
 	})
@@ -262,11 +263,11 @@ func findDevice(ctx context.Context, client api.API, projectID, ref string) (api
 
 // matchDevice finds a device by UUID or reported device ID in a listing. A
 // MAC address matches in any case, with colons or dashes, as the server
-// stores it in one form.
+// stores it in one form. A device without a device ID matches only by UUID.
 func matchDevice(devices []api.Device, ref string) (api.Device, error) {
 	want := normalizeDeviceID(ref)
 	for _, d := range devices {
-		if d.ID == ref || normalizeDeviceID(d.DeviceID) == want {
+		if d.ID == ref || d.DeviceID != nil && normalizeDeviceID(*d.DeviceID) == want {
 			return d, nil
 		}
 	}
