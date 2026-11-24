@@ -63,9 +63,9 @@ func (d DeviceView) deviceIDText() string {
 	return *d.DeviceID
 }
 
-// title is the device ID, or for a device without one its name, or else its
-// UUID.
-func (d DeviceView) title() string {
+// showHeading names the device in the device show header: by its device ID,
+// or for a device without one by its name, or else its UUID.
+func (d DeviceView) showHeading() string {
 	switch {
 	case d.DeviceID != nil:
 		return *d.DeviceID
@@ -99,7 +99,7 @@ func (p Printer) DeviceList(devices []DeviceView) error {
 		return p.WriteJSON(devices)
 	}
 	if len(devices) == 0 {
-		fmt.Fprintln(p.Out, "No devices match. Devices appear here once their firmware checks in.")
+		fmt.Fprintln(p.Out, "No devices match. A device appears once it is created in the dashboard or checks in.")
 		return nil
 	}
 	rows := make([][]string, len(devices))
@@ -123,7 +123,7 @@ func (p Printer) DeviceShow(d DeviceView) error {
 	if p.JSON {
 		return p.WriteJSON(d)
 	}
-	fmt.Fprintf(p.Out, "Device %s\n", p.bold(termtext.Clean(d.title())))
+	fmt.Fprintf(p.Out, "Device %s\n", p.bold(termtext.Clean(d.showHeading())))
 	if d.DeviceID == nil {
 		p.field("device id", deviceIDNotSaved)
 	}

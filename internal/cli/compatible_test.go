@@ -18,16 +18,14 @@ const (
 	depB   = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 )
 
-func strp(s string) *string { return &s }
-
 // fleet has two active devices on stable, one of them in group kitchen, an
 // inactive one on stable, and active ones on beta and on no channel.
 func fleet() []api.Device {
 	return []api.Device{
-		{ID: "dddddddd-dddd-4ddd-8ddd-000000000001", DeviceID: new("mac-1"), Active: true, ChannelID: strp(fakeapi.StableChannelID), GroupIDs: []string{"g1"}},
-		{ID: "dddddddd-dddd-4ddd-8ddd-000000000002", DeviceID: new("mac-2"), Active: true, ChannelID: strp(fakeapi.StableChannelID)},
-		{ID: "dddddddd-dddd-4ddd-8ddd-000000000003", DeviceID: new("mac-3"), Active: false, ChannelID: strp(fakeapi.StableChannelID)},
-		{ID: "dddddddd-dddd-4ddd-8ddd-000000000004", DeviceID: new("mac-4"), Active: true, ChannelID: strp(betaID), GroupIDs: []string{"g1"}},
+		{ID: "dddddddd-dddd-4ddd-8ddd-000000000001", DeviceID: new("mac-1"), Active: true, ChannelID: new(fakeapi.StableChannelID), GroupIDs: []string{"g1"}},
+		{ID: "dddddddd-dddd-4ddd-8ddd-000000000002", DeviceID: new("mac-2"), Active: true, ChannelID: new(fakeapi.StableChannelID)},
+		{ID: "dddddddd-dddd-4ddd-8ddd-000000000003", DeviceID: new("mac-3"), Active: false, ChannelID: new(fakeapi.StableChannelID)},
+		{ID: "dddddddd-dddd-4ddd-8ddd-000000000004", DeviceID: new("mac-4"), Active: true, ChannelID: new(betaID), GroupIDs: []string{"g1"}},
 		{ID: "dddddddd-dddd-4ddd-8ddd-000000000005", DeviceID: new("mac-5"), Active: true},
 	}
 }

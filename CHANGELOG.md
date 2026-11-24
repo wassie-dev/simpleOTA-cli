@@ -14,6 +14,8 @@ All notable changes to simpleota are documented here. The format follows
   device ID. With `--json`, its `device_id` is `null`, not `""`.
 - An empty or blank device argument, such as `device show ""`, no longer
   matches a device without a device ID.
+- The empty `device list` message no longer says devices appear only once
+  their firmware checks in.
 
 ## [0.2.0] - 2026-11-18
 

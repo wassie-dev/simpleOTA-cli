@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -299,8 +300,10 @@ func TestDeviceWithoutDeviceID(t *testing.T) {
 	if r.code != 0 || !strings.Contains(header, "Kitchen lamp") {
 		t.Fatalf("show: the header %q does not name the device: %+v", header, r)
 	}
-	if r := h.run("device", "show", "lamp-1"); r.code != 0 || !strings.HasPrefix(r.stdout, "Device lamp-1\n") {
-		t.Fatalf("show lamp-1: %+v", r)
+	r = h.run("device", "show", "lamp-1")
+	header, _, _ = strings.Cut(r.stdout, "\n")
+	if r.code != 0 || !strings.Contains(header, "lamp-1") || strings.Contains(header, "Hall lamp") {
+		t.Fatalf("show lamp-1: the header %q does not identify the device by its ID: %+v", header, r)
 	}
 
 	for _, ref := range []string{"", " "} {
@@ -310,5 +313,8 @@ func TestDeviceWithoutDeviceID(t *testing.T) {
 		if r := h.run("group", "member", "add", "kitchen", ref); r.code != ExitUsage || len(h.fake.Devices[1].GroupIDs) != 0 {
 			t.Fatalf("group member add %q matched a device without an ID: %+v", ref, r)
 		}
+	}
+	if r := h.run("group", "member", "add", "kitchen", unsaved); r.code != 0 || !slices.Equal(h.fake.Devices[1].GroupIDs, []string{"g1"}) {
+		t.Fatalf("group member add by UUID: %+v", r)
 	}
 }
