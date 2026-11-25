@@ -134,7 +134,7 @@ func TestDeviceEventsAndUpdate(t *testing.T) {
 	h.fake.Channels = append(h.fake.Channels, api.Channel{ID: beta, Name: "beta"})
 	stable := fakeapi.StableChannelID
 	id := "dddddddd-dddd-4ddd-8ddd-000000000001"
-	h.fake.Devices = []api.Device{{ID: id, DeviceID: "lamp-1", ChannelID: &stable, Active: true}}
+	h.fake.Devices = []api.Device{{ID: id, DeviceID: new("lamp-1"), ChannelID: &stable, Active: true}}
 	running, offered := 6, 7
 	h.fake.CheckEvents[id] = []api.CheckEvent{
 		{CreatedAt: fakeapi.Epoch, Decision: "offered", Status: "offered", ReportedBuildNumber: &running, ArtifactBuildNumber: &offered},
@@ -177,7 +177,7 @@ func TestChannelCreate(t *testing.T) {
 func TestGroups(t *testing.T) {
 	h := newHarness(t)
 	h.login(fakeapi.ProjectToken)
-	h.fake.Devices = []api.Device{{ID: "d1", DeviceID: "lamp-1"}, {ID: "d2", DeviceID: "lamp-2"}}
+	h.fake.Devices = []api.Device{{ID: "d1", DeviceID: new("lamp-1")}, {ID: "d2", DeviceID: new("lamp-2")}}
 	if r := h.run("group", "list"); r.code != 0 || !strings.Contains(r.stdout, "No device groups") {
 		t.Fatalf("empty: %+v", r)
 	}

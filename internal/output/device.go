@@ -12,7 +12,7 @@ import (
 // DeviceView is a device, with its channel's name resolved.
 type DeviceView struct {
 	ID                  string     `json:"id"`
-	DeviceID            string     `json:"device_id"`
+	DeviceID            *string    `json:"device_id"`
 	Name                string     `json:"name"`
 	Framework           string     `json:"framework"`
 	Chip                string     `json:"chip"`
@@ -52,6 +52,29 @@ func NewDeviceView(d api.Device, channels map[string]string) DeviceView {
 	return v
 }
 
+// deviceIDNotSaved stands in for a device ID the server has not saved yet.
+const deviceIDNotSaved = "(not saved yet)"
+
+// deviceIDText is the device ID, or deviceIDNotSaved when there is none.
+func (d DeviceView) deviceIDText() string {
+	if d.DeviceID == nil {
+		return deviceIDNotSaved
+	}
+	return *d.DeviceID
+}
+
+// showHeading names the device in the device show header: by its device ID,
+// or for a device without one by its name, or else its UUID.
+func (d DeviceView) showHeading() string {
+	switch {
+	case d.DeviceID != nil:
+		return *d.DeviceID
+	case d.Name != "":
+		return d.Name
+	}
+	return d.ID
+}
+
 func (d DeviceView) build() string {
 	if d.CurrentBuildNumber == nil {
 		return ""
@@ -76,12 +99,12 @@ func (p Printer) DeviceList(devices []DeviceView) error {
 		return p.WriteJSON(devices)
 	}
 	if len(devices) == 0 {
-		fmt.Fprintln(p.Out, "No devices match. Devices appear here once their firmware checks in.")
+		fmt.Fprintln(p.Out, "No devices match. A device appears once it is created in the dashboard or\nchecks in.")
 		return nil
 	}
 	rows := make([][]string, len(devices))
 	for i, d := range devices {
-		rows[i] = []string{d.DeviceID, d.Name, d.Chip, d.build(), d.Channel, d.state(), whenPtr(d.LastSeen)}
+		rows[i] = []string{d.deviceIDText(), d.Name, d.Chip, d.build(), d.Channel, d.state(), whenPtr(d.LastSeen)}
 	}
 	return p.table([]string{"DEVICE", "NAME", "CHIP", "BUILD", "CHANNEL", "STATE", "LAST SEEN"}, rows)
 }
@@ -100,7 +123,10 @@ func (p Printer) DeviceShow(d DeviceView) error {
 	if p.JSON {
 		return p.WriteJSON(d)
 	}
-	fmt.Fprintf(p.Out, "Device %s\n", p.bold(termtext.Clean(d.DeviceID)))
+	fmt.Fprintf(p.Out, "Device %s\n", p.bold(termtext.Clean(d.showHeading())))
+	if d.DeviceID == nil {
+		p.field("device id", deviceIDNotSaved)
+	}
 	p.field("name", d.Name)
 	p.field("id", d.ID)
 	p.field("build", d.build())

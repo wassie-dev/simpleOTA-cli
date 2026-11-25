@@ -185,8 +185,8 @@ func Status(ctx context.Context, a API, projectID, deploymentID string) (Summary
 	return s, nil
 }
 
-// nameFailures fills in the ID each failed device reports. A failed lookup
-// leaves the UUIDs alone.
+// nameFailures fills in the ID each failed device reports. A failed lookup,
+// or a device without a saved ID, leaves the UUID alone.
 func nameFailures(ctx context.Context, a API, projectID string, failures []Failure) {
 	if len(failures) == 0 {
 		return
@@ -197,7 +197,9 @@ func nameFailures(ctx context.Context, a API, projectID string, failures []Failu
 	}
 	reported := make(map[string]string, len(devices))
 	for _, d := range devices {
-		reported[d.ID] = d.DeviceID
+		if d.DeviceID != nil {
+			reported[d.ID] = *d.DeviceID
+		}
 	}
 	for i := range failures {
 		failures[i].Device = reported[failures[i].DeviceID]

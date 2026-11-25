@@ -372,7 +372,7 @@ func TestChipMismatchIsRefusedUnlessADeviceReportsIt(t *testing.T) {
 	if fake.Count("POST /api/v1/projects/"+fakeapi.ProjectID+"/release/") != 0 {
 		t.Fatal("a refused chip must not upload")
 	}
-	fake.Devices = []api.Device{{ID: "d1", DeviceID: "lamp-1", ChipFamily: "ESP99"}}
+	fake.Devices = []api.Device{{ID: "d1", DeviceID: new("lamp-1"), ChipFamily: "ESP99"}}
 	res, err := svc.Release(context.Background(), opts, everyone)
 	if err != nil || res.Chip != "esp99" {
 		t.Fatalf("a chip a device reports is allowed: %+v %v", res, err)

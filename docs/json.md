@@ -265,7 +265,8 @@ recently seen first; `device show` and `device update` print one.
 ```
 
 `id` is the device's SimpleOTA UUID and `device_id` the ID its firmware
-reports. `channel` is the channel's name. `current_build_number`,
+reports, null for a device created in the dashboard until a check-in saves
+its ID. `channel` is the channel's name. `current_build_number`,
 `nvs_schema_version`, `last_check_at`, `last_seen` and `channel_id` are null
 until the device reports them.
 
@@ -398,7 +399,7 @@ missed; a device served twice is listed once.
 `devices.offered` counts devices that have been offered the build or have
 reported against the deployment; the other counts split it. `device_id` is
 the device's SimpleOTA UUID, and `device` the ID the device reports, omitted
-when it could not be looked up. `failures` is always an array.
+when it could not be looked up or is not saved. `failures` is always an array.
 
 `outcome` is one of:
 

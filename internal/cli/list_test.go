@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -53,8 +54,8 @@ func TestDeviceListAndShow(t *testing.T) {
 	stable, build := fakeapi.StableChannelID, 7
 	seen := time.Date(2026, 10, 30, 9, 0, 0, 0, time.UTC)
 	h.fake.Devices = []api.Device{
-		{ID: "dddddddd-dddd-4ddd-8ddd-000000000001", DeviceID: "lamp-1", ChipFamily: "esp32", ChannelID: &stable, Active: true, CheckState: "checking_in", CurrentBuildNumber: &build, CurrentVersionLabel: "1.0.0", LastSeen: &seen, GroupIDs: []string{"g1"}},
-		{ID: "dddddddd-dddd-4ddd-8ddd-000000000002", DeviceID: "lamp-2", ChipFamily: "esp32", ChannelID: &beta, Active: false},
+		{ID: "dddddddd-dddd-4ddd-8ddd-000000000001", DeviceID: new("lamp-1"), ChipFamily: "esp32", ChannelID: &stable, Active: true, CheckState: "checking_in", CurrentBuildNumber: &build, CurrentVersionLabel: "1.0.0", LastSeen: &seen, GroupIDs: []string{"g1"}},
+		{ID: "dddddddd-dddd-4ddd-8ddd-000000000002", DeviceID: new("lamp-2"), ChipFamily: "esp32", ChannelID: &beta, Active: false},
 	}
 	r := h.run("device", "list")
 	if r.code != 0 || !strings.Contains(r.stdout, "lamp-1") || !strings.Contains(r.stdout, "7 (1.0.0)") || !strings.Contains(r.stdout, "2026-10-30 09:00") || !strings.Contains(r.stdout, "inactive") {
@@ -206,11 +207,11 @@ func TestDeviceOrderAndLimit(t *testing.T) {
 	inGroup := []string{"g1"}
 	// Never-seen devices first, as a server that sorts nulls first would.
 	h.fake.Devices = []api.Device{
-		{ID: "d1", DeviceID: "never-b", GroupIDs: inGroup},
-		{ID: "d2", DeviceID: "never-a", GroupIDs: inGroup},
-		{ID: "d3", DeviceID: "older", LastSeen: &older, GroupIDs: inGroup},
-		{ID: "d4", DeviceID: "tie-b", LastSeen: &newer, GroupIDs: inGroup},
-		{ID: "d5", DeviceID: "tie-a", LastSeen: &newer, GroupIDs: inGroup},
+		{ID: "d1", DeviceID: new("never-b"), GroupIDs: inGroup},
+		{ID: "d2", DeviceID: new("never-a"), GroupIDs: inGroup},
+		{ID: "d3", DeviceID: new("older"), LastSeen: &older, GroupIDs: inGroup},
+		{ID: "d4", DeviceID: new("tie-b"), LastSeen: &newer, GroupIDs: inGroup},
+		{ID: "d5", DeviceID: new("tie-a"), LastSeen: &newer, GroupIDs: inGroup},
 	}
 	want := []string{"tie-a", "tie-b", "older", "never-a", "never-b"}
 	r := h.run("device", "list", "--json")
@@ -239,7 +240,7 @@ func TestDeviceLookupAcceptsAnyMACForm(t *testing.T) {
 	h := newHarness(t)
 	h.login(fakeapi.ProjectToken)
 	h.fake.Groups = []api.Group{{ID: "g1", Name: "kitchen"}}
-	h.fake.Devices = []api.Device{{ID: "dddddddd-dddd-4ddd-8ddd-000000000001", DeviceID: "AA:BB:CC:DD:EE:01", Active: true}}
+	h.fake.Devices = []api.Device{{ID: "dddddddd-dddd-4ddd-8ddd-000000000001", DeviceID: new("AA:BB:CC:DD:EE:01"), Active: true}}
 	for _, ref := range []string{"AA:BB:CC:DD:EE:01", "aa:bb:cc:dd:ee:01", "aa-bb-cc-dd-ee-01", "AA-BB-CC-DD-EE-01"} {
 		if r := h.run("device", "show", ref); r.code != 0 || !strings.Contains(r.stdout, "AA:BB:CC:DD:EE:01") {
 			t.Errorf("show %s: %+v", ref, r)
@@ -250,5 +251,70 @@ func TestDeviceLookupAcceptsAnyMACForm(t *testing.T) {
 	}
 	if r := h.run("device", "show", "aa:bb:cc:dd:ee"); r.code != ExitUsage {
 		t.Fatalf("a partial MAC must not match: %+v", r)
+	}
+}
+
+func TestDeviceWithoutDeviceID(t *testing.T) {
+	h := newHarness(t)
+	h.login(fakeapi.ProjectToken)
+	h.fake.Groups = []api.Group{{ID: "g1", Name: "kitchen"}}
+	const unsaved = "dddddddd-dddd-4ddd-8ddd-000000000002"
+	h.fake.Devices = []api.Device{
+		{ID: "dddddddd-dddd-4ddd-8ddd-000000000001", DeviceID: new("lamp-1"), Name: "Hall lamp", Active: true},
+		{ID: unsaved, Name: "Kitchen lamp", Active: true},
+	}
+
+	r := h.run("device", "list", "--json")
+	var listed []map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(r.stdout), &listed); err != nil || len(listed) != 2 {
+		t.Fatalf("list --json: %+v %v", r, err)
+	}
+	for _, d := range listed {
+		want := `"lamp-1"`
+		if string(d["id"]) == `"`+unsaved+`"` {
+			want = "null"
+		}
+		if string(d["device_id"]) != want {
+			t.Fatalf("list --json device_id is %s, want %s", d["device_id"], want)
+		}
+	}
+	r = h.run("device", "show", unsaved, "--json")
+	var shown map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(r.stdout), &shown); err != nil || string(shown["device_id"]) != "null" {
+		t.Fatalf("show --json: %+v %v", r, err)
+	}
+
+	r = h.run("device", "list")
+	for _, line := range strings.Split(strings.TrimSpace(r.stdout), "\n")[1:] {
+		first := strings.Fields(line)[0]
+		switch {
+		case strings.Contains(line, "Hall lamp") && first != "lamp-1":
+			t.Fatalf("a device with an ID lists as %q: %+v", first, r)
+		case strings.Contains(line, "Kitchen lamp") && first == "-":
+			t.Fatalf("a device without an ID lists with an empty ID: %+v", r)
+		}
+	}
+
+	r = h.run("device", "show", unsaved)
+	header, _, _ := strings.Cut(r.stdout, "\n")
+	if r.code != 0 || !strings.Contains(header, "Kitchen lamp") {
+		t.Fatalf("show: the header %q does not name the device: %+v", header, r)
+	}
+	r = h.run("device", "show", "lamp-1")
+	header, _, _ = strings.Cut(r.stdout, "\n")
+	if r.code != 0 || !strings.Contains(header, "lamp-1") || strings.Contains(header, "Hall lamp") {
+		t.Fatalf("show lamp-1: the header %q does not identify the device by its ID: %+v", header, r)
+	}
+
+	for _, ref := range []string{"", " "} {
+		if r := h.run("device", "show", ref); r.code != ExitUsage {
+			t.Fatalf("show %q matched a device without an ID: %+v", ref, r)
+		}
+		if r := h.run("group", "member", "add", "kitchen", ref); r.code != ExitUsage || len(h.fake.Devices[1].GroupIDs) != 0 {
+			t.Fatalf("group member add %q matched a device without an ID: %+v", ref, r)
+		}
+	}
+	if r := h.run("group", "member", "add", "kitchen", unsaved); r.code != 0 || !slices.Equal(h.fake.Devices[1].GroupIDs, []string{"g1"}) {
+		t.Fatalf("group member add by UUID: %+v", r)
 	}
 }

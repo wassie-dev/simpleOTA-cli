@@ -183,7 +183,7 @@ func TestServerTextCannotDriveTheTerminal(t *testing.T) {
 	h.login(fakeapi.ProjectToken)
 	h.fake.AddDeployment(depA, api.StateActive, 5, 100)
 	h.fake.SetStates(depA, api.DeviceState{DeviceID: "dev\x1b[2J", FinalStatus: api.DeviceFailed, AssignedToRollout: true, StatusReason: hostile})
-	h.fake.Devices = []api.Device{{ID: "dddddddd-dddd-4ddd-8ddd-000000000001", DeviceID: hostile, Active: true}}
+	h.fake.Devices = []api.Device{{ID: "dddddddd-dddd-4ddd-8ddd-000000000001", DeviceID: new(hostile), Active: true}}
 
 	for _, args := range [][]string{{"deployment", "show", depA}, {"device", "list"}} {
 		r := h.run(args...)
@@ -211,7 +211,7 @@ func TestFailuresNameTheReportedDeviceID(t *testing.T) {
 	h.login(fakeapi.ProjectToken)
 	h.fake.AddDeployment(depA, api.StateActive, 5, 100)
 	uuid := "dddddddd-dddd-4ddd-8ddd-000000000001"
-	h.fake.Devices = []api.Device{{ID: uuid, DeviceID: "lamp-kitchen"}}
+	h.fake.Devices = []api.Device{{ID: uuid, DeviceID: new("lamp-kitchen")}}
 	h.fake.SetStates(depA, api.DeviceState{DeviceID: uuid, FinalStatus: api.DeviceFailed, AssignedToRollout: true, StatusReason: "boom"})
 	r := h.run("deployment", "show", depA)
 	if r.code != 0 || !strings.Contains(r.stdout, "device lamp-kitchen failed: boom") {
@@ -275,7 +275,7 @@ func TestFailuresDoNotPrintAHostileDeviceID(t *testing.T) {
 	h.fake.AddDeployment(depA, api.StateActive, 5, 100)
 	uuid := "dddddddd-dddd-4ddd-8ddd-000000000001"
 	hostileID := "lamp\x1b[2J\x1b]0;PWNED\x07\rFORGED\nError: none"
-	h.fake.Devices = []api.Device{{ID: uuid, DeviceID: hostileID}}
+	h.fake.Devices = []api.Device{{ID: uuid, DeviceID: new(hostileID)}}
 	h.fake.SetStates(depA, api.DeviceState{DeviceID: uuid, FinalStatus: api.DeviceFailed, AssignedToRollout: true})
 	r := h.run("deployment", "show", depA)
 	if strings.ContainsAny(r.stdout+r.stderr, "\x1b\x07\r") || strings.Contains(r.stdout+r.stderr, "FORGED") || !strings.Contains(r.stdout, "device "+uuid) {
