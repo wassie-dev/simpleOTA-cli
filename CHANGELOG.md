@@ -6,6 +6,8 @@ All notable changes to simpleota are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-25
+
 ### Fixed
 
 - A device created in the dashboard has no device ID until it checks in.
@@ -273,7 +275,8 @@ project. Commands that changed name or behaviour are listed under Changed.
 - `install.sh` and `install.ps1`: one-line install and update scripts,
   published with each release, that verify the download's checksum.
 
-[Unreleased]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/wassie-dev/simpleOTA-cli/compare/v0.1.2...v0.1.3
